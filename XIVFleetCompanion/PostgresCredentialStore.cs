@@ -11,7 +11,10 @@ namespace XIVFleetCompanion
     /// </summary>
     public static class PostgresCredentialStore
     {
-        private const string TargetName = "XIVFleetCompanion:Postgres";
+        private const string LocalTargetName = "XIVFleetCompanion:Postgres:Local";
+        private const string RemoteTargetName = "XIVFleetCompanion:Postgres:Remote";
+
+        private static string GetTargetName(bool useRemote) => useRemote ? RemoteTargetName : LocalTargetName;
 
         private class ConnectionDetails
         {
@@ -29,24 +32,24 @@ namespace XIVFleetCompanion
             public string Password { get; set; } = string.Empty;
         }
 
-        public static void Save(string host, int port, string database, string username, string password)
+        public static void Save(bool useRemote, string host, int port, string database, string username, string password)
         {
             var details = new ConnectionDetails { Host = host, Port = port, Database = database };
             var commentJson = JsonSerializer.Serialize(details);
 
             CredentialManager.WriteCredential(
-                applicationName: TargetName,
+                applicationName: GetTargetName(useRemote),
                 userName: username,
                 secret: password,
                 comment: commentJson,
                 persistence: CredentialPersistence.LocalMachine);
         }
 
-        public static PostgresCredential? Load()
+        public static PostgresCredential? Load(bool useRemote)
         {
             try
             {
-                var cred = CredentialManager.ReadCredential(TargetName);
+                var cred = CredentialManager.ReadCredential(GetTargetName(useRemote));
                 if (cred == null)
                     return null;
 
@@ -70,11 +73,11 @@ namespace XIVFleetCompanion
             }
         }
 
-        public static void Delete()
+        public static void Delete(bool useRemote)
         {
             try
             {
-                CredentialManager.DeleteCredential(TargetName);
+                CredentialManager.DeleteCredential(GetTargetName(useRemote));
             }
             catch
             {

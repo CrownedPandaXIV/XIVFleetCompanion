@@ -8,18 +8,26 @@ namespace XIVFleetCompanion
 {
     public static class PostgresWriter
     {
-        public static async Task<string> WriteCharacterSnapshotAsync(
-            ulong cid, string name, string world,
-            int retainerCount, int submarineCount,
-            uint gil, int ceruleum, int repairKits)
+        private static (string? connectionString, string? error) BuildConnectionString(bool useRemote)
         {
-            var cred = PostgresCredentialStore.Load();
+            var cred = PostgresCredentialStore.Load(useRemote);
             if (cred == null)
-                return "Not configured — no saved credential found.";
+                return (null, "Not configured — no saved credential found.");
 
             var connectionString =
                 $"Host={cred.Host};Port={cred.Port};Database={cred.Database};" +
                 $"Username={cred.Username};Password={cred.Password};Timeout=5";
+
+            return (connectionString, null);
+        }
+        public static async Task<string> WriteCharacterSnapshotAsync(
+            ulong cid, string name, string world,
+            int retainerCount, int submarineCount,
+            uint gil, int ceruleum, int repairKits, bool useRemote)
+        {
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
 
             try
             {
@@ -53,15 +61,11 @@ namespace XIVFleetCompanion
         }
 
         public static async Task<string> WriteInventorySnapshotAsync(
-            ulong ownerCid, List<AllaganToolsConnector.ParsedItem> items)
+            ulong ownerCid, List<AllaganToolsConnector.ParsedItem> items, bool useRemote)
         {
-            var cred = PostgresCredentialStore.Load();
-            if (cred == null)
-                return "Not configured — no saved credential found.";
-
-            var connectionString =
-                $"Host={cred.Host};Port={cred.Port};Database={cred.Database};" +
-                $"Username={cred.Username};Password={cred.Password};Timeout=5";
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
 
             try
             {

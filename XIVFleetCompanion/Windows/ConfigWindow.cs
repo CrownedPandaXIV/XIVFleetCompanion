@@ -76,7 +76,25 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text("Postgres Connection");
+        ImGui.Text("Connection Mode");
+
+        var useRemote = configuration.UseRemoteConnection;
+        if (ImGui.RadioButton("Local", !useRemote))
+        {
+            configuration.UseRemoteConnection = false;
+            configuration.Save();
+        }
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Remote", useRemote))
+        {
+            configuration.UseRemoteConnection = true;
+            configuration.Save();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.Text($"Postgres Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
 
         ImGui.InputText("Host", ref pgHost, 100);
         ImGui.InputText("Port", ref pgPort, 10);
@@ -88,7 +106,7 @@ public class ConfigWindow : Window, IDisposable
         {
             if (int.TryParse(pgPort, out var portNum))
             {
-                PostgresCredentialStore.Save(pgHost, portNum, pgDatabase, pgUsername, pgPassword);
+                PostgresCredentialStore.Save(configuration.UseRemoteConnection, pgHost, portNum, pgDatabase, pgUsername, pgPassword);
                 pgSaveResult = "Saved.";
             }
             else
@@ -101,7 +119,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (ImGui.Button("Clear Saved Credentials"))
         {
-            PostgresCredentialStore.Delete();
+            PostgresCredentialStore.Delete(configuration.UseRemoteConnection);
             pgSaveResult = "Cleared.";
         }
 

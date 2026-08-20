@@ -136,7 +136,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task RunSyncAsync()
     {
-        if (AutoRetainer == null) return;
+        if (AutoRetainer == null || !AutoRetainer.Ready) return;
 
         var cids = AutoRetainer.GetRegisteredCharacters();
         int successCount = 0;
@@ -149,7 +149,7 @@ public sealed class Plugin : IDalamudPlugin
             var result = await PostgresWriter.WriteCharacterSnapshotAsync(
                 data.CID, data.Name, data.CurrentWorld,
                 data.RetainerData.Count, data.OfflineSubmarineData.Count,
-                data.Gil, data.Ceruleum, data.RepairKits);
+                data.Gil, data.Ceruleum, data.RepairKits, Configuration.UseRemoteConnection);
 
             if (result == "Success.")
                 successCount++;
@@ -167,7 +167,7 @@ public sealed class Plugin : IDalamudPlugin
                     nonEmpty.AddRange(retainerItems.Where(i => i.Quantity > 0));
                 }
 
-                var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, nonEmpty);
+                var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, nonEmpty, Configuration.UseRemoteConnection);
 
                 if (!invResult.StartsWith("Success"))
                     Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.CurrentWorld} — {invResult}");
