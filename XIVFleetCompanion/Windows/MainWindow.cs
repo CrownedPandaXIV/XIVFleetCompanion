@@ -77,8 +77,10 @@ public class MainWindow : Window, IDisposable
             ImGui.Spacing();
             ImGui.Text("Source connectivity:");
 
-            var cred = PostgresCredentialStore.Load();
-            ImGui.BulletText(cred != null ? "Postgres: Configured" : "Postgres: Not configured");
+            var cred = PostgresCredentialStore.Load(plugin.Configuration.UseRemoteConnection);
+            ImGui.BulletText(cred != null
+                ? $"Postgres ({(plugin.Configuration.UseRemoteConnection ? "Remote" : "Local")}): Configured"
+                : $"Postgres ({(plugin.Configuration.UseRemoteConnection ? "Remote" : "Local")}): Not configured");
             bool autoRetainerReady = false;
             try
             {
@@ -136,7 +138,7 @@ public class MainWindow : Window, IDisposable
                     }
                     else
                     {
-                        var nonEmpty = items.Where(i => i.Quantity > 0).ToList(); return;
+                        var nonEmpty = items.Where(i => i.Quantity > 0).ToList();
 
                         var sample = nonEmpty.Take(5)
                             .Select(i => $"ItemId {i.ItemId} x{i.Quantity} (Container {i.Container})");
@@ -165,7 +167,7 @@ public class MainWindow : Window, IDisposable
 
                     Task.Run(async () =>
                     {
-                        var result = await PostgresConnectionTester.TestConnectionAsync();
+                        var result = await PostgresConnectionTester.TestConnectionAsync(plugin.Configuration.UseRemoteConnection);
                         connectionTestResult = result;
                         connectionTestRunning = false;
                     });

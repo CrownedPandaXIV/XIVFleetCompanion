@@ -14,6 +14,7 @@ public class Configuration : IPluginConfiguration
     public bool Enabled { get; set; } = false;
     public int SyncIntervalMinutes { get; set; } = 5;
     public DateTime? LastSyncTimestamp { get; set; } = null;
+    public bool UseRemoteConnection { get; set; } = false;
 
     // The below exists just to make saving less cumbersome
     public void Save()

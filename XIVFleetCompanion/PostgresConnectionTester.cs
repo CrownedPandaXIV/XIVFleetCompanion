@@ -10,9 +10,9 @@ namespace XIVFleetCompanion
         /// Attempts to open a real connection to Postgres using the saved credential.
         /// Returns a human-readable result string — never throws.
         /// </summary>
-        public static async Task<string> TestConnectionAsync()
+        public static async Task<string> TestConnectionAsync(bool useRemote)
         {
-            var cred = PostgresCredentialStore.Load();
+            var cred = PostgresCredentialStore.Load(useRemote);
             if (cred == null)
                 return "Not configured — no saved credential found.";
 
