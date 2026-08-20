@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="SamplePlugin/SamplePlugin.csproj">
+  <Project Path="XIVFleetCompanion/XIVFleetCompanion.csproj">
     <Platform Project="x64" />
   </Project>
 </Solution>
