@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.0.0.1</Version>
+    <!-- Manifest fields (see https://github.com/goatcorp/DalamudPackager/blob/827d88dc/DalamudPackager/DalamudPackager.cs#L420) -->
+    <Author>Panda</Author>
+    <Name>XIV Fleet Companion</Name>
+    <Punchline>Here to help manage your EMPIAH!</Punchline>
+    <Description>Got a massive fleet of submarines? Always struggling to see which ones need upgrades? Wanna see your multi-account fleet at a glance? Give this a try!</Description>
+    <RepoUrl>https://github.com/goatcorp/XIVFleetCompanion</RepoUrl>
+    <Tags>sample;plugin;goats</Tags>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\ApiConsts.cs" Link="ApiConsts.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\AutoRetainerApi.cs" Link="AutoRetainerApi.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\AutoRetainerApiInternal.cs" Link="AutoRetainerApiInternal.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\AutoRetainerConfig.cs" Link="AutoRetainerConfig.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\AdditionalRetainerData.cs" Link="Configuration\AdditionalRetainerData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\AdditionalVesselData.cs" Link="Configuration\AdditionalVesselData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\ARDiscardMiniConfig.cs" Link="Configuration\ARDiscardMiniConfig.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\CutsceneSkipMode.cs" Link="Configuration\CutsceneSkipMode.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\DeployablesVisualOrder.cs" Link="Configuration\DeployablesVisualOrder.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\EntrustCategoryConfiguration.cs" Link="Configuration\EntrustCategoryConfiguration.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\EntrustPlan.cs" Link="Configuration\EntrustPlan.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\FCData.cs" Link="Configuration\FCData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\GCDeliveryType.cs" Link="Configuration\GCDeliveryType.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\GCExchangeCategoryTab.cs" Link="Configuration\GCExchangeCategoryTab.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\GCExchangeItem.cs" Link="Configuration\GCExchangeItem.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\GCExchangeListingMetadata.cs" Link="Configuration\GCExchangeListingMetadata.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\GCExchangePlan.cs" Link="Configuration\GCExchangePlan.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\GCExchangeRankTab.cs" Link="Configuration\GCExchangeRankTab.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\HalfHourSchedule.cs" Link="Configuration\HalfHourSchedule.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\HouseDescriptor.cs" Link="Configuration\HouseDescriptor.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\HouseTeleportTarget.cs" Link="Configuration\HouseTeleportTarget.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\IMListKind.cs" Link="Configuration\IMListKind.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\IntervalState.cs" Link="Configuration\IntervalState.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\InventoryManagementSettings.cs" Link="Configuration\InventoryManagementSettings.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\ItemWithQuantity.cs" Link="Configuration\ItemWithQuantity.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\LevelAndPartsData.cs" Link="Configuration\LevelAndPartsData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\MultiModeCommonConfiguration.cs" Link="Configuration\MultiModeCommonConfiguration.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\MultiModeType.cs" Link="Configuration\MultiModeType.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\OfflineCharacterData.cs" Link="Configuration\OfflineCharacterData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\OfflineRetainerData.cs" Link="Configuration\OfflineRetainerData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\OfflineVesselData.cs" Link="Configuration\OfflineVesselData.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\OpenBellBehavior.cs" Link="Configuration\OpenBellBehavior.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\PlanCompleteBehavior.cs" Link="Configuration\PlanCompleteBehavior.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\PlannedVenture.cs" Link="Configuration\PlannedVenture.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\PluginEnableReason.cs" Link="Configuration\PluginEnableReason.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\RetainerVisualOrder.cs" Link="Configuration\RetainerVisualOrder.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\SubmarinePointPlan.cs" Link="Configuration\SubmarinePointPlan.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\SubmarineUnlockPlan.cs" Link="Configuration\SubmarineUnlockPlan.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\TaskCompletedBehavior.cs" Link="Configuration\TaskCompletedBehavior.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\TeleportOptions.cs" Link="Configuration\TeleportOptions.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\TeleportOptionsOverride.cs" Link="Configuration\TeleportOptionsOverride.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\UnavailableVentureDisplay.cs" Link="Configuration\UnavailableVentureDisplay.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\UnlockMode.cs" Link="Configuration\UnlockMode.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\UnoptimalVesselConfiguration.cs" Link="Configuration\UnoptimalVesselConfiguration.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\VenturePlan.cs" Link="Configuration\VenturePlan.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\VesselBehavior.cs" Link="Configuration\VesselBehavior.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\VesselTaskType.cs" Link="Configuration\VesselTaskType.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\WorkshopFailAction.cs" Link="Configuration\WorkshopFailAction.cs" />
+    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Delegates.cs" Link="Delegates.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\Data\goat.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ECommons" Version="3.2.1.17" />
+    <PackageReference Include="Meziantou.Framework.Win32.CredentialManager" Version="3.0.1" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Configuration\" />
+  </ItemGroup>
+</Project>
