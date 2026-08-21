@@ -56,6 +56,13 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        var accountLabel = configuration.AccountLabel;
+        if (ImGui.InputText("Account Label", ref accountLabel, 50))
+        {
+            configuration.AccountLabel = accountLabel;
+            configuration.Save();
+        }
+
         var syncInterval = configuration.SyncIntervalMinutes;
         if (ImGui.InputInt("Sync Interval (minutes)", ref syncInterval))
         {

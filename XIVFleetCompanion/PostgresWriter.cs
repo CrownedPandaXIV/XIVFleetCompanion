@@ -23,7 +23,7 @@ namespace XIVFleetCompanion
         public static async Task<string> WriteCharacterSnapshotAsync(
             ulong cid, string name, string world,
             int retainerCount, int submarineCount,
-            uint gil, int ceruleum, int repairKits, bool useRemote)
+            uint gil, int ceruleum, int repairKits, string accountLabel, bool useRemote)
         {
             var (connectionString, connError) = BuildConnectionString(useRemote);
             if (connectionString == null)
@@ -36,9 +36,9 @@ namespace XIVFleetCompanion
 
                 const string sql = @"
                     INSERT INTO companion_character_snapshot
-                        (cid, name, world, retainer_count, submarine_count, gil, ceruleum, repair_kits)
+                        (cid, name, world, retainer_count, submarine_count, gil, ceruleum, repair_kits, account_label)
                     VALUES
-                        (@cid, @name, @world, @retainer_count, @submarine_count, @gil, @ceruleum, @repair_kits)";
+                        (@cid, @name, @world, @retainer_count, @submarine_count, @gil, @ceruleum, @repair_kits, @account_label)";
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("cid", (decimal)cid);
@@ -49,6 +49,7 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("gil", (long)gil);
                 cmd.Parameters.AddWithValue("ceruleum", ceruleum);
                 cmd.Parameters.AddWithValue("repair_kits", repairKits);
+                cmd.Parameters.AddWithValue("account_label", string.IsNullOrEmpty(accountLabel) ? (object)DBNull.Value : accountLabel);
 
                 await cmd.ExecuteNonQueryAsync();
 
