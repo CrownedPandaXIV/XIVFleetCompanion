@@ -43,7 +43,7 @@ namespace XIVFleetCompanion
             public ulong CID { get; set; }
 
             [JsonPropertyName("FC")]
-            public ulong FC { get; set; }
+            public ulong? FC { get; set; }
         }
 
         private class FcEntry
@@ -104,16 +104,16 @@ namespace XIVFleetCompanion
                 foreach (var kvp in charByCid)
                 {
                     var character = kvp.Value;
-                    if (character.CID == 0 || character.FC == 0)
+                    if (character.CID == 0 || character.FC == null || character.FC == 0)
                         continue;
 
-                    var fcKey = character.FC.ToString();
+                    var fcKey = character.FC.Value.ToString();
                     if (!fcData.TryGetValue(fcKey, out var fc))
                         continue;
 
                     result[character.CID] = new HousingInfo
                     {
-                        FcId = character.FC,
+                        FcId = character.FC.Value,
                         FcName = fc.FCName,
                         FcPoints = fc.FCPoints,
                         FcRank = fc.Rank,
