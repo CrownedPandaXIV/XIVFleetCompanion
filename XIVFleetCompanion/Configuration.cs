@@ -15,6 +15,7 @@ public class Configuration : IPluginConfiguration
     public int SyncIntervalMinutes { get; set; } = 5;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
+    public string FCTrackerConfigPath { get; set; } = "";
 
     // The below exists just to make saving less cumbersome
     public void Save()

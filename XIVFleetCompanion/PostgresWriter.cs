@@ -107,5 +107,60 @@ namespace XIVFleetCompanion
                 return $"Failed — {ex.Message}";
             }
         }
+
+        public static async Task<string> WriteHousingSnapshotAsync(
+            ulong cid, FCTrackerConnector.HousingInfo housing, bool useRemote)
+        {
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    INSERT INTO companion_character_housing
+                        (cid, fc_id, fc_name, fc_points, fc_rank, total_members,
+                         has_house, house_city, house_ward, house_plot, house_last_visited, updated_at)
+                    VALUES
+                        (@cid, @fc_id, @fc_name, @fc_points, @fc_rank, @total_members,
+                         @has_house, @house_city, @house_ward, @house_plot, @house_last_visited, now())
+                    ON CONFLICT (cid) DO UPDATE SET
+                        fc_id = EXCLUDED.fc_id,
+                        fc_name = EXCLUDED.fc_name,
+                        fc_points = EXCLUDED.fc_points,
+                        fc_rank = EXCLUDED.fc_rank,
+                        total_members = EXCLUDED.total_members,
+                        has_house = EXCLUDED.has_house,
+                        house_city = EXCLUDED.house_city,
+                        house_ward = EXCLUDED.house_ward,
+                        house_plot = EXCLUDED.house_plot,
+                        house_last_visited = EXCLUDED.house_last_visited,
+                        updated_at = now()";
+
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("cid", (decimal)cid);
+                cmd.Parameters.AddWithValue("fc_id", (decimal)housing.FcId);
+                cmd.Parameters.AddWithValue("fc_name", housing.FcName);
+                cmd.Parameters.AddWithValue("fc_points", housing.FcPoints);
+                cmd.Parameters.AddWithValue("fc_rank", housing.FcRank);
+                cmd.Parameters.AddWithValue("total_members", housing.TotalMembers);
+                cmd.Parameters.AddWithValue("has_house", housing.HasHouse);
+                cmd.Parameters.AddWithValue("house_city", (object?)housing.HouseCity ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("house_ward", (object?)housing.HouseWard ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("house_plot", (object?)housing.HousePlot ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("house_last_visited", (object?)housing.HouseLastVisited ?? DBNull.Value);
+
+                await cmd.ExecuteNonQueryAsync();
+
+                return "Success.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed — {ex.Message}";
+            }
+        }
     }
 }

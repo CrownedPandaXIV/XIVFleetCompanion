@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using System.Windows.Forms;
 
 namespace XIVFleetCompanion.Windows;
 
@@ -126,6 +127,36 @@ public class ConfigWindow : Window, IDisposable
         if (!string.IsNullOrEmpty(pgSaveResult))
         {
             ImGui.TextWrapped(pgSaveResult);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.Text("FCTracker Config Path");
+        ImGui.TextWrapped("Points at FCTracker's config file for this XIVLauncher install, used to read FC/housing data.");
+
+        var fcTrackerPath = configuration.FCTrackerConfigPath;
+        if (ImGui.InputText("##FCTrackerPath", ref fcTrackerPath, 260))
+        {
+            configuration.FCTrackerConfigPath = fcTrackerPath;
+            configuration.Save();
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Browse..."))
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+                Title = "Select FCTrackerConfig.json"
+            };
+
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                configuration.FCTrackerConfigPath = dialog.FileName;
+                configuration.Save();
+            }
         }
     }
 }
