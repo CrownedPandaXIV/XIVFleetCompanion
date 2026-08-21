@@ -152,6 +152,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var cids = AutoRetainer.GetRegisteredCharacters();
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
+        Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
         int successCount = 0;
 
         foreach (var cid in cids)
