@@ -41,6 +41,18 @@ public sealed class Plugin : IDalamudPlugin
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
+        if (string.IsNullOrWhiteSpace(Configuration.FCTrackerConfigPath))
+        {
+            var ownConfigDir = PluginInterface.ConfigDirectory.FullName;
+            var pluginConfigsRoot = Directory.GetParent(ownConfigDir)?.FullName;
+            if (pluginConfigsRoot != null)
+            {
+                var guessedPath = Path.Combine(pluginConfigsRoot, "FCTracker", "FCTrackerConfig.json");
+                Configuration.FCTrackerConfigPath = guessedPath;
+                Configuration.Save();
+            }
+        }
+
         ECommonsMain.Init(PluginInterface, this);
         AutoRetainer = new AutoRetainerApi();
         AllaganTools = new AllaganToolsConnector(PluginInterface);
@@ -139,6 +151,7 @@ public sealed class Plugin : IDalamudPlugin
         if (AutoRetainer == null || !AutoRetainer.Ready) return;
 
         var cids = AutoRetainer.GetRegisteredCharacters();
+        var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
         int successCount = 0;
 
         foreach (var cid in cids)
@@ -171,6 +184,14 @@ public sealed class Plugin : IDalamudPlugin
 
                 if (!invResult.StartsWith("Success"))
                     Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.CurrentWorld} — {invResult}");
+            }
+
+            if (fcTrackerHousing.TryGetValue(cid, out var housing))
+            {
+                var housingResult = await PostgresWriter.WriteHousingSnapshotAsync(cid, housing, Configuration.UseRemoteConnection);
+
+                if (!housingResult.StartsWith("Success"))
+                    Log.Warning($"Fleet Companion: failed to write housing for {data.Name}@{data.CurrentWorld} — {housingResult}");
             }
         }
         Configuration.LastSyncTimestamp = DateTime.Now;
