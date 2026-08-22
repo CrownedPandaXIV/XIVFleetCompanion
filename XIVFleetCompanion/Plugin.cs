@@ -25,13 +25,15 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
 
-    private const string CommandName = "/pmycommand";
+    private const string CommandName = "/xivfleet";
 
     public Configuration Configuration { get; init; }
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
     private DateTime lastSyncCheck = DateTime.MinValue;
     private bool syncInProgress = false;
+    private DateTime lastRetentionCheck = DateTime.MinValue;
+    private bool retentionInProgress = false;
 
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
     private ConfigWindow ConfigWindow { get; init; }
@@ -59,18 +61,17 @@ public sealed class Plugin : IDalamudPlugin
 
         Framework.Update += OnFrameworkUpdate;
 
-        // You might normally want to embed resources and load them from the manifest stream
-        var goatImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "goat.png");
+        var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
         ConfigWindow = new ConfigWindow(this);
-        MainWindow = new MainWindow(this, goatImagePath);
+        MainWindow = new MainWindow(this, submarineImagePath);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "A useful message to display in /xlhelp"
+            HelpMessage = "Opens the XIV Fleet Companion main window."
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -86,7 +87,7 @@ public sealed class Plugin : IDalamudPlugin
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
         // Example Output: 00:57:54.959 | INF | [XIVFleetCompanion] ===A cool log message from Sample Plugin===
-        Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
+        Log.Information($"{PluginInterface.Manifest.Name} loaded — version {PluginInterface.Manifest.AssemblyVersion}.");
     }
 
     public void Dispose()
@@ -121,29 +122,59 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         if (!Configuration.Enabled) return;
-        if (syncInProgress) return;
 
         var now = DateTime.UtcNow;
-        if (now - lastSyncCheck < TimeSpan.FromMinutes(Configuration.SyncIntervalMinutes)) return;
 
-        lastSyncCheck = now;
-        syncInProgress = true;
-
-        Task.Run(async () =>
+        if (!syncInProgress && now - lastSyncCheck >= TimeSpan.FromMinutes(Configuration.SyncIntervalMinutes))
         {
-            try
+            lastSyncCheck = now;
+            syncInProgress = true;
+
+            Task.Run(async () =>
             {
-                await RunSyncAsync();
-            }
-            catch (Exception ex)
+                try
+                {
+                    await RunSyncAsync();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"Fleet Companion sync failed: {ex}");
+                }
+                finally
+                {
+                    syncInProgress = false;
+                }
+            });
+        }
+
+        // Retention runs on its own, much less frequent, once-daily check —
+        // no need to tie it to the sync interval.
+        if (!retentionInProgress && now - lastRetentionCheck >= TimeSpan.FromHours(24))
+        {
+            lastRetentionCheck = now;
+            retentionInProgress = true;
+
+            Task.Run(async () =>
             {
-                Log.Error($"Fleet Companion sync failed: {ex}");
-            }
-            finally
-            {
-                syncInProgress = false;
-            }
-        });
+                try
+                {
+                    var result = await PostgresWriter.RunRetentionCleanupAsync(
+                        Configuration.RetentionValue, Configuration.RetentionUnit,
+                        Configuration.DownsampleValue, Configuration.DownsampleUnit,
+                        Configuration.UseRemoteConnection);
+
+                    Log.Information($"Fleet Companion: retention cleanup — {result}");
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"Fleet Companion retention cleanup failed: {ex}");
+                }
+                finally
+                {
+                    retentionInProgress = false;
+                }
+            });
+        }
     }
 
     private async Task RunSyncAsync()

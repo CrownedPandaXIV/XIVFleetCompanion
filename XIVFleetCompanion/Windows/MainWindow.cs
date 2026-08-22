@@ -14,7 +14,7 @@ namespace XIVFleetCompanion.Windows;
 
 public class MainWindow : Window, IDisposable
 {
-    private readonly string goatImagePath;
+    private readonly string submarineImagePath;
     private readonly Plugin plugin;
 
     // Status window state
@@ -26,7 +26,7 @@ public class MainWindow : Window, IDisposable
     // We give this window a hidden ID using ##.
     // The user will see "My Amazing Window" as window title,
     // but for ImGui the ID is "My Amazing Window##With a hidden ID"
-    public MainWindow(Plugin plugin, string goatImagePath)
+    public MainWindow(Plugin plugin, string submarineImagePath)
         : base("My Amazing Window##With a hidden ID", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
         SizeConstraints = new WindowSizeConstraints
@@ -35,7 +35,7 @@ public class MainWindow : Window, IDisposable
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
         };
 
-        this.goatImagePath = goatImagePath;
+        this.submarineImagePath = submarineImagePath;
         this.plugin = plugin;
     }
 
@@ -185,13 +185,13 @@ public class MainWindow : Window, IDisposable
             // Check if this child is drawing
             if (child.Success)
             {
-                ImGui.Text("Have a goat:");
-                var goatImage = Plugin.TextureProvider.GetFromFile(goatImagePath).GetWrapOrDefault();
-                if (goatImage != null)
+                ImGui.Text("XIV Fleet Companion");
+                var submarineImage = Plugin.TextureProvider.GetFromFile(submarineImagePath).GetWrapOrDefault();
+                if (submarineImage != null)
                 {
                     using (ImRaii.PushIndent(55f))
                     {
-                        ImGui.Image(goatImage.Handle, goatImage.Size);
+                        ImGui.Image(submarineImage.Handle, submarineImage.Size);
                     }
                 }
                 else
