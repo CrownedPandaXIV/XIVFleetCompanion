@@ -2,7 +2,6 @@ using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace XIVFleetCompanion
 {
@@ -152,10 +151,10 @@ namespace XIVFleetCompanion
                     insertCmd.Parameters.AddWithValue("item_id", (int)item.ItemId);
                     insertCmd.Parameters.AddWithValue("quantity", (int)item.Quantity);
 
-                    var gearSetIdsAsInt = item.GearSetIds != null && item.GearSetIds.Length > 0
+                    int[]? gearSetIdsAsInt = item.GearSetIds != null && item.GearSetIds.Length > 0
                         ? Array.ConvertAll(item.GearSetIds, x => (int)x)
                         : null;
-                    insertCmd.Parameters.AddWithValue("gear_set_ids", (object)gearSetIdsAsInt ?? DBNull.Value);
+                    insertCmd.Parameters.AddWithValue("gear_set_ids", (object?)gearSetIdsAsInt ?? DBNull.Value);
 
                     await insertCmd.ExecuteNonQueryAsync();
                 }

@@ -46,7 +46,7 @@ namespace XIVFleetCompanion
             public ulong RetainerId;
             public uint SortedContainer;
             public int SortedSlotIndex;
-            public uint[] GearSetIds;
+            public uint[] GearSetIds = Array.Empty<uint>();
         }
 
         public List<ParsedItem> GetCharacterItems(ulong characterId)

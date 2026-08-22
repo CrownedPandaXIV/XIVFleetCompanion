@@ -62,8 +62,8 @@ namespace XIVFleetCompanion
                     Host = details.Host,
                     Port = details.Port,
                     Database = details.Database,
-                    Username = cred.UserName,
-                    Password = cred.Password
+                    Username = cred.UserName ?? string.Empty,
+                    Password = cred.Password ?? string.Empty
                 };
             }
             catch

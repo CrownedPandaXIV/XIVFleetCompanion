@@ -2,14 +2,15 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
     <Version>0.0.0.1</Version>
-    <UseWindowsForms>true</UseWindowsForms>
+      <UseWindowsForms>true</UseWindowsForms>
+      <NoWarn>$(NoWarn);CS0618</NoWarn>
     <!-- Manifest fields (see https://github.com/goatcorp/DalamudPackager/blob/827d88dc/DalamudPackager/DalamudPackager.cs#L420) -->
     <Author>Panda</Author>
     <Name>XIV Fleet Companion</Name>
     <Punchline>Here to help manage your EMPIAH!</Punchline>
     <Description>Got a massive fleet of submarines? Always struggling to see which ones need upgrades? Wanna see your multi-account fleet at a glance? Give this a try!</Description>
-    <RepoUrl>https://github.com/goatcorp/XIVFleetCompanion</RepoUrl>
-    <Tags>sample;plugin;goats</Tags>
+    <RepoUrl>https://github.com/CrownedPandaXIV/XIVFleetCompanion</RepoUrl>
+    <Tags>submarine;fleet;tracker</Tags>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\ApiConsts.cs" Link="ApiConsts.cs" />
@@ -60,11 +61,11 @@
     <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\VesselBehavior.cs" Link="Configuration\VesselBehavior.cs" />
     <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\VesselTaskType.cs" Link="Configuration\VesselTaskType.cs" />
     <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\WorkshopFailAction.cs" Link="Configuration\WorkshopFailAction.cs" />
-    <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Delegates.cs" Link="Delegates.cs" />
+      <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Delegates.cs" Link="Delegates.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\Data\goat.png">
+    <Content Include="..\Data\submarine.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </Content>
