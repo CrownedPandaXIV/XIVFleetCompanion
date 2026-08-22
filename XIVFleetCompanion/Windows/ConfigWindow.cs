@@ -18,6 +18,14 @@ public class ConfigWindow : Window, IDisposable
     private string pgPassword = "";
     private string pgSaveResult = "";
 
+    // Retention/downsampling save form
+    private static readonly string[] TimeUnits = { "Days", "Weeks", "Months" };
+    private int retentionValue = 6;
+    private int retentionUnitIndex = 2; // Months
+    private int downsampleValue = 1;
+    private int downsampleUnitIndex = 0; // Days
+    private string retentionSaveResult = "";
+
     // We give this window a constant ID using ###.
     // This allows for labels to be dynamic, like "{FPS Counter}fps###XYZ counter window",
     // and the window ID will always be "###XYZ counter window" for ImGui
@@ -29,9 +37,22 @@ public class ConfigWindow : Window, IDisposable
         SizeCondition = ImGuiCond.FirstUseEver;
 
         configuration = plugin.Configuration;
+
+        retentionValue = configuration.RetentionValue;
+        retentionUnitIndex = Array.IndexOf(TimeUnits, configuration.RetentionUnit);
+        if (retentionUnitIndex < 0) retentionUnitIndex = 2;
+
+        downsampleValue = configuration.DownsampleValue;
+        downsampleUnitIndex = Array.IndexOf(TimeUnits, configuration.DownsampleUnit);
+        if (downsampleUnitIndex < 0) downsampleUnitIndex = 0;
     }
 
     public void Dispose() { }
+
+    public override void OnOpen()
+    {
+        retentionSaveResult = "";
+    }
 
     public override void PreDraw()
     {
@@ -163,6 +184,50 @@ public class ConfigWindow : Window, IDisposable
                 configuration.FCTrackerConfigPath = dialog.FileName;
                 configuration.Save();
             }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.Text("Retention & Downsampling");
+        ImGui.TextWrapped("Runs automatically about once every 24 hours while the plugin is enabled and loaded — not on a fixed calendar schedule, so a few hours of drift is normal.");
+
+        ImGui.TextWrapped("Retention Window: how old a snapshot must be before it becomes eligible for compression. Anything older than this gets downsampled.");
+        ImGui.SetNextItemWidth(80);
+        ImGui.InputInt("##RetentionValue", ref retentionValue);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120);
+        ImGui.Combo("Retention Window", ref retentionUnitIndex, TimeUnits, TimeUnits.Length);
+
+        ImGui.Spacing();
+
+        ImGui.TextWrapped("Downsample Interval: how coarse compressed data becomes. For example, 1 Days keeps one snapshot per day; 1 Weeks keeps one per week. Note: Months are approximated as 30-day blocks, not calendar months.");
+        ImGui.SetNextItemWidth(80);
+        ImGui.InputInt("##DownsampleValue", ref downsampleValue);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120);
+        ImGui.Combo("Downsample Interval", ref downsampleUnitIndex, TimeUnits, TimeUnits.Length);
+
+        if (ImGui.Button("Save Retention Settings"))
+        {
+            if (retentionValue < 1 || downsampleValue < 1)
+            {
+                retentionSaveResult = "Both values must be at least 1.";
+            }
+            else
+            {
+                configuration.RetentionValue = retentionValue;
+                configuration.RetentionUnit = TimeUnits[retentionUnitIndex];
+                configuration.DownsampleValue = downsampleValue;
+                configuration.DownsampleUnit = TimeUnits[downsampleUnitIndex];
+                configuration.Save();
+                retentionSaveResult = "Saved.";
+            }
+        }
+
+        if (!string.IsNullOrEmpty(retentionSaveResult))
+        {
+            ImGui.TextWrapped(retentionSaveResult);
         }
     }
 }

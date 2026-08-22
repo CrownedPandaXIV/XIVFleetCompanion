@@ -1,5 +1,6 @@
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
+using System;
 using System.Collections.Generic;
 
 namespace XIVFleetCompanion
@@ -45,6 +46,7 @@ namespace XIVFleetCompanion
             public ulong RetainerId;
             public uint SortedContainer;
             public int SortedSlotIndex;
+            public uint[] GearSetIds;
         }
 
         public List<ParsedItem> GetCharacterItems(ulong characterId)
@@ -58,6 +60,18 @@ namespace XIVFleetCompanion
                 {
                     if (item.Length < 24) continue;
 
+                    // GearSets occupy every index from 25 onward — a variable-length
+                    // list of gear set IDs this item currently belongs to (can be
+                    // empty for items not saved into any gear set).
+                    var gearSetCount = item.Length > 25 ? item.Length - 25 : 0;
+                    var gearSetIds = gearSetCount > 0
+                        ? new uint[gearSetCount]
+                        : Array.Empty<uint>();
+                    for (var i = 0; i < gearSetCount; i++)
+                    {
+                        gearSetIds[i] = (uint)item[25 + i];
+                    }
+
                     result.Add(new ParsedItem
                     {
                         Container = (uint)item[0],
@@ -66,7 +80,8 @@ namespace XIVFleetCompanion
                         Quantity = (uint)item[3],
                         RetainerId = item[23],
                         SortedContainer = (uint)item[20],
-                        SortedSlotIndex = (int)item[22]
+                        SortedSlotIndex = (int)item[22],
+                        GearSetIds = gearSetIds
                     });
                 }
             }

@@ -16,9 +16,64 @@ namespace XIVFleetCompanion
 
             var connectionString =
                 $"Host={cred.Host};Port={cred.Port};Database={cred.Database};" +
-                $"Username={cred.Username};Password={cred.Password};Timeout=5";
+                $"Username={cred.Username};Password={cred.Password};Timeout=5;" +
+                $"Include Error Detail=true";
 
             return (connectionString, null);
+        }
+        public static async Task<string> RunRetentionCleanupAsync(
+    int retentionValue, string retentionUnit,
+    int downsampleValue, string downsampleUnit,
+    bool useRemote)
+        {
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
+
+            // Months are approximated as 30-day blocks, not calendar months —
+            // matches the note shown in the config UI.
+            double UnitToDays(string unit) => unit switch
+            {
+                "Days" => 1.0,
+                "Weeks" => 7.0,
+                "Months" => 30.0,
+                _ => 1.0
+            };
+
+            var retentionSeconds = retentionValue * UnitToDays(retentionUnit) * 86400.0;
+            var bucketSeconds = downsampleValue * UnitToDays(downsampleUnit) * 86400.0;
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    DELETE FROM companion_character_snapshot
+                    WHERE snapshot_at < (now() - (@retention_seconds || ' seconds')::interval)
+                    AND ctid NOT IN (
+                        SELECT DISTINCT ON (cid, bucket) ctid
+                        FROM (
+                            SELECT ctid, cid, snapshot_at,
+                                   floor(extract(epoch from snapshot_at) / @bucket_seconds) AS bucket
+                            FROM companion_character_snapshot
+                            WHERE snapshot_at < (now() - (@retention_seconds || ' seconds')::interval)
+                        ) sub
+                        ORDER BY cid, bucket, snapshot_at DESC
+                    )";
+
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("retention_seconds", retentionSeconds);
+                cmd.Parameters.AddWithValue("bucket_seconds", bucketSeconds);
+
+                var deletedCount = await cmd.ExecuteNonQueryAsync();
+
+                return $"Success — compressed {deletedCount} old rows.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed — {ex.Message}";
+            }
         }
         public static async Task<string> WriteCharacterSnapshotAsync(
             ulong cid, string name, string world,
@@ -83,9 +138,9 @@ namespace XIVFleetCompanion
 
                 const string insertSql = @"
                     INSERT INTO companion_inventory_snapshot
-                        (owner_cid, retainer_id, sorted_container, sorted_slot_index, item_id, quantity)
+                        (owner_cid, retainer_id, sorted_container, sorted_slot_index, item_id, quantity, gear_set_ids)
                     VALUES
-                        (@owner_cid, @retainer_id, @sorted_container, @sorted_slot_index, @item_id, @quantity)";
+                        (@owner_cid, @retainer_id, @sorted_container, @sorted_slot_index, @item_id, @quantity, @gear_set_ids)";
 
                 foreach (var item in items)
                 {
@@ -96,6 +151,12 @@ namespace XIVFleetCompanion
                     insertCmd.Parameters.AddWithValue("sorted_slot_index", item.SortedSlotIndex);
                     insertCmd.Parameters.AddWithValue("item_id", (int)item.ItemId);
                     insertCmd.Parameters.AddWithValue("quantity", (int)item.Quantity);
+
+                    var gearSetIdsAsInt = item.GearSetIds != null && item.GearSetIds.Length > 0
+                        ? Array.ConvertAll(item.GearSetIds, x => (int)x)
+                        : null;
+                    insertCmd.Parameters.AddWithValue("gear_set_ids", (object)gearSetIdsAsInt ?? DBNull.Value);
+
                     await insertCmd.ExecuteNonQueryAsync();
                 }
 
