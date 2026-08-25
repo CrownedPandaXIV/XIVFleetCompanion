@@ -169,6 +169,77 @@ namespace XIVFleetCompanion
             }
         }
 
+        // One row of raw AutoRetainer submarine data - built by Plugin.cs
+        // from AdditionalSubmarineData (build/rank) + OfflineSubmarineData
+        // (voyage return time), matched by sub name. Deliberately RAW:
+        // no route decoding, no gil/day math, no "current setup" string
+        // formatting - that's business logic and belongs in Tier 3,
+        // matching the same philosophy as companion_inventory_snapshot
+        // storing every item with zero curation.
+        public class SubmarineRecord
+        {
+            public string SubName = "";
+            public int Level;
+            public int Part1;
+            public int Part2;
+            public int Part3;
+            public int Part4;
+            public byte[] Points = Array.Empty<byte>();
+            public long? ReturnTime;
+        }
+
+        public static async Task<string> WriteSubmarineSnapshotAsync(
+            ulong ownerCid, List<SubmarineRecord> subs, bool useRemote)
+        {
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+                await using var transaction = await conn.BeginTransactionAsync();
+
+                const string deleteSql = "DELETE FROM companion_submarine_snapshot WHERE cid = @cid";
+                await using (var deleteCmd = new NpgsqlCommand(deleteSql, conn, transaction))
+                {
+                    deleteCmd.Parameters.AddWithValue("cid", (decimal)ownerCid);
+                    await deleteCmd.ExecuteNonQueryAsync();
+                }
+
+                const string insertSql = @"
+                    INSERT INTO companion_submarine_snapshot
+                        (cid, sub_name, level, part1, part2, part3, part4, points, return_time, updated_at)
+                    VALUES
+                        (@cid, @sub_name, @level, @part1, @part2, @part3, @part4, @points, @return_time, now())";
+
+                foreach (var sub in subs)
+                {
+                    await using var insertCmd = new NpgsqlCommand(insertSql, conn, transaction);
+                    insertCmd.Parameters.AddWithValue("cid", (decimal)ownerCid);
+                    insertCmd.Parameters.AddWithValue("sub_name", sub.SubName);
+                    insertCmd.Parameters.AddWithValue("level", sub.Level);
+                    insertCmd.Parameters.AddWithValue("part1", sub.Part1);
+                    insertCmd.Parameters.AddWithValue("part2", sub.Part2);
+                    insertCmd.Parameters.AddWithValue("part3", sub.Part3);
+                    insertCmd.Parameters.AddWithValue("part4", sub.Part4);
+                    insertCmd.Parameters.AddWithValue("points", sub.Points);
+                    insertCmd.Parameters.AddWithValue("return_time", (object?)sub.ReturnTime ?? DBNull.Value);
+
+                    await insertCmd.ExecuteNonQueryAsync();
+                }
+
+                await transaction.CommitAsync();
+
+                return $"Success — wrote {subs.Count} submarines.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed — {ex.Message}";
+            }
+        }
+
         public static async Task<string> WriteHousingSnapshotAsync(
             ulong cid, FCTrackerConnector.HousingInfo housing, bool useRemote)
         {
