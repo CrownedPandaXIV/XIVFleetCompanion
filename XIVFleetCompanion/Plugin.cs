@@ -204,8 +204,12 @@ public sealed class Plugin : IDalamudPlugin
 
             if (AllaganTools != null)
             {
-                var items = AllaganTools.GetCharacterItems(cid);
-                var nonEmpty = items.Where(i => i.Quantity > 0).ToList();
+                if (data.FCID != 0 && AllaganTools != null)
+                {
+                    var fcTestItems = AllaganTools.GetCharacterItems(data.FCID);
+                    var fcTestContainers = fcTestItems.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
+                    Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name}'s FCID ({data.FCID}) queried directly returned containers: {string.Join(", ", fcTestContainers)}");
+                }
 
                 // TEMPORARY DIAGNOSTIC - remove after confirming FC chest range
                 var distinctContainers = nonEmpty.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
