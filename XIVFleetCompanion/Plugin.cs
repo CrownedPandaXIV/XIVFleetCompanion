@@ -211,6 +211,13 @@ public sealed class Plugin : IDalamudPlugin
                 var distinctContainers = nonEmpty.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
                 Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name} personal call returned containers: {string.Join(", ", distinctContainers)}");
 
+                if (data.FCID != 0 && AllaganTools != null)
+                {
+                    var fcTestItems = AllaganTools.GetCharacterItems(data.FCID);
+                    var fcTestContainers = fcTestItems.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
+                    Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name}'s FCID ({data.FCID}) queried directly returned containers: {string.Join(", ", fcTestContainers)}");
+                }
+
                 foreach (var retainer in data.RetainerData)
                 {
                     var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerID);
