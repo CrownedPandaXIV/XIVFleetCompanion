@@ -213,10 +213,28 @@ public sealed class Plugin : IDalamudPlugin
                     nonEmpty.AddRange(retainerItems.Where(i => i.Quantity > 0));
                 }
 
-                var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, nonEmpty, Configuration.UseRemoteConnection);
+                // FC chest containers (20000-20010, confirmed against real
+                // data) are pulled out and written to their own fc_id-keyed
+                // table - a shared chest shouldn't be duplicated under
+                // every character's own owner_cid. Everything else
+                // (personal inventory, retainers, and any other container
+                // type) keeps going to companion_inventory_snapshot exactly
+                // as before, with zero curation, same as always.
+                var fcChestItems = nonEmpty.Where(i => i.SortedContainer >= 20000 && i.SortedContainer <= 20010).ToList();
+                var personalAndRetainerItems = nonEmpty.Where(i => !(i.SortedContainer >= 20000 && i.SortedContainer <= 20010)).ToList();
+
+                var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems, Configuration.UseRemoteConnection);
 
                 if (!invResult.StartsWith("Success"))
                     Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.CurrentWorld} — {invResult}");
+
+                if (fcChestItems.Count > 0 && data.FCID != 0)
+                {
+                    var fcInvResult = await PostgresWriter.WriteFCInventorySnapshotAsync(data.FCID, fcChestItems, Configuration.UseRemoteConnection);
+
+                    if (!fcInvResult.StartsWith("Success"))
+                        Log.Warning($"Fleet Companion: failed to write FC chest inventory for {data.Name}@{data.CurrentWorld} — {fcInvResult}");
+                }
             }
 
             // AdditionalSubmarineData holds build/rank (keyed by sub name);

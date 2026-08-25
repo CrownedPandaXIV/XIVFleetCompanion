@@ -240,6 +240,60 @@ namespace XIVFleetCompanion
             }
         }
 
+        // Same "no curation" philosophy as WriteInventorySnapshotAsync -
+        // every non-empty FC chest item stored as-is, no filtering for
+        // "which items matter." Keyed by fc_id (not owner_cid), so
+        // multiple characters from the same FC syncing independently all
+        // write to the SAME rows - an upsert of the same real chest
+        // contents, not a duplicate copy per character.
+        public static async Task<string> WriteFCInventorySnapshotAsync(
+            ulong fcId, List<AllaganToolsConnector.ParsedItem> items, bool useRemote)
+        {
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+                await using var transaction = await conn.BeginTransactionAsync();
+
+                const string deleteSql = "DELETE FROM companion_fc_inventory_snapshot WHERE fc_id = @fc_id";
+                await using (var deleteCmd = new NpgsqlCommand(deleteSql, conn, transaction))
+                {
+                    deleteCmd.Parameters.AddWithValue("fc_id", (decimal)fcId);
+                    await deleteCmd.ExecuteNonQueryAsync();
+                }
+
+                const string insertSql = @"
+                    INSERT INTO companion_fc_inventory_snapshot
+                        (fc_id, sorted_container, sorted_slot_index, item_id, quantity)
+                    VALUES
+                        (@fc_id, @sorted_container, @sorted_slot_index, @item_id, @quantity)";
+
+                foreach (var item in items)
+                {
+                    await using var insertCmd = new NpgsqlCommand(insertSql, conn, transaction);
+                    insertCmd.Parameters.AddWithValue("fc_id", (decimal)fcId);
+                    insertCmd.Parameters.AddWithValue("sorted_container", (int)item.SortedContainer);
+                    insertCmd.Parameters.AddWithValue("sorted_slot_index", item.SortedSlotIndex);
+                    insertCmd.Parameters.AddWithValue("item_id", (int)item.ItemId);
+                    insertCmd.Parameters.AddWithValue("quantity", (int)item.Quantity);
+
+                    await insertCmd.ExecuteNonQueryAsync();
+                }
+
+                await transaction.CommitAsync();
+
+                return $"Success — wrote {items.Count} FC chest items.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed — {ex.Message}";
+            }
+        }
+
         public static async Task<string> WriteHousingSnapshotAsync(
             ulong cid, FCTrackerConnector.HousingInfo housing, bool useRemote)
         {
