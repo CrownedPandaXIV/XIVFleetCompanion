@@ -207,6 +207,10 @@ public sealed class Plugin : IDalamudPlugin
                 var items = AllaganTools.GetCharacterItems(cid);
                 var nonEmpty = items.Where(i => i.Quantity > 0).ToList();
 
+                // TEMPORARY DIAGNOSTIC - remove after confirming FC chest range
+                var distinctContainers = nonEmpty.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
+                Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name} personal call returned containers: {string.Join(", ", distinctContainers)}");
+
                 foreach (var retainer in data.RetainerData)
                 {
                     var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerID);
