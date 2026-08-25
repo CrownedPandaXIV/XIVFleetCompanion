@@ -7,10 +7,11 @@ using Dalamud.Plugin.Services;
 using ECommons;
 using ECommons.EzEventManager;
 using System;
+using System.Collections.Generic;
 using System.IO;
-using XIVFleetCompanion.Windows;
-using System.Threading.Tasks;
 using System.Linq;
+using System.Threading.Tasks;
+using XIVFleetCompanion.Windows;
 
 namespace XIVFleetCompanion;
 
@@ -217,6 +218,36 @@ public sealed class Plugin : IDalamudPlugin
                 if (!invResult.StartsWith("Success"))
                     Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.CurrentWorld} — {invResult}");
             }
+
+            // AdditionalSubmarineData holds build/rank (keyed by sub name);
+            // OfflineSubmarineData holds voyage return time (as a list,
+            // matched by its own Name field). Only subs present in
+            // AdditionalSubmarineData are written - a sub with no entry
+            // there has no build at all yet (matches Parse Parts Needed's
+            // own "no build exists for this slot" case from the old n8n
+            // logic), so there's nothing raw to write for it.
+            var subRecords = new List<PostgresWriter.SubmarineRecord>();
+            foreach (var (subName, vesselData) in data.AdditionalSubmarineData)
+            {
+                var voyage = data.OfflineSubmarineData.Find(v => v.Name == subName);
+
+                subRecords.Add(new PostgresWriter.SubmarineRecord
+                {
+                    SubName = subName,
+                    Level = vesselData.Level,
+                    Part1 = vesselData.Part1,
+                    Part2 = vesselData.Part2,
+                    Part3 = vesselData.Part3,
+                    Part4 = vesselData.Part4,
+                    Points = vesselData.Points ?? Array.Empty<byte>(),
+                    ReturnTime = voyage != null ? voyage.ReturnTime : (long?)null
+                });
+            }
+
+            var subResult = await PostgresWriter.WriteSubmarineSnapshotAsync(cid, subRecords, Configuration.UseRemoteConnection);
+
+            if (!subResult.StartsWith("Success"))
+                Log.Warning($"Fleet Companion: failed to write submarines for {data.Name}@{data.CurrentWorld} — {subResult}");
 
             if (fcTrackerHousing.TryGetValue(cid, out var housing))
             {
