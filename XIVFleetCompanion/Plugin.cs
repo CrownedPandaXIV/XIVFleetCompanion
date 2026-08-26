@@ -204,23 +204,8 @@ public sealed class Plugin : IDalamudPlugin
 
             if (AllaganTools != null)
             {
-                if (data.FCID != 0 && AllaganTools != null)
-                {
-                    var fcTestItems = AllaganTools.GetCharacterItems(data.FCID);
-                    var fcTestContainers = fcTestItems.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
-                    Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name}'s FCID ({data.FCID}) queried directly returned containers: {string.Join(", ", fcTestContainers)}");
-                }
-
-                // TEMPORARY DIAGNOSTIC - remove after confirming FC chest range
-                var distinctContainers = nonEmpty.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
-                Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name} personal call returned containers: {string.Join(", ", distinctContainers)}");
-
-                if (data.FCID != 0 && AllaganTools != null)
-                {
-                    var fcTestItems = AllaganTools.GetCharacterItems(data.FCID);
-                    var fcTestContainers = fcTestItems.Select(i => i.SortedContainer).Distinct().OrderBy(c => c).ToList();
-                    Log.Information($"Fleet Companion DIAGNOSTIC: {data.Name}'s FCID ({data.FCID}) queried directly returned containers: {string.Join(", ", fcTestContainers)}");
-                }
+                var personalItems = AllaganTools.GetCharacterItems(data.CID);
+                var nonEmpty = personalItems.Where(i => i.Quantity > 0).ToList();
 
                 foreach (var retainer in data.RetainerData)
                 {
