@@ -264,7 +264,9 @@ public sealed class Plugin : IDalamudPlugin
                     Part3 = vesselData.Part3,
                     Part4 = vesselData.Part4,
                     Points = vesselData.Points ?? Array.Empty<byte>(),
-                    ReturnTime = voyage != null ? voyage.ReturnTime : (long?)null
+                    ReturnTime = voyage != null ? voyage.ReturnTime : (long?)null,
+                    CurrentExp = vesselData.CurrentExp,
+                    NextLevelExp = vesselData.NextLevelExp
                 });
             }
 

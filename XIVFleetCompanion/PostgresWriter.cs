@@ -188,6 +188,8 @@ namespace XIVFleetCompanion
             public int Part4;
             public byte[] Points = Array.Empty<byte>();
             public long? ReturnTime;
+            public long CurrentExp;
+            public long NextLevelExp;
         }
 
         public static async Task<string> WriteSubmarineSnapshotAsync(
@@ -212,9 +214,9 @@ namespace XIVFleetCompanion
 
                 const string insertSql = @"
                     INSERT INTO companion_submarine_snapshot
-                        (cid, sub_name, level, part1, part2, part3, part4, points, return_time, updated_at)
+                        (cid, sub_name, level, part1, part2, part3, part4, points, return_time, current_exp, next_level_exp, updated_at)
                     VALUES
-                        (@cid, @sub_name, @level, @part1, @part2, @part3, @part4, @points, @return_time, now())";
+                        (@cid, @sub_name, @level, @part1, @part2, @part3, @part4, @points, @return_time, @current_exp, @next_level_exp, now())";
 
                 foreach (var sub in subs)
                 {
@@ -228,6 +230,8 @@ namespace XIVFleetCompanion
                     insertCmd.Parameters.AddWithValue("part4", sub.Part4);
                     insertCmd.Parameters.AddWithValue("points", sub.Points);
                     insertCmd.Parameters.AddWithValue("return_time", (object?)sub.ReturnTime ?? DBNull.Value);
+                    insertCmd.Parameters.AddWithValue("current_exp", sub.CurrentExp);
+                    insertCmd.Parameters.AddWithValue("next_level_exp", sub.NextLevelExp);
 
                     await insertCmd.ExecuteNonQueryAsync();
                 }
