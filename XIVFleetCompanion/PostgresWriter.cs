@@ -349,5 +349,42 @@ namespace XIVFleetCompanion
                 return $"Failed — {ex.Message}";
             }
         }
+
+        public static async Task<string> WriteRetainerLookupAsync(
+            ulong retainerId, ulong ownerCid, string name, bool useRemote)
+        {
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    INSERT INTO companion_retainer_lookup
+                        (retainer_id, owner_cid, name, updated_at)
+                    VALUES
+                        (@retainer_id, @owner_cid, @name, now())
+                    ON CONFLICT (retainer_id) DO UPDATE SET
+                        owner_cid = EXCLUDED.owner_cid,
+                        name = EXCLUDED.name,
+                        updated_at = now()";
+
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("retainer_id", (decimal)retainerId);
+                cmd.Parameters.AddWithValue("owner_cid", (decimal)ownerCid);
+                cmd.Parameters.AddWithValue("name", name);
+
+                await cmd.ExecuteNonQueryAsync();
+
+                return "Success.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed — {ex.Message}";
+            }
+        }
     }
 }

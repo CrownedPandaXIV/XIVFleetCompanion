@@ -211,6 +211,12 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerID);
                     nonEmpty.AddRange(retainerItems.Where(i => i.Quantity > 0));
+
+                    var retainerLookupResult = await PostgresWriter.WriteRetainerLookupAsync(
+                        retainer.RetainerID, data.CID, retainer.Name, Configuration.UseRemoteConnection);
+
+                    if (!retainerLookupResult.StartsWith("Success"))
+                        Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
                 }
 
                 // FC chest containers (20000-20010, confirmed against real
