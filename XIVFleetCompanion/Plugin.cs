@@ -195,7 +195,7 @@ public sealed class Plugin : IDalamudPlugin
             var result = await PostgresWriter.WriteCharacterSnapshotAsync(
                 data.CID, data.Name, data.CurrentWorld,
                 data.RetainerData.Count, data.OfflineSubmarineData.Count,
-                data.Gil, data.Ceruleum, data.RepairKits, Configuration.AccountLabel, Configuration.UseRemoteConnection);
+                data.Gil, data.Ceruleum, data.RepairKits, Configuration.AccountLabel, data.FCID, Configuration.UseRemoteConnection);
 
             if (result == "Success.")
                 successCount++;
