@@ -219,15 +219,28 @@ public sealed class Plugin : IDalamudPlugin
                         Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
                 }
 
-                // FC chest containers (20000-20010, confirmed against real
-                // data) are pulled out and written to their own fc_id-keyed
-                // table - a shared chest shouldn't be duplicated under
-                // every character's own owner_cid. Everything else
-                // (personal inventory, retainers, and any other container
-                // type) keeps going to companion_inventory_snapshot exactly
-                // as before, with zero curation, same as always.
-                var fcChestItems = nonEmpty.Where(i => i.SortedContainer >= 20000 && i.SortedContainer <= 20010).ToList();
-                var personalAndRetainerItems = nonEmpty.Where(i => !(i.SortedContainer >= 20000 && i.SortedContainer <= 20010)).ToList();
+                // FC chest data must be queried directly via the FC's own
+                // ID (GetCharacterItems(data.FCID)), NOT filtered out of a
+                // character's personal item list - confirmed as the real
+                // bug tonight: personal-item queries only incidentally
+                // included FC-range containers when AllaganTools happened
+                // to have stale/cached data mixed in, which is why this was
+                // unreliable (sometimes real chest data, sometimes a stray
+                // FreeCompanyCurrency row, usually nothing at all). A
+                // dedicated FC-scoped query is the correct source, matching
+                // what an earlier probe in this same file (since removed)
+                // had already confirmed worked. Personal inventory never
+                // includes FC-range containers now, so no filtering needed
+                // there anymore either.
+                var personalAndRetainerItems = nonEmpty;
+                List<AllaganToolsConnector.ParsedItem> fcChestItems = new();
+                if (data.FCID != 0)
+                {
+                    var fcItems = AllaganTools.GetCharacterItems(data.FCID);
+                    fcChestItems = fcItems
+                        .Where(i => i.Quantity > 0 && i.SortedContainer >= 20000 && i.SortedContainer <= 20004)
+                        .ToList();
+                }
 
                 var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems, Configuration.UseRemoteConnection);
 
