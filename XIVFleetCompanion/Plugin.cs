@@ -226,8 +226,20 @@ public sealed class Plugin : IDalamudPlugin
                 // (personal inventory, retainers, and any other container
                 // type) keeps going to companion_inventory_snapshot exactly
                 // as before, with zero curation, same as always.
+                // TEMPORARY DIAGNOSTIC - tracking down why sorted_container
+                // 2502 (FreeCompanyCurrency) ends up in companion_fc_inventory_snapshot
+                // despite this filter. Logs every raw item whose SortedContainer
+                // doesn't cleanly fall into a known range, plus a canary confirming
+                // this exact build is the one actually running.
+                foreach (var item in nonEmpty.Where(i => i.SortedContainer == 2502))
+                {
+                    Log.Information($"Fleet Companion DIAGNOSTIC [{data.Name}]: found SortedContainer=2502 in nonEmpty BEFORE filtering — Container={item.Container}, Slot={item.Slot}, ItemId={item.ItemId}, Quantity={item.Quantity}, RetainerId={item.RetainerId}, SortedContainer={item.SortedContainer}, SortedSlotIndex={item.SortedSlotIndex}");
+                }
+
                 var fcChestItems = nonEmpty.Where(i => i.SortedContainer >= 20000 && i.SortedContainer <= 20010).ToList();
                 var personalAndRetainerItems = nonEmpty.Where(i => !(i.SortedContainer >= 20000 && i.SortedContainer <= 20010)).ToList();
+
+                Log.Information($"Fleet Companion DIAGNOSTIC [{data.Name}]: fcChestItems.Count={fcChestItems.Count}, containers=[{string.Join(",", fcChestItems.Select(i => i.SortedContainer).Distinct())}]");
 
                 var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems, Configuration.UseRemoteConnection);
 
