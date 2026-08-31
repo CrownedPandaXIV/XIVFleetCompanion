@@ -315,10 +315,12 @@ namespace XIVFleetCompanion
                 const string sql = @"
                     INSERT INTO companion_character_housing
                         (cid, fc_id, fc_name, fc_points, fc_rank, total_members,
-                         has_house, house_city, house_ward, house_plot, house_last_visited, updated_at)
+                         has_house, house_city, house_ward, house_plot, house_last_visited,
+                         fc_master, fc_home_world_id, updated_at)
                     VALUES
                         (@cid, @fc_id, @fc_name, @fc_points, @fc_rank, @total_members,
-                         @has_house, @house_city, @house_ward, @house_plot, @house_last_visited, now())
+                         @has_house, @house_city, @house_ward, @house_plot, @house_last_visited,
+                         @fc_master, @fc_home_world_id, now())
                     ON CONFLICT (cid) DO UPDATE SET
                         fc_id = EXCLUDED.fc_id,
                         fc_name = EXCLUDED.fc_name,
@@ -330,6 +332,8 @@ namespace XIVFleetCompanion
                         house_ward = EXCLUDED.house_ward,
                         house_plot = EXCLUDED.house_plot,
                         house_last_visited = EXCLUDED.house_last_visited,
+                        fc_master = EXCLUDED.fc_master,
+                        fc_home_world_id = EXCLUDED.fc_home_world_id,
                         updated_at = now()";
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
@@ -344,6 +348,8 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("house_ward", (object?)housing.HouseWard ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("house_plot", (object?)housing.HousePlot ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("house_last_visited", (object?)housing.HouseLastVisited ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("fc_master", (object?)housing.FcMaster ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("fc_home_world_id", (object?)housing.FcHomeWorldId ?? DBNull.Value);
 
                 await cmd.ExecuteNonQueryAsync();
 
