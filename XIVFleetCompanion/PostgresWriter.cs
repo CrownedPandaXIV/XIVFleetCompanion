@@ -356,7 +356,9 @@ namespace XIVFleetCompanion
         }
 
         public static async Task<string> WriteRetainerLookupAsync(
-            ulong retainerId, ulong ownerCid, string name, bool useRemote)
+            ulong retainerId, ulong ownerCid, string name,
+            uint job, uint gil, bool hasVenture, uint ventureId,
+            long ventureBeginsAt, long ventureEndsAt, bool useRemote)
         {
             var (connectionString, connError) = BuildConnectionString(useRemote);
             if (connectionString == null)
@@ -369,18 +371,30 @@ namespace XIVFleetCompanion
 
                 const string sql = @"
                     INSERT INTO companion_retainer_lookup
-                        (retainer_id, owner_cid, name, updated_at)
+                        (retainer_id, owner_cid, name, job, gil, has_venture, venture_id, venture_begins_at, venture_ends_at, updated_at)
                     VALUES
-                        (@retainer_id, @owner_cid, @name, now())
+                        (@retainer_id, @owner_cid, @name, @job, @gil, @has_venture, @venture_id, @venture_begins_at, @venture_ends_at, now())
                     ON CONFLICT (retainer_id) DO UPDATE SET
                         owner_cid = EXCLUDED.owner_cid,
                         name = EXCLUDED.name,
+                        job = EXCLUDED.job,
+                        gil = EXCLUDED.gil,
+                        has_venture = EXCLUDED.has_venture,
+                        venture_id = EXCLUDED.venture_id,
+                        venture_begins_at = EXCLUDED.venture_begins_at,
+                        venture_ends_at = EXCLUDED.venture_ends_at,
                         updated_at = now()";
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("retainer_id", (decimal)retainerId);
                 cmd.Parameters.AddWithValue("owner_cid", (decimal)ownerCid);
                 cmd.Parameters.AddWithValue("name", name);
+                cmd.Parameters.AddWithValue("job", (int)job);
+                cmd.Parameters.AddWithValue("gil", (long)gil);
+                cmd.Parameters.AddWithValue("has_venture", hasVenture);
+                cmd.Parameters.AddWithValue("venture_id", (int)ventureId);
+                cmd.Parameters.AddWithValue("venture_begins_at", ventureBeginsAt);
+                cmd.Parameters.AddWithValue("venture_ends_at", ventureEndsAt);
 
                 await cmd.ExecuteNonQueryAsync();
 
