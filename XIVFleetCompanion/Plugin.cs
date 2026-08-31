@@ -215,7 +215,7 @@ public sealed class Plugin : IDalamudPlugin
                     var retainerLookupResult = await PostgresWriter.WriteRetainerLookupAsync(
                         retainer.RetainerID, data.CID, retainer.Name,
                         retainer.Job, retainer.Gil, retainer.HasVenture, retainer.VentureID,
-                        retainer.VentureBeginsAt, retainer.VentureEndsAt, Configuration.UseRemoteConnection);
+                        retainer.VentureBeginsAt, retainer.VentureEndsAt, retainer.Level, Configuration.UseRemoteConnection);
 
                     if (!retainerLookupResult.StartsWith("Success"))
                         Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
