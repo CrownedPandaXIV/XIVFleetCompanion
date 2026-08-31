@@ -316,11 +316,11 @@ namespace XIVFleetCompanion
                     INSERT INTO companion_character_housing
                         (cid, fc_id, fc_name, fc_points, fc_rank, total_members,
                          has_house, house_city, house_ward, house_plot, house_last_visited,
-                         fc_master, fc_home_world_id, updated_at)
+                         fc_master, fc_home_world_id, fc_founding_date, fc_eligibility_override, updated_at)
                     VALUES
                         (@cid, @fc_id, @fc_name, @fc_points, @fc_rank, @total_members,
                          @has_house, @house_city, @house_ward, @house_plot, @house_last_visited,
-                         @fc_master, @fc_home_world_id, now())
+                         @fc_master, @fc_home_world_id, @fc_founding_date, @fc_eligibility_override, now())
                     ON CONFLICT (cid) DO UPDATE SET
                         fc_id = EXCLUDED.fc_id,
                         fc_name = EXCLUDED.fc_name,
@@ -334,6 +334,8 @@ namespace XIVFleetCompanion
                         house_last_visited = EXCLUDED.house_last_visited,
                         fc_master = EXCLUDED.fc_master,
                         fc_home_world_id = EXCLUDED.fc_home_world_id,
+                        fc_founding_date = EXCLUDED.fc_founding_date,
+                        fc_eligibility_override = EXCLUDED.fc_eligibility_override,
                         updated_at = now()";
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
@@ -350,6 +352,8 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("house_last_visited", (object?)housing.HouseLastVisited ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("fc_master", (object?)housing.FcMaster ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("fc_home_world_id", (object?)housing.FcHomeWorldId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("fc_founding_date", (object?)housing.FcFoundingDate ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("fc_eligibility_override", (object?)housing.FcEligibilityOverride ?? DBNull.Value);
 
                 await cmd.ExecuteNonQueryAsync();
 
