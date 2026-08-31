@@ -20,6 +20,8 @@ namespace XIVFleetCompanion
             public int? HouseWard { get; set; }
             public int? HousePlot { get; set; }
             public DateTime? HouseLastVisited { get; set; }
+            public string FcMaster { get; set; } = string.Empty;
+            public int? FcHomeWorldId { get; set; }
         }
 
         private class RootData
@@ -59,6 +61,12 @@ namespace XIVFleetCompanion
 
             [JsonPropertyName("TotalMembers")]
             public int TotalMembers { get; set; }
+
+            [JsonPropertyName("MasterString")]
+            public string MasterString { get; set; } = string.Empty;
+
+            [JsonPropertyName("HomeWorldId")]
+            public int HomeWorldId { get; set; }
 
             [JsonPropertyName("House")]
             public HouseEntry? House { get; set; }
@@ -122,7 +130,9 @@ namespace XIVFleetCompanion
                         HouseCity = fc.House?.City,
                         HouseWard = fc.House?.Ward,
                         HousePlot = fc.House?.Plot,
-                        HouseLastVisited = fc.House?.LastVisited
+                        HouseLastVisited = fc.House?.LastVisited,
+                        FcMaster = fc.MasterString,
+                        FcHomeWorldId = fc.HomeWorldId
                     };
                 }
             }
