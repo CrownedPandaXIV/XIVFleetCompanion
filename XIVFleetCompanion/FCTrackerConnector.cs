@@ -22,6 +22,8 @@ namespace XIVFleetCompanion
             public DateTime? HouseLastVisited { get; set; }
             public string FcMaster { get; set; } = string.Empty;
             public int? FcHomeWorldId { get; set; }
+            public DateTime? FcFoundingDate { get; set; }
+            public DateTime? FcEligibilityOverride { get; set; }
         }
 
         private class RootData
@@ -67,6 +69,12 @@ namespace XIVFleetCompanion
 
             [JsonPropertyName("HomeWorldId")]
             public int HomeWorldId { get; set; }
+
+            [JsonPropertyName("FoundingDate")]
+            public DateTime FoundingDate { get; set; }
+
+            [JsonPropertyName("EligibilityDateReferenceOverride")]
+            public DateTime? EligibilityDateReferenceOverride { get; set; }
 
             [JsonPropertyName("House")]
             public HouseEntry? House { get; set; }
@@ -132,7 +140,9 @@ namespace XIVFleetCompanion
                         HousePlot = fc.House?.Plot,
                         HouseLastVisited = fc.House?.LastVisited,
                         FcMaster = fc.MasterString,
-                        FcHomeWorldId = fc.HomeWorldId
+                        FcHomeWorldId = fc.HomeWorldId,
+                        FcFoundingDate = fc.FoundingDate == default ? null : fc.FoundingDate,
+                        FcEligibilityOverride = fc.EligibilityDateReferenceOverride
                     };
                 }
             }
