@@ -368,7 +368,7 @@ namespace XIVFleetCompanion
         public static async Task<string> WriteRetainerLookupAsync(
             ulong retainerId, ulong ownerCid, string name,
             uint job, uint gil, bool hasVenture, uint ventureId,
-            long ventureBeginsAt, long ventureEndsAt, int level, bool useRemote)
+            long ventureBeginsAt, long ventureEndsAt, int level, int? hireOrderIndex, bool useRemote)
         {
             var (connectionString, connError) = BuildConnectionString(useRemote);
             if (connectionString == null)
@@ -381,9 +381,9 @@ namespace XIVFleetCompanion
 
                 const string sql = @"
                     INSERT INTO companion_retainer_lookup
-                        (retainer_id, owner_cid, name, job, gil, has_venture, venture_id, venture_begins_at, venture_ends_at, level, updated_at)
+                        (retainer_id, owner_cid, name, job, gil, has_venture, venture_id, venture_begins_at, venture_ends_at, level, hire_order_index, updated_at)
                     VALUES
-                        (@retainer_id, @owner_cid, @name, @job, @gil, @has_venture, @venture_id, @venture_begins_at, @venture_ends_at, @level, now())
+                        (@retainer_id, @owner_cid, @name, @job, @gil, @has_venture, @venture_id, @venture_begins_at, @venture_ends_at, @level, @hire_order_index, now())
                     ON CONFLICT (retainer_id) DO UPDATE SET
                         owner_cid = EXCLUDED.owner_cid,
                         name = EXCLUDED.name,
@@ -394,6 +394,7 @@ namespace XIVFleetCompanion
                         venture_begins_at = EXCLUDED.venture_begins_at,
                         venture_ends_at = EXCLUDED.venture_ends_at,
                         level = EXCLUDED.level,
+                        hire_order_index = EXCLUDED.hire_order_index,
                         updated_at = now()";
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
@@ -407,6 +408,7 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("venture_begins_at", ventureBeginsAt);
                 cmd.Parameters.AddWithValue("venture_ends_at", ventureEndsAt);
                 cmd.Parameters.AddWithValue("level", level);
+                cmd.Parameters.AddWithValue("hire_order_index", (object?)hireOrderIndex ?? DBNull.Value);
 
                 await cmd.ExecuteNonQueryAsync();
 
