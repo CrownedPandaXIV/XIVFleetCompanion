@@ -193,14 +193,14 @@ public sealed class Plugin : IDalamudPlugin
             if (data == null || data.CID == 0) continue;
 
             var result = await PostgresWriter.WriteCharacterSnapshotAsync(
-                data.CID, data.Name, data.CurrentWorld,
+                data.CID, data.Name, data.World,
                 data.RetainerData.Count, data.OfflineSubmarineData.Count,
                 data.Gil, data.Ceruleum, data.RepairKits, Configuration.AccountLabel, data.FCID, data.NumSubSlots, Configuration.UseRemoteConnection);
 
             if (result == "Success.")
                 successCount++;
             else
-                Log.Warning($"Fleet Companion: failed to write snapshot for {data.Name}@{data.CurrentWorld} — {result}");
+                Log.Warning($"Fleet Companion: failed to write snapshot for {data.Name}@{data.World} — {result}");
 
             if (AllaganTools != null)
             {
@@ -248,7 +248,7 @@ public sealed class Plugin : IDalamudPlugin
                 var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems, Configuration.UseRemoteConnection);
 
                 if (!invResult.StartsWith("Success"))
-                    Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.CurrentWorld} — {invResult}");
+                    Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.World} — {invResult}");
 
                 // Always write (even with zero items) so the delete-then-
                 // reinsert inside WriteFCInventorySnapshotAsync actually
@@ -264,7 +264,7 @@ public sealed class Plugin : IDalamudPlugin
                     var fcInvResult = await PostgresWriter.WriteFCInventorySnapshotAsync(data.FCID, fcChestItems, Configuration.UseRemoteConnection);
 
                     if (!fcInvResult.StartsWith("Success"))
-                        Log.Warning($"Fleet Companion: failed to write FC chest inventory for {data.Name}@{data.CurrentWorld} — {fcInvResult}");
+                        Log.Warning($"Fleet Companion: failed to write FC chest inventory for {data.Name}@{data.World} — {fcInvResult}");
                 }
             }
 
@@ -298,14 +298,14 @@ public sealed class Plugin : IDalamudPlugin
             var subResult = await PostgresWriter.WriteSubmarineSnapshotAsync(cid, subRecords, Configuration.UseRemoteConnection);
 
             if (!subResult.StartsWith("Success"))
-                Log.Warning($"Fleet Companion: failed to write submarines for {data.Name}@{data.CurrentWorld} — {subResult}");
+                Log.Warning($"Fleet Companion: failed to write submarines for {data.Name}@{data.World} — {subResult}");
 
             if (fcTrackerHousing.TryGetValue(cid, out var housing))
             {
                 var housingResult = await PostgresWriter.WriteHousingSnapshotAsync(cid, housing, Configuration.UseRemoteConnection);
 
                 if (!housingResult.StartsWith("Success"))
-                    Log.Warning($"Fleet Companion: failed to write housing for {data.Name}@{data.CurrentWorld} — {housingResult}");
+                    Log.Warning($"Fleet Companion: failed to write housing for {data.Name}@{data.World} — {housingResult}");
             }
         }
         Configuration.LastSyncTimestamp = DateTime.Now;
