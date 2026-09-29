@@ -183,9 +183,9 @@ public sealed class Plugin : IDalamudPlugin
     private static readonly uint[] SalvageItemIds = { 22500, 22501, 22502, 22503, 22504, 22505, 22506, 22507 };
 
     private static void AddMetric(
-        Dictionary<(string Type, ulong Id, string Metric), decimal> metrics,
-        string subjectType, ulong subjectId, string metric, decimal value)
-        => metrics[(subjectType, subjectId, metric)] = value;
+        Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)> metrics,
+        string subjectType, ulong subjectId, string metric, decimal value, string? label = null)
+        => metrics[(subjectType, subjectId, metric)] = (value, label);
 
     private async Task RunSyncAsync()
     {
@@ -195,7 +195,7 @@ public sealed class Plugin : IDalamudPlugin
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
         Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
         int successCount = 0;
-        var metrics = new Dictionary<(string Type, ulong Id, string Metric), decimal>();
+        var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
 
         foreach (var cid in cids)
         {
@@ -317,7 +317,20 @@ public sealed class Plugin : IDalamudPlugin
             if (fcTrackerHousing.TryGetValue(cid, out var housing))
             {
                 if (housing.FcId != 0)
-                    AddMetric(metrics, "fc", housing.FcId, "fc_points", housing.FcPoints);
+                {
+                    // FC points belong to the FC (labelled with the leader's name) and, when
+                    // this character IS the leader, also to this character (labelled with the
+                    // FC's name). The leader is matched by name within the same FC.
+                    AddMetric(metrics, "fc", housing.FcId, "fc_points", housing.FcPoints,
+                        string.IsNullOrWhiteSpace(housing.FcMaster) ? null : housing.FcMaster);
+
+                    if (data.FCID == housing.FcId
+                        && string.Equals(data.Name, housing.FcMaster, StringComparison.OrdinalIgnoreCase))
+                    {
+                        AddMetric(metrics, "character", data.CID, "fc_points", housing.FcPoints,
+                            string.IsNullOrWhiteSpace(housing.FcName) ? null : housing.FcName);
+                    }
+                }
 
                 var housingResult = await PostgresWriter.WriteHousingSnapshotAsync(cid, housing, Configuration.UseRemoteConnection);
 
@@ -330,7 +343,8 @@ public sealed class Plugin : IDalamudPlugin
             SubjectType = kv.Key.Type,
             SubjectId = kv.Key.Id,
             Metric = kv.Key.Metric,
-            Value = kv.Value
+            Value = kv.Value.Value,
+            Label = kv.Value.Label
         }).ToList();
 
         var metricResult = await PostgresWriter.WriteMetricsAsync(metricPoints, Configuration.UseRemoteConnection);
