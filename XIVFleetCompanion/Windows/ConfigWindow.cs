@@ -20,7 +20,7 @@ public class ConfigWindow : Window, IDisposable
 
     // Retention/downsampling save form
     private static readonly string[] TimeUnits = { "Days", "Weeks", "Months" };
-    private int retentionValue = 6;
+    private int retentionValue = 2;
     private int retentionUnitIndex = 2; // Months
     private int downsampleValue = 1;
     private int downsampleUnitIndex = 0; // Days
