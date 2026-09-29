@@ -51,8 +51,8 @@ plugin installer and the log.
 - **MAJOR** (0.x to 1.0, then 1.0 to 2.0): 1.0 marks the first stable release; after that,
   a change that needs a database update or a newer app first.
 
-To release: change `<Version>`, add a section to `CHANGELOG.md`, merge, then tag the merge
-commit `v<new>`. The plugin and the app are versioned separately; the changelog notes when one
+To release: change `<Version>`, add a section to `CHANGELOG.md`, merge. The tag `v<new>` and the GitHub release (with that
+changelog section as its description) are then created automatically by `.github/workflows/release.yml`. The plugin and the app are versioned separately; the changelog notes when one
 needs the other updated.
 
 ## Building
