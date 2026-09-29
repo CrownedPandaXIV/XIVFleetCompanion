@@ -28,6 +28,9 @@ public sealed class Plugin : IDalamudPlugin
 
     private const string CommandName = "/xivfleet";
 
+    // The plugin's version (from the project file), shown in window titles and the log.
+    internal static string VersionText => PluginInterface.Manifest.AssemblyVersion?.ToString(3) ?? "unknown";
+
     public Configuration Configuration { get; init; }
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
@@ -88,7 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
         // Example Output: 00:57:54.959 | INF | [XIVFleetCompanion] ===A cool log message from Sample Plugin===
-        Log.Information($"{PluginInterface.Manifest.Name} loaded — version {PluginInterface.Manifest.AssemblyVersion}.");
+        Log.Information($"{PluginInterface.Manifest.Name} loaded — version {VersionText}.");
     }
 
     public void Dispose()
