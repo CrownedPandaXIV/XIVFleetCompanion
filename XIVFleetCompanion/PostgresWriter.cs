@@ -1,6 +1,7 @@
 using Npgsql;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace XIVFleetCompanion
@@ -413,6 +414,71 @@ namespace XIVFleetCompanion
                 await cmd.ExecuteNonQueryAsync();
 
                 return "Success.";
+            }
+            catch (Exception ex)
+            {
+                return $"Failed — {ex.Message}";
+            }
+        }
+        // One value to record in companion_metric_history (see sql/001_metric_history.sql).
+        // SubjectType is "character" or "fc"; SubjectId is the character id or FC id.
+        public class MetricPoint
+        {
+            public string SubjectType { get; set; } = string.Empty;
+            public ulong SubjectId { get; set; }
+            public string Metric { get; set; } = string.Empty;
+            public decimal Value { get; set; }
+        }
+
+        // A metric is stored again only when its value changed, or when its last
+        // stored row is older than this ("still the same" marker so a chart can tell
+        // an unchanged value from a plugin that was not running).
+        private const double MetricHeartbeatSeconds = 3600;
+
+        // Records a batch of metrics in one round trip. Each (SubjectType, SubjectId,
+        // Metric) must appear at most once per batch (the caller de-duplicates).
+        public static async Task<string> WriteMetricsAsync(List<MetricPoint> metrics, bool useRemote)
+        {
+            if (metrics.Count == 0)
+                return "Success — no metrics to write.";
+
+            var (connectionString, connError) = BuildConnectionString(useRemote);
+            if (connectionString == null)
+                return connError!;
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    WITH incoming AS (
+                        SELECT subject_type, subject_id, metric, value
+                        FROM unnest(@subject_types::text[], @subject_ids::numeric[], @metrics::text[], @vals::numeric[])
+                             AS t(subject_type, subject_id, metric, value)
+                    ),
+                    changed AS (
+                        INSERT INTO companion_metric_latest AS l (subject_type, subject_id, metric, value, recorded_at)
+                        SELECT subject_type, subject_id, metric, value, now() FROM incoming
+                        ON CONFLICT (subject_type, subject_id, metric) DO UPDATE
+                            SET value = EXCLUDED.value, recorded_at = EXCLUDED.recorded_at
+                            WHERE l.value IS DISTINCT FROM EXCLUDED.value
+                               OR l.recorded_at < now() - make_interval(secs => @heartbeat_seconds::double precision)
+                        RETURNING subject_type, subject_id, metric, value, recorded_at
+                    )
+                    INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value)
+                    SELECT recorded_at, subject_type, subject_id, metric, value FROM changed";
+
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("subject_types", metrics.Select(m => m.SubjectType).ToArray());
+                cmd.Parameters.AddWithValue("subject_ids", metrics.Select(m => (decimal)m.SubjectId).ToArray());
+                cmd.Parameters.AddWithValue("metrics", metrics.Select(m => m.Metric).ToArray());
+                cmd.Parameters.AddWithValue("vals", metrics.Select(m => m.Value).ToArray());
+                cmd.Parameters.AddWithValue("heartbeat_seconds", MetricHeartbeatSeconds);
+
+                var recorded = await cmd.ExecuteNonQueryAsync();
+
+                return $"Success — {recorded} of {metrics.Count} metrics recorded.";
             }
             catch (Exception ex)
             {

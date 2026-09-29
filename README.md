@@ -19,6 +19,27 @@ housing eligibility display, etc.) is left to the app.
 - Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection.
 - The plugin syncs on the interval set in settings and runs a daily retention/downsampling cleanup.
 
+## History for charts
+
+Besides the per-sync snapshot table, the plugin records selected values into a general
+history table (`companion_metric_history`) so they can be charted over time. A value is
+stored only when it changes, plus an hourly "still the same" marker, so slow-moving values
+stay small. Currently recorded:
+
+| Metric | Belongs to | Notes |
+| --- | --- | --- |
+| `gil`, `ceruleum`, `repair_kits` | character | |
+| `fc_points` | Free Company | from FCTracker |
+| `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers; FC = chest, only when AllaganTools has chest data |
+
+**Setup, once:** run `sql/001_metric_history.sql` in the database the plugin writes to. Until
+that has been run, the plugin logs a warning each sync and skips metric history (everything
+else keeps working). Optionally run `sql/002_backfill_metrics_from_snapshots.sql` afterwards
+to copy the existing gil, ceruleum and repair kit history into the new table.
+
+To record something new, add another `AddMetric(...)` call in `Plugin.cs`; no schema change
+is needed.
+
 ## Building
 
 Requires XIVLauncher, FFXIV and Dalamud installed, and the .NET SDK.

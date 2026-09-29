@@ -178,6 +178,15 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    // Item ids whose quantities are recorded as history for the salvage charts
+    // (same items the app's Salvage view prices).
+    private static readonly uint[] SalvageItemIds = { 22500, 22501, 22502, 22503, 22504, 22505, 22506, 22507 };
+
+    private static void AddMetric(
+        Dictionary<(string Type, ulong Id, string Metric), decimal> metrics,
+        string subjectType, ulong subjectId, string metric, decimal value)
+        => metrics[(subjectType, subjectId, metric)] = value;
+
     private async Task RunSyncAsync()
     {
         if (AutoRetainer == null || !AutoRetainer.Ready) return;
@@ -186,6 +195,7 @@ public sealed class Plugin : IDalamudPlugin
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
         Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
         int successCount = 0;
+        var metrics = new Dictionary<(string Type, ulong Id, string Metric), decimal>();
 
         foreach (var cid in cids)
         {
@@ -201,6 +211,10 @@ public sealed class Plugin : IDalamudPlugin
                 successCount++;
             else
                 Log.Warning($"Fleet Companion: failed to write snapshot for {data.Name}@{data.World} — {result}");
+
+            AddMetric(metrics, "character", data.CID, "gil", data.Gil);
+            AddMetric(metrics, "character", data.CID, "ceruleum", data.Ceruleum);
+            AddMetric(metrics, "character", data.CID, "repair_kits", data.RepairKits);
 
             if (AllaganTools != null)
             {
@@ -232,6 +246,23 @@ public sealed class Plugin : IDalamudPlugin
                     fcChestItems = fcItems
                         .Where(i => i.Quantity > 0 && i.SortedContainer >= 20000 && i.SortedContainer <= 20004)
                         .ToList();
+                }
+
+                // Salvage item quantities (bags + retainers for the character, chest for
+                // the FC). Only recorded when AllaganTools actually returned items, so a
+                // missing cache is never stored as a real drop to zero.
+                if (nonEmpty.Count > 0)
+                {
+                    foreach (var salvageId in SalvageItemIds)
+                        AddMetric(metrics, "character", data.CID, $"item_qty:{salvageId}",
+                            nonEmpty.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
+                }
+
+                if (data.FCID != 0 && fcChestItems.Count > 0)
+                {
+                    foreach (var salvageId in SalvageItemIds)
+                        AddMetric(metrics, "fc", data.FCID, $"item_qty:{salvageId}",
+                            fcChestItems.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
                 }
 
                 var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems, Configuration.UseRemoteConnection);
@@ -285,12 +316,27 @@ public sealed class Plugin : IDalamudPlugin
 
             if (fcTrackerHousing.TryGetValue(cid, out var housing))
             {
+                if (housing.FcId != 0)
+                    AddMetric(metrics, "fc", housing.FcId, "fc_points", housing.FcPoints);
+
                 var housingResult = await PostgresWriter.WriteHousingSnapshotAsync(cid, housing, Configuration.UseRemoteConnection);
 
                 if (!housingResult.StartsWith("Success"))
                     Log.Warning($"Fleet Companion: failed to write housing for {data.Name}@{data.World} — {housingResult}");
             }
         }
+        var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint
+        {
+            SubjectType = kv.Key.Type,
+            SubjectId = kv.Key.Id,
+            Metric = kv.Key.Metric,
+            Value = kv.Value
+        }).ToList();
+
+        var metricResult = await PostgresWriter.WriteMetricsAsync(metricPoints, Configuration.UseRemoteConnection);
+        if (!metricResult.StartsWith("Success"))
+            Log.Warning($"Fleet Companion: failed to write metric history — {metricResult}");
+
         Configuration.LastSyncTimestamp = DateTime.Now;
         Configuration.Save();
 
