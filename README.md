@@ -40,6 +40,21 @@ to copy the existing gil, ceruleum and repair kit history into the new table.
 To record something new, add another `AddMetric(...)` call in `Plugin.cs`; no schema change
 is needed.
 
+## Versioning
+
+The plugin uses [Semantic Versioning](https://semver.org) (`MAJOR.MINOR.PATCH`), set as
+`<Version>` in `XIVFleetCompanion/XIVFleetCompanion.csproj`. It shows in the window titles, the
+plugin installer and the log.
+
+- **PATCH** (0.1.0 to 0.1.1): bug fixes, no new behavior.
+- **MINOR** (0.1.0 to 0.2.0): new data recorded or new features.
+- **MAJOR** (0.x to 1.0, then 1.0 to 2.0): 1.0 marks the first stable release; after that,
+  a change that needs a database update or a newer app first.
+
+To release: change `<Version>`, add a section to `CHANGELOG.md`, merge, then tag the merge
+commit `v<new>`. The plugin and the app are versioned separately; the changelog notes when one
+needs the other updated.
+
 ## Building
 
 Requires XIVLauncher, FFXIV and Dalamud installed, and the .NET SDK.
