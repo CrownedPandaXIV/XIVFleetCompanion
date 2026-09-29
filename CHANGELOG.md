@@ -3,6 +3,16 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.1.1 - 2026-09-29
+
+- Much faster cleanup of old snapshot history. The old cleanup query could run for many minutes
+  (or effectively never finish) on a table of millions of rows; the new one does a 4-million-row
+  cleanup in about 20 seconds, keeping exactly the same rows. The cleanup also now has a 10-minute
+  time limit instead of 30 seconds.
+- New recommended index for the daily cleanup: `sql/003_snapshot_timestamp_index.sql`.
+- The default retention window is now 2 months (was 6). Existing installs keep whatever they have
+  saved; change it in the settings window. Long-term history is kept in the metric history table.
+
 ## 0.1.0 - 2026-09-29
 
 First tracked version. Everything the plugin does so far:
