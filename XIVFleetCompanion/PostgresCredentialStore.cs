@@ -66,9 +66,10 @@ namespace XIVFleetCompanion
                     Password = cred.Password ?? string.Empty
                 };
             }
-            catch
+            catch (Exception ex)
             {
-                // Missing, corrupted, or inaccessible credential — caller treats this as "not configured".
+                // Corrupted or inaccessible credential — caller treats this as "not configured".
+                Plugin.Log.Warning($"Fleet Companion: could not read saved Postgres credential — {ex.Message}");
                 return null;
             }
         }

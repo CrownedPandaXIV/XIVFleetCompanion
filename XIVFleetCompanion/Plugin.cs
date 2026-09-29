@@ -222,19 +222,8 @@ public sealed class Plugin : IDalamudPlugin
                         Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
                 }
 
-                // FC chest data must be queried directly via the FC's own
-                // ID (GetCharacterItems(data.FCID)), NOT filtered out of a
-                // character's personal item list - confirmed as the real
-                // bug tonight: personal-item queries only incidentally
-                // included FC-range containers when AllaganTools happened
-                // to have stale/cached data mixed in, which is why this was
-                // unreliable (sometimes real chest data, sometimes a stray
-                // FreeCompanyCurrency row, usually nothing at all). A
-                // dedicated FC-scoped query is the correct source, matching
-                // what an earlier probe in this same file (since removed)
-                // had already confirmed worked. Personal inventory never
-                // includes FC-range containers now, so no filtering needed
-                // there anymore either.
+                // FC chest data comes from the FC's own ID, not from a
+                // character's personal items.
                 var personalAndRetainerItems = nonEmpty;
                 List<AllaganToolsConnector.ParsedItem> fcChestItems = new();
                 if (data.FCID != 0)
@@ -250,15 +239,9 @@ public sealed class Plugin : IDalamudPlugin
                 if (!invResult.StartsWith("Success"))
                     Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.World} — {invResult}");
 
-                // Always write (even with zero items) so the delete-then-
-                // reinsert inside WriteFCInventorySnapshotAsync actually
-                // clears stale/wrong rows every sync - previously this only
-                // ran when fcChestItems.Count > 0, so a sync where
-                // AllaganTools reported no FC chest data at all (confirmed
-                // common - it appears to only have fresh FC data cached
-                // after the in-game FC chest UI has actually been opened)
-                // left whatever was written last time sitting there forever,
-                // uncleaned.
+                // Always write, even with zero items, so stale rows get cleared.
+                // AllaganTools only has fresh FC chest data after the in-game
+                // FC chest UI has been opened.
                 if (data.FCID != 0)
                 {
                     var fcInvResult = await PostgresWriter.WriteFCInventorySnapshotAsync(data.FCID, fcChestItems, Configuration.UseRemoteConnection);
