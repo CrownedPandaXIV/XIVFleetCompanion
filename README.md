@@ -29,7 +29,7 @@ stay small. Currently recorded:
 | Metric | Belongs to | Notes |
 | --- | --- | --- |
 | `gil`, `ceruleum`, `repair_kits` | character | |
-| `fc_points` | Free Company | from FCTracker |
+| `fc_points` | Free Company, and the FC leader's character when it is one of yours | from FCTracker; labelled with the leader's name (on the FC) or the FC's name (on the leader). A leader change is recorded even if the points are unchanged |
 | `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers; FC = chest, only when AllaganTools has chest data |
 
 **Setup, once:** run `sql/001_metric_history.sql` in the database the plugin writes to. Until

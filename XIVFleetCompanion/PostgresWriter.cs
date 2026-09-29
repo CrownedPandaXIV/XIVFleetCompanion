@@ -428,6 +428,8 @@ namespace XIVFleetCompanion
             public ulong SubjectId { get; set; }
             public string Metric { get; set; } = string.Empty;
             public decimal Value { get; set; }
+            // Optional context stored with the value (e.g. the FC leader's name).
+            public string? Label { get; set; }
         }
 
         // A metric is stored again only when its value changed, or when its last
@@ -453,27 +455,29 @@ namespace XIVFleetCompanion
 
                 const string sql = @"
                     WITH incoming AS (
-                        SELECT subject_type, subject_id, metric, value
-                        FROM unnest(@subject_types::text[], @subject_ids::numeric[], @metrics::text[], @vals::numeric[])
-                             AS t(subject_type, subject_id, metric, value)
+                        SELECT subject_type, subject_id, metric, value, label
+                        FROM unnest(@subject_types::text[], @subject_ids::numeric[], @metrics::text[], @vals::numeric[], @labels::text[])
+                             AS t(subject_type, subject_id, metric, value, label)
                     ),
                     changed AS (
-                        INSERT INTO companion_metric_latest AS l (subject_type, subject_id, metric, value, recorded_at)
-                        SELECT subject_type, subject_id, metric, value, now() FROM incoming
+                        INSERT INTO companion_metric_latest AS l (subject_type, subject_id, metric, value, label, recorded_at)
+                        SELECT subject_type, subject_id, metric, value, label, now() FROM incoming
                         ON CONFLICT (subject_type, subject_id, metric) DO UPDATE
-                            SET value = EXCLUDED.value, recorded_at = EXCLUDED.recorded_at
+                            SET value = EXCLUDED.value, label = EXCLUDED.label, recorded_at = EXCLUDED.recorded_at
                             WHERE l.value IS DISTINCT FROM EXCLUDED.value
+                               OR l.label IS DISTINCT FROM EXCLUDED.label
                                OR l.recorded_at < now() - make_interval(secs => @heartbeat_seconds::double precision)
-                        RETURNING subject_type, subject_id, metric, value, recorded_at
+                        RETURNING subject_type, subject_id, metric, value, label, recorded_at
                     )
-                    INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value)
-                    SELECT recorded_at, subject_type, subject_id, metric, value FROM changed";
+                    INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value, label)
+                    SELECT recorded_at, subject_type, subject_id, metric, value, label FROM changed";
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("subject_types", metrics.Select(m => m.SubjectType).ToArray());
                 cmd.Parameters.AddWithValue("subject_ids", metrics.Select(m => (decimal)m.SubjectId).ToArray());
                 cmd.Parameters.AddWithValue("metrics", metrics.Select(m => m.Metric).ToArray());
                 cmd.Parameters.AddWithValue("vals", metrics.Select(m => m.Value).ToArray());
+                cmd.Parameters.AddWithValue("labels", metrics.Select(m => m.Label).ToArray());
                 cmd.Parameters.AddWithValue("heartbeat_seconds", MetricHeartbeatSeconds);
 
                 var recorded = await cmd.ExecuteNonQueryAsync();

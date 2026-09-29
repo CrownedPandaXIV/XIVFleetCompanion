@@ -10,6 +10,9 @@
 --   'character' + character id      e.g. metric 'gil', 'ceruleum', 'repair_kits',
 --                                   'item_qty:22500' (item quantity across bags + retainers)
 --   'fc'        + free company id   e.g. metric 'fc_points', 'item_qty:22500' (FC chest)
+-- label is optional context stored with a value. For 'fc_points' it is the FC leader's name
+-- (on the FC's own rows) or the FC's name (on the leader character's row), so same-named
+-- FCs can be told apart. A changed label is stored as a new row even if the value is unchanged.
 -- New charts only need the plugin to start writing a new metric name; no schema change.
 
 CREATE TABLE IF NOT EXISTS companion_metric_history (
@@ -17,7 +20,8 @@ CREATE TABLE IF NOT EXISTS companion_metric_history (
     subject_type text        NOT NULL,
     subject_id   numeric     NOT NULL,
     metric       text        NOT NULL,
-    value        numeric     NOT NULL
+    value        numeric     NOT NULL,
+    label        text
 );
 
 -- One subject's metric over time (a single character's gil).
@@ -34,5 +38,10 @@ CREATE TABLE IF NOT EXISTS companion_metric_latest (
     metric       text        NOT NULL,
     value        numeric     NOT NULL,
     recorded_at  timestamptz NOT NULL,
+    label        text,
     PRIMARY KEY (subject_type, subject_id, metric)
 );
+
+-- If an earlier version of this script created the tables without label, add it.
+ALTER TABLE companion_metric_history ADD COLUMN IF NOT EXISTS label text;
+ALTER TABLE companion_metric_latest  ADD COLUMN IF NOT EXISTS label text;
