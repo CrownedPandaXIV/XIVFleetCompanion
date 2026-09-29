@@ -1,0 +1,26 @@
+name: Release
+
+# When a change lands on master with a version that has no release yet, create the tag and
+# the GitHub release (description taken from CHANGELOG.md). Does nothing otherwise.
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Tag and release a new version
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        echo "Version: $version"
+        bash .github/scripts/tag-release.sh "$version" "$GITHUB_SHA"
