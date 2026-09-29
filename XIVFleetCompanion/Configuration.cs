@@ -21,7 +21,7 @@ public class Configuration : IPluginConfiguration
     // Retention/downsampling settings for companion_character_snapshot cleanup.
     // RetentionValue/Unit: how old a row must be before it becomes eligible for compression.
     // DownsampleValue/Unit: how coarse compressed data becomes (e.g. 1 Days = keep one row per day).
-    public int RetentionValue { get; set; } = 6;
+    public int RetentionValue { get; set; } = 2;
     public string RetentionUnit { get; set; } = "Months";
     public int DownsampleValue { get; set; } = 1;
     public string DownsampleUnit { get; set; } = "Days";
