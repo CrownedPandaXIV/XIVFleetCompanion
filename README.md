@@ -18,12 +18,10 @@ housing eligibility display, etc.) is left to the app.
 - `/xivfleet` opens the main window; the plugin installer's config button opens settings.
 - Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection.
 - The plugin syncs on the interval set in settings. Inventories, FC chests, submarines, retainers and
-  housing are written only when they changed (and in full once an hour); character snapshots and the
-  chart history every sync. It also runs a daily retention/downsampling cleanup.
-  Snapshots newer than the retention window (default 2 months) are kept in full; older ones are
-  thinned to one per character per downsample interval (default 1 day). For a fast cleanup on a
-  large table, run `sql/003_snapshot_timestamp_index.sql` once. Long-term history for charts lives
-  in the metric history table (see below), so a short retention window is fine.
+  housing are written only when they changed (and in full once an hour); each character's current
+  row and the chart history every sync (the chart history stores only values that changed).
+  Dismissed retainers, chests of Free Companies none of your characters is in any more, and the old
+  Free Company details of a character that left its FC are removed as they are noticed.
 
 ## Current state per character
 
@@ -32,12 +30,26 @@ app shows (name, world, account, gil, ceruleum, repair kits, retainers, submarin
 Company), when it was first seen and when it last synced. Name, world, account label and Free Company
 changes are logged in `companion_character_changes` automatically. **Run `sql/004_character_current.sql`
 once before updating the plugin to 0.3.0**; it creates both tables and fills them from the existing
-snapshot history (a minute or two on a few million rows). The snapshot table is still written for now.
+snapshot history (a minute or two on a few million rows).
+
+## The old snapshot history (removed in 0.4.0)
+
+Up to 0.3.x the plugin also wrote `companion_character_snapshot`: a full row per character on every
+sync, about 900 MB after a few months. Everything worth keeping from it is now elsewhere (current
+values in `companion_character_current`, values over time in the chart history, identity changes in
+`companion_character_changes`), so from 0.4.0 it is no longer written, and the daily
+retention/downsampling clean-up that kept it in check is gone too. To remove the table:
+
+1. Update the plugin to 0.4.0 on every PC that runs it and let it sync once.
+2. Save the table to a file: the app's `backup\save-character-snapshot.ps1` (it checks the file too).
+3. Run `sql/005_remove_character_snapshot.sql`. It refuses, changing nothing, if a plugin older than
+   0.4.0 still writes the table or a character has no current row.
+
+`sql/002` and `sql/003` only apply to databases that still have the old table.
 
 ## History for charts
 
-Besides the per-sync snapshot table, the plugin records selected values into a general
-history table (`companion_metric_history`) so they can be charted over time. A value is
+The plugin records selected values into a general history table (`companion_metric_history`) so they can be charted over time. A value is
 stored only when it changes, plus an hourly "still the same" marker, so slow-moving values
 stay small. Currently recorded:
 

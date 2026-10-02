@@ -76,30 +76,6 @@ namespace XIVFleetCompanion
             public int? HireOrderIndex;
         }
 
-        // Every character's snapshot row for this sync, in one statement.
-        public static async Task<int> WriteCharacterSnapshotsAsync(NpgsqlConnection conn, IReadOnlyList<CharacterSnapshot> rows)
-        {
-            if (rows.Count == 0) return 0;
-            const string sql = @"
-                INSERT INTO companion_character_snapshot
-                    (cid, name, world, retainer_count, submarine_count, gil, ceruleum, repair_kits, account_label, fc_id, num_sub_slots)
-                SELECT * FROM unnest(@cid::numeric[], @name::text[], @world::text[], @retainers::int[], @subs::int[],
-                                     @gil::bigint[], @ceruleum::int[], @kits::int[], @account::text[], @fc::numeric[], @slots::int[])";
-            await using var cmd = new NpgsqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("cid", rows.Select(r => (decimal)r.Cid).ToArray());
-            cmd.Parameters.AddWithValue("name", rows.Select(r => r.Name).ToArray());
-            cmd.Parameters.AddWithValue("world", rows.Select(r => r.World).ToArray());
-            cmd.Parameters.AddWithValue("retainers", rows.Select(r => r.RetainerCount).ToArray());
-            cmd.Parameters.AddWithValue("subs", rows.Select(r => r.SubmarineCount).ToArray());
-            cmd.Parameters.AddWithValue("gil", rows.Select(r => r.Gil).ToArray());
-            cmd.Parameters.AddWithValue("ceruleum", rows.Select(r => r.Ceruleum).ToArray());
-            cmd.Parameters.AddWithValue("kits", rows.Select(r => r.RepairKits).ToArray());
-            cmd.Parameters.AddWithValue("account", rows.Select(r => string.IsNullOrEmpty(r.AccountLabel) ? null : r.AccountLabel).ToArray());
-            cmd.Parameters.AddWithValue("fc", rows.Select(r => r.FcId == 0 ? (decimal?)null : r.FcId).ToArray());
-            cmd.Parameters.AddWithValue("slots", rows.Select(r => r.NumSubSlots).ToArray());
-            return await cmd.ExecuteNonQueryAsync();
-        }
-
         // Every character's current row (sql/004_character_current.sql), in one statement. Changes of
         // name, world, account label or Free Company are logged by a trigger on that table.
         public static async Task<int> WriteCurrentCharactersAsync(NpgsqlConnection conn, IReadOnlyList<CharacterSnapshot> rows)

@@ -37,8 +37,6 @@ public sealed class Plugin : IDalamudPlugin
     public AllaganToolsConnector? AllaganTools { get; private set; }
     private DateTime lastSyncCheck = DateTime.MinValue;
     private bool syncInProgress = false;
-    private DateTime lastRetentionCheck = DateTime.MinValue;
-    private bool retentionInProgress = false;
 
     // What was last written per character / FC, so unchanged data is not written again every
     // sync. Forgotten once an hour, so everything is rewritten at least hourly.
@@ -153,35 +151,6 @@ public sealed class Plugin : IDalamudPlugin
                 finally
                 {
                     syncInProgress = false;
-                }
-            });
-        }
-
-        // Retention runs on its own, much less frequent, once-daily check —
-        // no need to tie it to the sync interval.
-        if (!retentionInProgress && now - lastRetentionCheck >= TimeSpan.FromHours(24))
-        {
-            lastRetentionCheck = now;
-            retentionInProgress = true;
-
-            Task.Run(async () =>
-            {
-                try
-                {
-                    var result = await PostgresWriter.RunRetentionCleanupAsync(
-                        Configuration.RetentionValue, Configuration.RetentionUnit,
-                        Configuration.DownsampleValue, Configuration.DownsampleUnit,
-                        Configuration.UseRemoteConnection);
-
-                    Log.Information($"Fleet Companion: retention cleanup — {result}");
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"Fleet Companion retention cleanup failed: {ex}");
-                }
-                finally
-                {
-                    retentionInProgress = false;
                 }
             });
         }
@@ -436,22 +405,13 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
-        // Every character's snapshot row in one statement.
+        // Every character's current row, in one statement. The table comes from
+        // sql/004_character_current.sql; until that has been run, characters are not saved (one
+        // warning per plugin session).
         var synced = 0;
         try
         {
-            synced = await FleetWriter.WriteCharacterSnapshotsAsync(conn, snapshots);
-        }
-        catch (PostgresException ex)
-        {
-            Log.Warning($"Fleet Companion: failed to write character snapshots — {ex.Message}");
-        }
-
-        // Every character's current row. The table comes from sql/004_character_current.sql; until
-        // that has been run, this is skipped with one warning per plugin session.
-        try
-        {
-            synced = Math.Max(synced, await FleetWriter.WriteCurrentCharactersAsync(conn, snapshots));
+            synced = await FleetWriter.WriteCurrentCharactersAsync(conn, snapshots);
 
             // With every character's Free Company now current, chests of FCs none of them is in go.
             var removedSlots = await FleetWriter.RemoveOrphanFcChestsAsync(conn);
@@ -461,7 +421,7 @@ public sealed class Plugin : IDalamudPlugin
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             if (!warnedNoCurrentTable)
-                Log.Warning("Fleet Companion: companion_character_current does not exist yet; run sql/004_character_current.sql once. Skipping it until then.");
+                Log.Warning("Fleet Companion: companion_character_current does not exist; run sql/004_character_current.sql once. Characters are not saved until then.");
             warnedNoCurrentTable = true;
         }
         catch (PostgresException ex)
