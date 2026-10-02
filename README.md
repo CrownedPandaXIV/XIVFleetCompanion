@@ -10,7 +10,7 @@ housing eligibility display, etc.) is left to the app.
 ## Data sources
 
 - **AutoRetainer** (via `AutoRetainerAPI`): characters, retainers, submarines, Gil, Ceruleum, repair kits
-- **AllaganTools**: personal, retainer and Free Company chest inventory. FC chest data is only available after the in-game FC chest UI has been opened, so it can be empty on a given sync.
+- **AllaganTools**: personal, retainer and Free Company chest inventory. FC chest data is only available after the in-game FC chest UI has been opened, so it can be empty on a given sync. When AllaganTools is not running, the stored inventories are kept as they were rather than emptied.
 - **FCTracker**: Free Company housing, founding date and eligibility data (read from its config file)
 
 ## Usage

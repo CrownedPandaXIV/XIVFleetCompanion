@@ -3,6 +3,17 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.1.2 - 2026-10-02
+
+- Inventories are no longer emptied when AllaganTools is not running. Before, a sync while
+  AllaganTools was disabled (for example while it waits for an update after a patch) replaced every
+  character's stored inventory and FC chest with nothing, so the app's Parts, Salvage and Inventory
+  tabs showed empty until it came back. Now the stored contents are kept and the plugin log says
+  that inventories were not updated. The same applies to a single character AllaganTools has no
+  data for yet.
+- Retainer details (name, class, level, gil, venture) come from AutoRetainer and are now written
+  even when AllaganTools is not running. Before, they also stopped updating.
+
 ## 0.1.1 - 2026-09-29
 
 - Much faster cleanup of old snapshot history. The old cleanup query could run for many minutes
