@@ -60,6 +60,44 @@ namespace XIVFleetCompanion
             public long? ReturnTime;
             public long CurrentExp;
             public long NextLevelExp;
+            // Workshop slot, 1-4 (from the position in AutoRetainer's sub list). Null when unknown.
+            public int? Slot;
+        }
+
+        // Which subs to write, and their slots. registered: AutoRetainer's list of the character's subs
+        // (OfflineSubmarineData), in workshop order; withBuild: the names AutoRetainer has build data
+        // for (AdditionalSubmarineData, keyed by name). A sub is written when it is in both; its slot
+        // is its position in the list. Build data under a name that is no longer in the list (a sub
+        // that was renamed) is left out. If the list is empty (not read yet), every sub with build data
+        // is written, with the slot taken from a default name (Submersible-2 -> 2) or left unknown.
+        public static List<(string Name, int? Slot)> PlanSubmarines(IReadOnlyList<string> registered, IEnumerable<string> withBuild)
+        {
+            var built = new HashSet<string>(withBuild, StringComparer.Ordinal);
+            var plan = new List<(string Name, int? Slot)>();
+            if (registered.Count == 0)
+            {
+                foreach (var name in built.OrderBy(n => n, StringComparer.Ordinal))
+                    plan.Add((name, SlotFromDefaultName(name)));
+                return plan;
+            }
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < registered.Count; i++)
+            {
+                var name = registered[i];
+                if (built.Contains(name) && seen.Add(name))
+                    plan.Add((name, i + 1));
+            }
+            return plan;
+        }
+
+        // "Submersible-3" -> 3; any other name -> null.
+        public static int? SlotFromDefaultName(string name)
+        {
+            const string prefix = "Submersible-";
+            return name.StartsWith(prefix, StringComparison.Ordinal)
+                   && int.TryParse(name.AsSpan(prefix.Length), out var n) && n >= 1 && n <= 4
+                ? n
+                : null;
         }
 
         public class RetainerRecord
@@ -172,10 +210,42 @@ namespace XIVFleetCompanion
             await tx.CommitAsync();
         }
 
-        // Replaces one character's stored submarines in one transaction.
+        // Replaces one character's stored submarines in one transaction. When a slot now holds a sub
+        // with a different name and the old name is gone (the sub was renamed), the app's Craft?
+        // setting (sub_craft_toggle, kept per name) moves to the new name. The slot column comes from
+        // sql/006; without it the subs are written as before, without slots.
         public static async Task WriteSubmarinesAsync(NpgsqlConnection conn, ulong cid, IReadOnlyList<SubmarineRecord> subs)
         {
             await using var tx = await conn.BeginTransactionAsync();
+
+            bool hasSlot, hasCraftToggle;
+            await using (var check = new NpgsqlCommand(@"
+                SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_schema = current_schema() AND table_name = 'companion_submarine_snapshot' AND column_name = 'slot'),
+                       to_regclass('sub_craft_toggle') IS NOT NULL", conn, tx))
+            await using (var reader = await check.ExecuteReaderAsync())
+            {
+                await reader.ReadAsync();
+                hasSlot = reader.GetBoolean(0);
+                hasCraftToggle = reader.GetBoolean(1);
+            }
+
+            // The names stored per slot before this write (older rows without a slot: from the default name).
+            var oldNameBySlot = new Dictionary<int, string>();
+            if (hasSlot)
+            {
+                await using var old = new NpgsqlCommand(
+                    "SELECT sub_name, slot FROM companion_submarine_snapshot WHERE cid = @cid", conn, tx);
+                old.Parameters.AddWithValue("cid", (decimal)cid);
+                await using var reader = await old.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var name = reader.GetString(0);
+                    var slot = reader.IsDBNull(1) ? SlotFromDefaultName(name) : reader.GetInt32(1);
+                    if (slot != null) oldNameBySlot[slot.Value] = name;
+                }
+            }
+
             await using (var delete = new NpgsqlCommand("DELETE FROM companion_submarine_snapshot WHERE cid = @cid", conn, tx))
             {
                 delete.Parameters.AddWithValue("cid", (decimal)cid);
@@ -183,7 +253,15 @@ namespace XIVFleetCompanion
             }
             if (subs.Count > 0)
             {
-                const string sql = @"
+                var sql = hasSlot
+                    ? @"
+                    INSERT INTO companion_submarine_snapshot
+                        (cid, sub_name, level, part1, part2, part3, part4, points, return_time, current_exp, next_level_exp, slot, updated_at)
+                    SELECT @cid, n, l, p1, p2, p3, p4, pts, rt, ce, ne, sl, now()
+                    FROM unnest(@name::text[], @level::int[], @p1::int[], @p2::int[], @p3::int[], @p4::int[],
+                                @points::bytea[], @ret::bigint[], @exp::bigint[], @next::bigint[], @slot::int[])
+                         AS t(n, l, p1, p2, p3, p4, pts, rt, ce, ne, sl)"
+                    : @"
                     INSERT INTO companion_submarine_snapshot
                         (cid, sub_name, level, part1, part2, part3, part4, points, return_time, current_exp, next_level_exp, updated_at)
                     SELECT @cid, n, l, p1, p2, p3, p4, pts, rt, ce, ne, now()
@@ -202,7 +280,27 @@ namespace XIVFleetCompanion
                 insert.Parameters.AddWithValue("ret", subs.Select(s => s.ReturnTime).ToArray());
                 insert.Parameters.AddWithValue("exp", subs.Select(s => s.CurrentExp).ToArray());
                 insert.Parameters.AddWithValue("next", subs.Select(s => s.NextLevelExp).ToArray());
+                if (hasSlot)
+                    insert.Parameters.AddWithValue("slot", subs.Select(s => s.Slot).ToArray());
                 await insert.ExecuteNonQueryAsync();
+            }
+
+            if (hasCraftToggle)
+            {
+                var newNames = new HashSet<string>(subs.Select(s => s.SubName), StringComparer.Ordinal);
+                foreach (var sub in subs)
+                {
+                    if (sub.Slot == null || !oldNameBySlot.TryGetValue(sub.Slot.Value, out var oldName)) continue;
+                    if (oldName == sub.SubName || newNames.Contains(oldName)) continue;
+                    await using var move = new NpgsqlCommand(@"
+                        UPDATE sub_craft_toggle SET sub_name = @new, updated_at = now()
+                        WHERE cid = @cid AND sub_name = @old
+                          AND NOT EXISTS (SELECT 1 FROM sub_craft_toggle WHERE cid = @cid AND sub_name = @new)", conn, tx);
+                    move.Parameters.AddWithValue("cid", (decimal)cid);
+                    move.Parameters.AddWithValue("old", oldName);
+                    move.Parameters.AddWithValue("new", sub.SubName);
+                    await move.ExecuteNonQueryAsync();
+                }
             }
             await tx.CommitAsync();
         }
@@ -338,7 +436,7 @@ namespace XIVFleetCompanion
 
         public static string Fingerprint(IEnumerable<SubmarineRecord> subs)
             => Digest(subs.OrderBy(s => s.SubName, StringComparer.Ordinal)
-                .Select(s => $"{s.SubName}|{s.Level}|{s.Part1}|{s.Part2}|{s.Part3}|{s.Part4}|{Convert.ToHexString(s.Points ?? Array.Empty<byte>())}|{s.ReturnTime}|{s.CurrentExp}|{s.NextLevelExp}"));
+                .Select(s => $"{s.SubName}|{s.Level}|{s.Part1}|{s.Part2}|{s.Part3}|{s.Part4}|{Convert.ToHexString(s.Points ?? Array.Empty<byte>())}|{s.ReturnTime}|{s.CurrentExp}|{s.NextLevelExp}|{s.Slot}"));
 
         public static string Fingerprint(IEnumerable<RetainerRecord> retainers)
             => Digest(retainers.OrderBy(r => r.RetainerId)
