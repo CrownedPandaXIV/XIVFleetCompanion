@@ -1,14 +1,25 @@
 using System;
+using System.IO;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.ImGuiFileDialog;
+using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
-using System.Windows.Forms;
 
 namespace XIVFleetCompanion.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
     private readonly Configuration configuration;
+
+    // Dalamud's file picker: drawn inside the game like this window, so the game keeps running while
+    // it is open (the Windows one froze the game until it was closed).
+    private readonly FileDialogManager fileDialog = new();
+
+    // Whether the FCTracker file exists, checked when the path changes and every few seconds after.
+    private string checkedFcTrackerPath = "";
+    private bool fcTrackerFileFound;
+    private DateTime fcTrackerCheckedAt = DateTime.MinValue;
 
     // Postgres credential save form
     private string pgHost = "";
@@ -144,25 +155,55 @@ public class ConfigWindow : Window, IDisposable
         var fcTrackerPath = configuration.FCTrackerConfigPath;
         if (ImGui.InputText("##FCTrackerPath", ref fcTrackerPath, 260))
         {
-            configuration.FCTrackerConfigPath = fcTrackerPath;
-            configuration.Save();
+            SetFcTrackerPath(fcTrackerPath);
         }
 
         ImGui.SameLine();
 
         if (ImGui.Button("Browse..."))
         {
-            using var dialog = new OpenFileDialog
-            {
-                Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
-                Title = "Select FCTrackerConfig.json"
-            };
-
-            if (dialog.ShowDialog() == DialogResult.OK)
-            {
-                configuration.FCTrackerConfigPath = dialog.FileName;
-                configuration.Save();
-            }
+            var startFolder = Path.GetDirectoryName(configuration.FCTrackerConfigPath);
+            if (string.IsNullOrEmpty(startFolder) || !Directory.Exists(startFolder))
+                startFolder = null;
+            fileDialog.OpenFileDialog("Select FCTrackerConfig.json", ".json",
+                (picked, paths) =>
+                {
+                    if (picked && paths.Count > 0)
+                        SetFcTrackerPath(paths[0]);
+                },
+                1, startFolder);
         }
+
+        ImGui.SameLine();
+
+        var defaultPath = Plugin.DefaultFcTrackerConfigPath();
+        using (ImRaii.Disabled(defaultPath == null || defaultPath == configuration.FCTrackerConfigPath))
+        {
+            if (ImGui.Button("Use default") && defaultPath != null)
+                SetFcTrackerPath(defaultPath);
+        }
+        if (defaultPath != null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(defaultPath);
+
+        if (configuration.FCTrackerConfigPath != checkedFcTrackerPath || DateTime.UtcNow - fcTrackerCheckedAt > TimeSpan.FromSeconds(5))
+        {
+            checkedFcTrackerPath = configuration.FCTrackerConfigPath;
+            fcTrackerFileFound = !string.IsNullOrWhiteSpace(checkedFcTrackerPath) && File.Exists(checkedFcTrackerPath);
+            fcTrackerCheckedAt = DateTime.UtcNow;
+        }
+        using (ImRaii.PushColor(ImGuiCol.Text, fcTrackerFileFound ? new Vector4(0.45f, 0.85f, 0.45f, 1f) : new Vector4(0.95f, 0.70f, 0.35f, 1f)))
+        {
+            ImGui.TextWrapped(fcTrackerFileFound
+                ? "Found."
+                : "Not found: Free Company and housing details are not synced until this points at FCTracker's config file.");
+        }
+
+        fileDialog.Draw();
+    }
+
+    private void SetFcTrackerPath(string path)
+    {
+        configuration.FCTrackerConfigPath = path;
+        configuration.Save();
     }
 }
