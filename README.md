@@ -47,6 +47,12 @@ retention/downsampling clean-up that kept it in check is gone too. To remove the
 
 `sql/002` and `sql/003` only apply to databases that still have the old table.
 
+## Submarine slots
+
+From 0.5.0 each stored sub has its workshop slot (1-4), so renaming a sub does not break anything:
+the app finds each slot's sub by slot, and a renamed sub's Craft? setting moves to its new name. Run
+`sql/006_submarine_slot.sql` once to add the column (the plugin writes subs without slots until then).
+
 ## History for charts
 
 The plugin records selected values into a general history table (`companion_metric_history`) so they can be charted over time. A value is
