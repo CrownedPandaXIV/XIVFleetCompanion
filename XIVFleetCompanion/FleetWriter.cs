@@ -231,10 +231,13 @@ namespace XIVFleetCompanion
             await tx.CommitAsync();
         }
 
-        // Inserts or updates every retainer of one character in one statement.
+        // Inserts or updates every retainer of one character, and removes that character's retainers
+        // that are no longer in the list (dismissed), in one transaction. An empty list changes
+        // nothing: it is more likely missing data than a character who dismissed every retainer.
         public static async Task WriteRetainersAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyList<RetainerRecord> retainers)
         {
             if (retainers.Count == 0) return;
+            await using var tx = await conn.BeginTransactionAsync();
             const string sql = @"
                 INSERT INTO companion_retainer_lookup
                     (retainer_id, owner_cid, name, job, gil, has_venture, venture_id, venture_begins_at, venture_ends_at, level, hire_order_index, updated_at)
@@ -254,9 +257,10 @@ namespace XIVFleetCompanion
                     level = EXCLUDED.level,
                     hire_order_index = EXCLUDED.hire_order_index,
                     updated_at = now()";
-            await using var cmd = new NpgsqlCommand(sql, conn);
+            var ids = retainers.Select(r => (decimal)r.RetainerId).ToArray();
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
             cmd.Parameters.AddWithValue("owner", (decimal)ownerCid);
-            cmd.Parameters.AddWithValue("id", retainers.Select(r => (decimal)r.RetainerId).ToArray());
+            cmd.Parameters.AddWithValue("id", ids);
             cmd.Parameters.AddWithValue("name", retainers.Select(r => r.Name).ToArray());
             cmd.Parameters.AddWithValue("job", retainers.Select(r => (int)r.Job).ToArray());
             cmd.Parameters.AddWithValue("gil", retainers.Select(r => (long)r.Gil).ToArray());
@@ -267,6 +271,35 @@ namespace XIVFleetCompanion
             cmd.Parameters.AddWithValue("level", retainers.Select(r => r.Level).ToArray());
             cmd.Parameters.AddWithValue("hire", retainers.Select(r => r.HireOrderIndex).ToArray());
             await cmd.ExecuteNonQueryAsync();
+
+            await using var remove = new NpgsqlCommand(
+                "DELETE FROM companion_retainer_lookup WHERE owner_cid = @owner AND retainer_id <> ALL(@id)", conn, tx);
+            remove.Parameters.AddWithValue("owner", (decimal)ownerCid);
+            remove.Parameters.AddWithValue("id", ids);
+            await remove.ExecuteNonQueryAsync();
+            await tx.CommitAsync();
+        }
+
+        // Removes the Free Company and housing rows of characters that are no longer in any Free
+        // Company. Returns how many were removed.
+        public static async Task<int> RemoveHousingAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids)
+        {
+            if (cids.Count == 0) return 0;
+            await using var cmd = new NpgsqlCommand("DELETE FROM companion_character_housing WHERE cid = ANY(@cids)", conn);
+            cmd.Parameters.AddWithValue("cids", cids.Select(c => (decimal)c).ToArray());
+            return await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Removes the chests of Free Companies that no tracked character belongs to any more (a
+        // character left, or the FC was disbanded), going by companion_character_current, which
+        // holds every account's characters. Returns how many chest slots were removed.
+        public static async Task<int> RemoveOrphanFcChestsAsync(NpgsqlConnection conn)
+        {
+            const string sql = @"
+                DELETE FROM companion_fc_inventory_snapshot f
+                WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = f.fc_id)";
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            return await cmd.ExecuteNonQueryAsync();
         }
 
         // Inserts or updates one character's Free Company and housing details.

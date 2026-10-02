@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.3.1 - 2026-10-02
+
+No database script to run.
+
+- **Dismissed retainers are removed.** When a character's retainers are written, its retainers that are
+  no longer in AutoRetainer's list are deleted, so they drop out of the app's Retainers tab and gil
+  totals. An empty list is ignored (more likely missing data than every retainer dismissed).
+- **Chests of Free Companies you are no longer in are removed.** After each sync, the chest of any Free
+  Company that none of your tracked characters (on any account) belongs to is deleted, so it no longer
+  counts in the fleet inventory and salvage totals.
+- **Old Free Company and house details are removed** from a character that has left its Free Company,
+  once FCTracker and AutoRetainer both say it is in none. A Free Company losing its house was already
+  handled: the house is cleared as soon as FCTracker sees it gone.
+
 ## 0.3.0 - 2026-10-02
 
 Needs `sql/004_character_current.sql` to be run once first (it is safe to run more than once).
