@@ -3,6 +3,18 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.4.1 - 2026-10-02
+
+- **Fixed: Browse... froze the game.** The FCTracker config path's Browse button opened the Windows file
+  picker from inside the game's drawing loop, so the game stopped (no frames, no input, AutoRetainer
+  paused) until it was closed, and in fullscreen the picker could open behind the game. It now uses
+  Dalamud's own file picker, drawn inside the game, which keeps running.
+- **Found / not found** under the path shows whether the file is there (checked when the path changes
+  and every few seconds), so a wrong path is visible without waiting for a sync.
+- **Use default** puts back the standard path (`pluginConfigs\FCTracker\FCTrackerConfig.json`, the one
+  filled in on first load); hover it to see the path.
+- The plugin no longer uses Windows Forms.
+
 ## 0.4.0 - 2026-10-02
 
 Needs `sql/004_character_current.sql` to have been run (from 0.3.0). Characters are saved only in

@@ -53,11 +53,9 @@ public sealed class Plugin : IDalamudPlugin
 
         if (string.IsNullOrWhiteSpace(Configuration.FCTrackerConfigPath))
         {
-            var ownConfigDir = PluginInterface.ConfigDirectory.FullName;
-            var pluginConfigsRoot = Directory.GetParent(ownConfigDir)?.FullName;
-            if (pluginConfigsRoot != null)
+            var guessedPath = DefaultFcTrackerConfigPath();
+            if (guessedPath != null)
             {
-                var guessedPath = Path.Combine(pluginConfigsRoot, "FCTracker", "FCTrackerConfig.json");
                 Configuration.FCTrackerConfigPath = guessedPath;
                 Configuration.Save();
             }
@@ -164,6 +162,14 @@ public sealed class Plugin : IDalamudPlugin
         Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)> metrics,
         string subjectType, ulong subjectId, string metric, decimal value, string? label = null)
         => metrics[(subjectType, subjectId, metric)] = (value, label);
+
+    // Where FCTracker keeps its config in this XIVLauncher install: next to this plugin's own config
+    // folder, under pluginConfigs\FCTracker. Null if that folder cannot be worked out.
+    internal static string? DefaultFcTrackerConfigPath()
+    {
+        var pluginConfigsRoot = Directory.GetParent(PluginInterface.ConfigDirectory.FullName)?.FullName;
+        return pluginConfigsRoot == null ? null : Path.Combine(pluginConfigsRoot, "FCTracker", "FCTrackerConfig.json");
+    }
 
     private async Task RunSyncAsync()
     {
