@@ -3,6 +3,21 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.5.1 - 2026-10-02
+
+No database changes.
+
+- **The settings form no longer wipes a saved connection.** It now opens filled in with the saved host,
+  port, database and username; leaving the password box empty keeps the saved password. Saving with an
+  empty host, database or username is refused. "Clear Saved Credentials" needs a second click.
+- The main window checks Postgres, AutoRetainer and AllaganTools every few seconds instead of on every
+  frame, so an unreadable saved credential no longer writes a warning to the log many times a second.
+- AutoRetainer's data is copied on the game's thread at the start of each sync, so a sync no longer
+  reads it while AutoRetainer is changing it (which could fail that sync).
+- Tidy-ups: the main window no longer shows "Enabled" and "Last sync" twice; the unused "Movable Config
+  Window" option and leftover template comments are gone. The windows have new internal IDs, so they
+  open once at their default position and size.
+
 ## 0.5.0 - 2026-10-02
 
 Run `sql/006_submarine_slot.sql` once (before or after updating; instant, safe to run again). Without
