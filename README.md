@@ -25,6 +25,15 @@ housing eligibility display, etc.) is left to the app.
   large table, run `sql/003_snapshot_timestamp_index.sql` once. Long-term history for charts lives
   in the metric history table (see below), so a short retention window is fine.
 
+## Current state per character
+
+From 0.3.0 the plugin also keeps `companion_character_current`: one row per character with what the
+app shows (name, world, account, gil, ceruleum, repair kits, retainers, submarines, sub slots, Free
+Company), when it was first seen and when it last synced. Name, world, account label and Free Company
+changes are logged in `companion_character_changes` automatically. **Run `sql/004_character_current.sql`
+once before updating the plugin to 0.3.0**; it creates both tables and fills them from the existing
+snapshot history (a minute or two on a few million rows). The snapshot table is still written for now.
+
 ## History for charts
 
 Besides the per-sync snapshot table, the plugin records selected values into a general
@@ -35,6 +44,7 @@ stay small. Currently recorded:
 | Metric | Belongs to | Notes |
 | --- | --- | --- |
 | `gil`, `ceruleum`, `repair_kits` | character | |
+| `retainer_count`, `submarine_count`, `num_sub_slots` | character | from 0.3.0; `sql/004` copies the earlier changes from the snapshot history |
 | `fc_points` | Free Company, and the FC leader's character when it is one of yours | from FCTracker; labelled with the leader's name (on the FC) or the FC's name (on the leader). A leader change is recorded even if the points are unchanged |
 | `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers; FC = chest, only when AllaganTools has chest data |
 

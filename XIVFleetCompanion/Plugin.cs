@@ -43,6 +43,7 @@ public sealed class Plugin : IDalamudPlugin
     // What was last written per character / FC, so unchanged data is not written again every
     // sync. Forgotten once an hour, so everything is rewritten at least hourly.
     private readonly ChangeTracker changes = new(TimeSpan.FromHours(1), DateTime.UtcNow);
+    private bool warnedNoCurrentTable = false;
 
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
     private ConfigWindow ConfigWindow { get; init; }
@@ -275,6 +276,9 @@ public sealed class Plugin : IDalamudPlugin
             AddMetric(metrics, "character", data.CID, "gil", data.Gil);
             AddMetric(metrics, "character", data.CID, "ceruleum", data.Ceruleum);
             AddMetric(metrics, "character", data.CID, "repair_kits", data.RepairKits);
+            AddMetric(metrics, "character", data.CID, "retainer_count", data.RetainerData.Count);
+            AddMetric(metrics, "character", data.CID, "submarine_count", data.OfflineSubmarineData.Count);
+            AddMetric(metrics, "character", data.CID, "num_sub_slots", data.NumSubSlots);
 
             // Retainer details come from AutoRetainer, so they are written whether or not
             // AllaganTools is available.
@@ -433,6 +437,23 @@ public sealed class Plugin : IDalamudPlugin
         catch (PostgresException ex)
         {
             Log.Warning($"Fleet Companion: failed to write character snapshots — {ex.Message}");
+        }
+
+        // Every character's current row. The table comes from sql/004_character_current.sql; until
+        // that has been run, this is skipped with one warning per plugin session.
+        try
+        {
+            synced = Math.Max(synced, await FleetWriter.WriteCurrentCharactersAsync(conn, snapshots));
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            if (!warnedNoCurrentTable)
+                Log.Warning("Fleet Companion: companion_character_current does not exist yet; run sql/004_character_current.sql once. Skipping it until then.");
+            warnedNoCurrentTable = true;
+        }
+        catch (PostgresException ex)
+        {
+            Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
 
         var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint

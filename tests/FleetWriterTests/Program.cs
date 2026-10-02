@@ -47,6 +47,29 @@ internal static class Program
             house_plot int, house_last_visited timestamptz, updated_at timestamptz NOT NULL DEFAULT now(),
             fc_master text, fc_home_world_id int, fc_founding_date timestamptz, fc_eligibility_override timestamptz);";
 
+    // A file in the repository (the sql/ scripts), found by walking up from the test program.
+    private static string RepoFile(string relative)
+    {
+        for (var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            var path = System.IO.Path.Combine(dir.FullName, relative);
+            if (System.IO.File.Exists(path)) return path;
+        }
+        throw new InvalidOperationException($"Could not find {relative} above {AppContext.BaseDirectory}");
+    }
+
+    private static async Task RunScript(NpgsqlConnection conn, string relative)
+    {
+        await using var cmd = new NpgsqlCommand(await System.IO.File.ReadAllTextAsync(RepoFile(relative)), conn);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task Exec(NpgsqlConnection conn, string sql)
+    {
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     private static async Task<List<object?[]>> Rows(NpgsqlConnection conn, string sql)
     {
         var list = new List<object?[]>();
@@ -105,6 +128,43 @@ internal static class Program
         var snaps = await Rows(conn, "SELECT cid, name, world, retainer_count, submarine_count, gil, ceruleum, repair_kits, account_label, fc_id, num_sub_slots FROM companion_character_snapshot ORDER BY cid");
         Check(written == 2 && Show(snaps) == "18014498578000001,Aki,Maduin,10,4,4000000000,5000,300,Main,9000001,4 / 18014498578000002,Bex,Behemoth,0,0,0,0,0,null,null,0",
             "character snapshots are written in one statement; gil above 2 billion fits; an empty account label and FC 0 are stored as empty (null): " + Show(snaps));
+
+        // sql/004: current rows and the history worth keeping, copied from the snapshot history.
+        await Exec(conn, @"
+            INSERT INTO companion_character_snapshot (cid, name, world, account_label, retainer_count, submarine_count, gil, ceruleum, repair_kits, fc_id, num_sub_slots, snapshot_at) VALUES
+              (18014498578000001, 'Old Aki', 'Maduin', 'Main', 8, 4, 1, 1, 1, NULL,    3, now() - interval '30 days'),
+              (18014498578000001, 'Old Aki', 'Maduin', 'Main', 8, 4, 2, 2, 2, NULL,    3, now() - interval '29 days'),
+              (18014498578000001, 'Aki',     'Maduin', 'Main', 10, 4, 3, 3, 3, 9000001, 4, now() - interval '10 days')");
+        await RunScript(conn, "sql/001_metric_history.sql");
+        await RunScript(conn, "sql/004_character_current.sql");
+        var current = await Rows(conn, "SELECT cid, name, retainer_count, num_sub_slots, fc_id, first_seen_at < now() - interval '29 days', last_synced_at > now() - interval '1 hour' FROM companion_character_current ORDER BY cid");
+        Check(Show(current) == "18014498578000001,Aki,10,4,9000001,True,True / 18014498578000002,Bex,0,0,null,False,True",
+            "004 fills the current table from each character's newest snapshot, first seen from the oldest: " + Show(current));
+        var changeLog = await Rows(conn, "SELECT field, old_value, new_value FROM companion_character_changes ORDER BY field");
+        Check(Show(changeLog) == "fc_id,null,9000001 / name,Old Aki,Aki", "004 copies past name and Free Company changes into the change log: " + Show(changeLog));
+        var counts004 = await Rows(conn, "SELECT metric, string_agg(value::text, '>' ORDER BY recorded_at) FROM companion_metric_history WHERE subject_id = 18014498578000001 GROUP BY metric ORDER BY metric");
+        Check(Show(counts004) == "num_sub_slots,3>4 / retainer_count,8>10 / submarine_count,4",
+            "004 copies retainer, submarine and sub slot changes into the chart history: " + Show(counts004));
+        const string countsSql = "SELECT (SELECT count(*) FROM companion_character_current), (SELECT count(*) FROM companion_character_changes), (SELECT count(*) FROM companion_metric_history), (SELECT count(*) FROM companion_metric_latest)";
+        var firstRun = Show(await Rows(conn, countsSql));
+        await RunScript(conn, "sql/004_character_current.sql");
+        var secondRun = Show(await Rows(conn, countsSql));
+        Check(firstRun == secondRun && firstRun == "2,2,8,6", $"running 004 again adds nothing (current, changes, history, latest): {firstRun} then {secondRun}");
+
+        // Current rows from the plugin: inserted or updated in one statement; identity changes are logged.
+        await FleetWriter.WriteCurrentCharactersAsync(conn, new[]
+        {
+            new FleetWriter.CharacterSnapshot { Cid = 18014498578000001, Name = "Aki", World = "Maduin", RetainerCount = 10, SubmarineCount = 4,
+                Gil = 5_000_000_000, Ceruleum = 4000, RepairKits = 250, AccountLabel = "Main", FcId = 9000001, NumSubSlots = 4 },
+            new FleetWriter.CharacterSnapshot { Cid = 18014498578000002, Name = "Bex Renamed", World = "Behemoth", AccountLabel = "", FcId = 9000002 },
+            new FleetWriter.CharacterSnapshot { Cid = 18014498578000003, Name = "Cal", World = "Cuchulainn", AccountLabel = "Alt" },
+        });
+        current = await Rows(conn, "SELECT cid, name, gil, ceruleum, account_label, fc_id FROM companion_character_current ORDER BY cid");
+        Check(Show(current) == "18014498578000001,Aki,5000000000,4000,Main,9000001 / 18014498578000002,Bex Renamed,0,0,null,9000002 / 18014498578000003,Cal,0,0,Alt,null",
+            "current rows are updated and a new character is added: " + Show(current));
+        changeLog = await Rows(conn, "SELECT cid, field, old_value, new_value FROM companion_character_changes WHERE changed_at > now() - interval '1 minute' ORDER BY cid, field");
+        Check(Show(changeLog) == "18014498578000002,fc_id,null,9000002 / 18014498578000002,name,Bex,Bex Renamed",
+            "a rename and a new Free Company are logged; gil changes and new characters are not: " + Show(changeLog));
 
         // Inventory: replaced as a whole, gear sets kept as int arrays.
         const ulong owner = 18014498578000001;

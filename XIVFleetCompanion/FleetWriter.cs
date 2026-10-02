@@ -100,6 +100,44 @@ namespace XIVFleetCompanion
             return await cmd.ExecuteNonQueryAsync();
         }
 
+        // Every character's current row (sql/004_character_current.sql), in one statement. Changes of
+        // name, world, account label or Free Company are logged by a trigger on that table.
+        public static async Task<int> WriteCurrentCharactersAsync(NpgsqlConnection conn, IReadOnlyList<CharacterSnapshot> rows)
+        {
+            if (rows.Count == 0) return 0;
+            const string sql = @"
+                INSERT INTO companion_character_current
+                    (cid, name, world, account_label, gil, ceruleum, repair_kits, retainer_count, submarine_count, num_sub_slots, fc_id, last_synced_at)
+                SELECT t.*, now()
+                FROM unnest(@cid::numeric[], @name::text[], @world::text[], @account::text[], @gil::bigint[], @ceruleum::int[],
+                            @kits::int[], @retainers::int[], @subs::int[], @slots::int[], @fc::numeric[]) AS t
+                ON CONFLICT (cid) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    world = EXCLUDED.world,
+                    account_label = EXCLUDED.account_label,
+                    gil = EXCLUDED.gil,
+                    ceruleum = EXCLUDED.ceruleum,
+                    repair_kits = EXCLUDED.repair_kits,
+                    retainer_count = EXCLUDED.retainer_count,
+                    submarine_count = EXCLUDED.submarine_count,
+                    num_sub_slots = EXCLUDED.num_sub_slots,
+                    fc_id = EXCLUDED.fc_id,
+                    last_synced_at = now()";
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("cid", rows.Select(r => (decimal)r.Cid).ToArray());
+            cmd.Parameters.AddWithValue("name", rows.Select(r => r.Name).ToArray());
+            cmd.Parameters.AddWithValue("world", rows.Select(r => r.World).ToArray());
+            cmd.Parameters.AddWithValue("account", rows.Select(r => string.IsNullOrEmpty(r.AccountLabel) ? null : r.AccountLabel).ToArray());
+            cmd.Parameters.AddWithValue("gil", rows.Select(r => r.Gil).ToArray());
+            cmd.Parameters.AddWithValue("ceruleum", rows.Select(r => r.Ceruleum).ToArray());
+            cmd.Parameters.AddWithValue("kits", rows.Select(r => r.RepairKits).ToArray());
+            cmd.Parameters.AddWithValue("retainers", rows.Select(r => r.RetainerCount).ToArray());
+            cmd.Parameters.AddWithValue("subs", rows.Select(r => r.SubmarineCount).ToArray());
+            cmd.Parameters.AddWithValue("slots", rows.Select(r => r.NumSubSlots).ToArray());
+            cmd.Parameters.AddWithValue("fc", rows.Select(r => r.FcId == 0 ? (decimal?)null : r.FcId).ToArray());
+            return await cmd.ExecuteNonQueryAsync();
+        }
+
         // Replaces one character's stored inventory (bags and retainers) in one transaction.
         public static async Task WriteInventoryAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyList<InventoryItem> items)
         {
