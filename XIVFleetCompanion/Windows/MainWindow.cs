@@ -23,11 +23,19 @@ public class MainWindow : Window, IDisposable
     private string autoRetainerTestResult = "";
     private string allaganToolsTestResult = "";
 
-    // We give this window a hidden ID using ##.
-    // The user will see "My Amazing Window" as window title,
-    // but for ImGui the ID is "My Amazing Window##With a hidden ID"
+    // Whether Postgres is configured and AutoRetainer / AllaganTools answer. Checked every few
+    // seconds while the window is open, not on every frame (each check reads Windows Credential
+    // Manager or calls another plugin).
+    private static readonly TimeSpan StatusRefresh = TimeSpan.FromSeconds(3);
+    private DateTime statusCheckedAt = DateTime.MinValue;
+    private bool statusRemote;
+    private bool postgresConfigured;
+    private bool autoRetainerReady;
+    private bool allaganToolsReady;
+
+    // "###" keeps the window's ImGui ID fixed while the title shows the version.
     public MainWindow(Plugin plugin, string submarineImagePath)
-        : base($"XIV Fleet Companion v{Plugin.VersionText}###With a hidden ID", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+        : base($"XIV Fleet Companion v{Plugin.VersionText}###XIVFleetCompanionMain", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -41,13 +49,31 @@ public class MainWindow : Window, IDisposable
 
     public void Dispose() { }
 
+    private void RefreshStatus()
+    {
+        var remote = plugin.Configuration.UseRemoteConnection;
+        if (remote == statusRemote && DateTime.UtcNow - statusCheckedAt < StatusRefresh)
+            return;
+        statusRemote = remote;
+        statusCheckedAt = DateTime.UtcNow;
+
+        postgresConfigured = PostgresCredentialStore.Load(remote) != null;
+        try
+        {
+            autoRetainerReady = plugin.AutoRetainer != null && plugin.AutoRetainer.Ready;
+        }
+        catch
+        {
+            autoRetainerReady = false;
+        }
+        allaganToolsReady = plugin.AllaganTools?.IsReady() ?? false;
+    }
+
     public override void Draw()
     {
-        ImGui.Text($"Fleet sync is currently {(plugin.Configuration.Enabled ? "Enabled" : "Disabled")}.");
+        RefreshStatus();
+
         ImGui.Text($"Sync interval: {plugin.Configuration.SyncIntervalMinutes} minute(s).");
-        ImGui.Text(plugin.Configuration.LastSyncTimestamp.HasValue
-            ? $"Last sync: {plugin.Configuration.LastSyncTimestamp.Value:g}"
-            : "Last sync: never");
 
         if (ImGui.Button("Show Settings"))
         {
@@ -77,22 +103,9 @@ public class MainWindow : Window, IDisposable
             ImGui.Spacing();
             ImGui.Text("Source connectivity:");
 
-            var cred = PostgresCredentialStore.Load(plugin.Configuration.UseRemoteConnection);
-            ImGui.BulletText(cred != null
-                ? $"Postgres ({(plugin.Configuration.UseRemoteConnection ? "Remote" : "Local")}): Configured"
-                : $"Postgres ({(plugin.Configuration.UseRemoteConnection ? "Remote" : "Local")}): Not configured");
-            bool autoRetainerReady = false;
-            try
-            {
-                autoRetainerReady = plugin.AutoRetainer != null && plugin.AutoRetainer.Ready;
-            }
-            catch
-            {
-                autoRetainerReady = false;
-            }
-
+            var mode = statusRemote ? "Remote" : "Local";
+            ImGui.BulletText(postgresConfigured ? $"Postgres ({mode}): Configured" : $"Postgres ({mode}): Not configured");
             ImGui.BulletText(autoRetainerReady ? "AutoRetainer: OK" : "AutoRetainer: Not found / not running");
-            bool allaganToolsReady = plugin.AllaganTools?.IsReady() ?? false;
             ImGui.BulletText(allaganToolsReady ? "AllaganTools: OK" : "AllaganTools: Not found / not running");
 
             if (ImGui.Button("Read My Character Data"))
@@ -182,12 +195,8 @@ public class MainWindow : Window, IDisposable
             ImGui.TextWrapped(connectionTestResult);
         }
 
-        // Normally a BeginChild() would have to be followed by an unconditional EndChild(),
-        // ImRaii takes care of this after the scope ends.
-        // This works for all ImGui functions that require specific handling, examples are BeginTable() or Indent().
-        using (var child = ImRaii.Child("SomeChildWithAScrollbar", Vector2.Zero, true))
+        using (var child = ImRaii.Child("Banner", Vector2.Zero, true))
         {
-            // Check if this child is drawing
             if (child.Success)
             {
                 ImGui.Text("XIV Fleet Companion");

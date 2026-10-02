@@ -16,7 +16,7 @@ housing eligibility display, etc.) is left to the app.
 ## Usage
 
 - `/xivfleet` opens the main window; the plugin installer's config button opens settings.
-- Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection.
+- Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection. The form shows the saved details (never the password); leave the password box empty to keep the saved one. "Clear Saved Credentials" asks for a second click.
 - The plugin syncs on the interval set in settings. Inventories, FC chests, submarines, retainers and
   housing are written only when they changed (and in full once an hour); each character's current
   row and the chart history every sync (the chart history stores only values that changed).
