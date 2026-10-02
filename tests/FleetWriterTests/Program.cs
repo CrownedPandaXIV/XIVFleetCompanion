@@ -118,16 +118,12 @@ internal static class Program
 
     private static async Task RunChecks(NpgsqlConnection conn)
     {
-        // Character snapshots: one statement for every character.
-        var written = await FleetWriter.WriteCharacterSnapshotsAsync(conn, new[]
-        {
-            new FleetWriter.CharacterSnapshot { Cid = 18014498578000001, Name = "Aki", World = "Maduin", RetainerCount = 10, SubmarineCount = 4,
-                Gil = 4_000_000_000, Ceruleum = 5000, RepairKits = 300, AccountLabel = "Main", FcId = 9000001, NumSubSlots = 4 },
-            new FleetWriter.CharacterSnapshot { Cid = 18014498578000002, Name = "Bex", World = "Behemoth", AccountLabel = "", FcId = 0 },
-        });
-        var snaps = await Rows(conn, "SELECT cid, name, world, retainer_count, submarine_count, gil, ceruleum, repair_kits, account_label, fc_id, num_sub_slots FROM companion_character_snapshot ORDER BY cid");
-        Check(written == 2 && Show(snaps) == "18014498578000001,Aki,Maduin,10,4,4000000000,5000,300,Main,9000001,4 / 18014498578000002,Bex,Behemoth,0,0,0,0,0,null,null,0",
-            "character snapshots are written in one statement; gil above 2 billion fits; an empty account label and FC 0 are stored as empty (null): " + Show(snaps));
+        // The old per-sync history, as an older plugin wrote it (plugin 0.4.0 no longer does), for
+        // the sql/004 and sql/005 checks.
+        await Exec(conn, @"
+            INSERT INTO companion_character_snapshot (cid, name, world, retainer_count, submarine_count, gil, ceruleum, repair_kits, account_label, fc_id, num_sub_slots) VALUES
+                (18014498578000001, 'Aki', 'Maduin', 10, 4, 4000000000, 5000, 300, 'Main', 9000001, 4),
+                (18014498578000002, 'Bex', 'Behemoth', 0, 0, 0, 0, 0, NULL, NULL, 0)");
 
         // sql/004: current rows and the history worth keeping, copied from the snapshot history.
         await Exec(conn, @"
@@ -334,5 +330,18 @@ internal static class Program
         tracker.Remember("inv:1", "A");
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
+
+        // sql/005 removes the old history table, but only once nothing has written it for 10 minutes.
+        string? refused = null;
+        try { await RunScript(conn, "sql/005_remove_character_snapshot.sql"); }
+        catch (PostgresException ex) { refused = ex.MessageText; }
+        var stillThere = Show(await Rows(conn, "SELECT to_regclass('companion_character_snapshot') IS NOT NULL"));
+        Check(refused != null && refused.Contains("older than 0.4.0") && stillThere == "True",
+            "005 refuses while the old table was written in the last 10 minutes, and changes nothing: " + refused);
+        await Exec(conn, "UPDATE companion_character_snapshot SET snapshot_at = now() - interval '1 hour'");
+        await RunScript(conn, "sql/005_remove_character_snapshot.sql");
+        await RunScript(conn, "sql/005_remove_character_snapshot.sql");
+        var gone = Show(await Rows(conn, "SELECT to_regclass('companion_character_snapshot') IS NULL, (SELECT count(*) FROM companion_character_current)"));
+        Check(gone == "True,3", "005 removes the old table (running it again is harmless); the current rows stay: " + gone);
     }
 }

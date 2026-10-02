@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.4.0 - 2026-10-02
+
+Needs `sql/004_character_current.sql` to have been run (from 0.3.0). Characters are saved only in
+`companion_character_current` from now on.
+
+- **The old snapshot history is no longer written.** `companion_character_snapshot` got a full row per
+  character on every sync; the current values, the chart history and the change log now hold
+  everything it was used for. Saving the old table to a file and removing it is up to you (see the
+  README: the app's `backup\save-character-snapshot.ps1`, then `sql/005_remove_character_snapshot.sql`).
+- **Retention & Downsampling is gone** from the settings, with its daily clean-up: it only ever
+  thinned out that table.
+- New `sql/005_remove_character_snapshot.sql`: removes the old table, and refuses (changing nothing)
+  while a plugin older than 0.4.0 still writes it or a character has no current row.
+
 ## 0.3.1 - 2026-10-02
 
 No database script to run.
