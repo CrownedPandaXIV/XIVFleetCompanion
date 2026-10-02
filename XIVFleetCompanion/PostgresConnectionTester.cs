@@ -13,12 +13,9 @@ namespace XIVFleetCompanion
         public static async Task<string> TestConnectionAsync(bool useRemote)
         {
             var cred = PostgresCredentialStore.Load(useRemote);
-            if (cred == null)
-                return "Not configured — no saved credential found.";
-
-            var connectionString =
-                $"Host={cred.Host};Port={cred.Port};Database={cred.Database};" +
-                $"Username={cred.Username};Password={cred.Password};Timeout=5";
+            var (connectionString, error) = PostgresWriter.BuildConnectionString(useRemote);
+            if (cred == null || connectionString == null)
+                return error ?? "Not configured — no saved credential found.";
 
             try
             {
