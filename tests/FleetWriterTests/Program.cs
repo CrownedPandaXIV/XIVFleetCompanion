@@ -214,6 +214,18 @@ internal static class Program
         var chest = await Rows(conn, "SELECT fc_id, sorted_container, sorted_slot_index, item_id, quantity FROM companion_fc_inventory_snapshot");
         Check(Show(chest) == "9000001,20000,0,10155,950", "the FC chest is replaced as a whole: " + Show(chest));
 
+        // A chest of an FC that no tracked character is in any more is removed; the others stay.
+        await FleetWriter.WriteFcInventoryAsync(conn, 9999999, new List<FleetWriter.InventoryItem>
+        {
+            new() { SortedContainer = 20000, SortedSlotIndex = 0, ItemId = 22500, Quantity = 1 },
+            new() { SortedContainer = 20001, SortedSlotIndex = 3, ItemId = 22501, Quantity = 2 },
+        });
+        var removedSlots = await FleetWriter.RemoveOrphanFcChestsAsync(conn);
+        chest = await Rows(conn, "SELECT fc_id, count(*) FROM companion_fc_inventory_snapshot GROUP BY fc_id ORDER BY fc_id");
+        Check(removedSlots == 2 && Show(chest) == "9000001,1",
+            $"the chest of an FC no character is in is removed ({removedSlots} slots), the chest of a current FC stays: " + Show(chest));
+        Check(await FleetWriter.RemoveOrphanFcChestsAsync(conn) == 0, "running the chest clean-up again removes nothing");
+
         // Submarines, including the route bytes and a sub with no voyage.
         var subs = new List<FleetWriter.SubmarineRecord>
         {
@@ -244,6 +256,20 @@ internal static class Program
         Check(Show(ret) == $"33777097243660301,{owner},Ret A2,16,2500,True,395,1790000000,100,0 / 33777097243660302,{owner},Ret B,17,0,False,0,0,90,null",
             "retainers are written in one statement and updated in place; no hire order is stored as empty: " + Show(ret));
 
+        // A dismissed retainer is removed; another character's retainers are not touched; an empty
+        // list (missing data) removes nothing.
+        await FleetWriter.WriteRetainersAsync(conn, 18014498578000002, new List<FleetWriter.RetainerRecord>
+        {
+            new() { RetainerId = 33777097243660399, Name = "Other Owner's", Job = 18, Level = 50 },
+        });
+        await FleetWriter.WriteRetainersAsync(conn, owner, retainers.Skip(1).ToList());
+        ret = await Rows(conn, "SELECT retainer_id, owner_cid FROM companion_retainer_lookup ORDER BY retainer_id");
+        Check(Show(ret) == $"33777097243660302,{owner} / 33777097243660399,18014498578000002",
+            "a retainer no longer in the list is removed, another character's retainer stays: " + Show(ret));
+        await FleetWriter.WriteRetainersAsync(conn, owner, new List<FleetWriter.RetainerRecord>());
+        ret = await Rows(conn, "SELECT count(*) FROM companion_retainer_lookup WHERE owner_cid = " + owner);
+        Check(Show(ret) == "1", "an empty retainer list removes nothing: " + Show(ret));
+
         // Housing upsert; the FC rank column is text in the real database.
         var housing = new FCTrackerConnector.HousingInfo
         {
@@ -257,6 +283,28 @@ internal static class Program
         await FleetWriter.WriteHousingAsync(conn, owner, housing);
         var house = await Rows(conn, "SELECT fc_id, fc_name, fc_points, fc_rank, has_house, house_ward, fc_master, fc_home_world_id FROM companion_character_housing");
         Check(Show(house) == "9000001,Panda Co,130000,8,False,null,Aki,54", "housing is inserted then updated, rank stored as text: " + Show(house));
+
+        // A character that left its Free Company loses its row; another character's row stays.
+        await FleetWriter.WriteHousingAsync(conn, 18014498578000002, housing);
+        var removedHousing = await FleetWriter.RemoveHousingAsync(conn, new[] { owner });
+        house = await Rows(conn, "SELECT cid FROM companion_character_housing");
+        Check(removedHousing == 1 && Show(house) == "18014498578000002", "removing a character's FC details leaves the others: " + Show(house));
+
+        // FCTracker's file: characters it knows to be in no FC are reported; unknown ones are not.
+        var fcTrackerFile = System.IO.Path.GetTempFileName();
+        System.IO.File.WriteAllText(fcTrackerFile, @"{""GatheredData"": {
+            ""CharByCID"": {
+                ""1"": {""CID"": 1, ""FC"": 9000001},
+                ""2"": {""CID"": 2, ""FC"": null},
+                ""3"": {""CID"": 3, ""FC"": 0},
+                ""4"": {""CID"": 4, ""FC"": 9000077}},
+            ""FCData"": {""9000001"": {""FCName"": ""Panda Co"", ""FCPoints"": 5, ""House"": null}}}}");
+        var withoutFc = new HashSet<ulong>();
+        var parsed = FCTrackerConnector.ReadHousingData(fcTrackerFile, withoutFc);
+        System.IO.File.Delete(fcTrackerFile);
+        Check(string.Join(",", parsed.Keys.OrderBy(k => k)) == "1" && !parsed[1].HasHouse
+              && string.Join(",", withoutFc.OrderBy(k => k)) == "2,3",
+            $"FCTracker: in an FC {string.Join(",", parsed.Keys)}, in none {string.Join(",", withoutFc.OrderBy(k => k))} (an FC it has no details for is neither)");
 
         // Fingerprints: same data in another order is the same; any change is different.
         var shuffled = items.AsEnumerable().Reverse().ToList();
