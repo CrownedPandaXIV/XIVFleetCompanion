@@ -49,13 +49,20 @@ namespace XIVFleetCompanion
             public uint[] GearSetIds = Array.Empty<uint>();
         }
 
-        public List<ParsedItem> GetCharacterItems(ulong characterId)
+        /// <summary>
+        /// Every inventory slot AllaganTools has for a character, retainer or Free Company id.
+        /// Returns null (never throws) when AllaganTools could not be asked, so a caller can tell
+        /// "no answer" from an answer with no items.
+        /// </summary>
+        public List<ParsedItem>? GetCharacterItems(ulong characterId)
         {
             var result = new List<ParsedItem>();
 
             try
             {
                 var raw = getCharacterItems.InvokeFunc(characterId);
+                if (raw == null)
+                    return null;
                 foreach (var item in raw)
                 {
                     if (item.Length < 24) continue;
@@ -87,7 +94,8 @@ namespace XIVFleetCompanion
             }
             catch
             {
-                // AllaganTools not available or call failed — return empty list.
+                // AllaganTools not available or call failed.
+                return null;
             }
 
             return result;

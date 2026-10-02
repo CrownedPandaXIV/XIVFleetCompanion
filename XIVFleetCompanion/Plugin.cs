@@ -198,6 +198,13 @@ public sealed class Plugin : IDalamudPlugin
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
         Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
         int successCount = 0;
+
+        // Asked once per sync. When AllaganTools is not running, inventories and FC chests
+        // keep their last stored contents (see below).
+        var allaganToolsReady = AllaganTools != null && AllaganTools.IsReady();
+        if (!allaganToolsReady)
+            Log.Warning("Fleet Companion: AllaganTools is not available; inventories and FC chests were not updated this sync.");
+
         var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
 
         foreach (var cid in cids)
@@ -219,34 +226,52 @@ public sealed class Plugin : IDalamudPlugin
             AddMetric(metrics, "character", data.CID, "ceruleum", data.Ceruleum);
             AddMetric(metrics, "character", data.CID, "repair_kits", data.RepairKits);
 
-            if (AllaganTools != null)
+            // Retainer details come from AutoRetainer, so they are written whether or not
+            // AllaganTools is available.
+            for (int retainerIndex = 0; retainerIndex < data.RetainerData.Count; retainerIndex++)
             {
-                var personalItems = AllaganTools.GetCharacterItems(data.CID);
-                var nonEmpty = personalItems.Where(i => i.Quantity > 0).ToList();
+                var retainer = data.RetainerData[retainerIndex];
+                var retainerLookupResult = await PostgresWriter.WriteRetainerLookupAsync(
+                    retainer.RetainerID, data.CID, retainer.Name,
+                    retainer.Job, retainer.Gil, retainer.HasVenture, retainer.VentureID,
+                    retainer.VentureBeginsAt, retainer.VentureEndsAt, retainer.Level, retainerIndex, Configuration.UseRemoteConnection);
 
-                for (int retainerIndex = 0; retainerIndex < data.RetainerData.Count; retainerIndex++)
+                if (!retainerLookupResult.StartsWith("Success"))
+                    Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
+            }
+
+            // Inventories are replaced on every sync, so they are only written when
+            // AllaganTools actually answered. Otherwise (AllaganTools disabled, updating
+            // after a patch, or with nothing cached for this character yet) the stored
+            // inventory is left as it was instead of being emptied.
+            if (allaganToolsReady)
+            {
+                var personalItems = AllaganTools!.GetCharacterItems(data.CID);
+                var personalAndRetainerItems = personalItems?.Where(i => i.Quantity > 0).ToList();
+
+                // A character always carries something (at least the gear they wear), so
+                // an empty answer means AllaganTools has no data for them, not an empty bag.
+                var inventoryComplete = personalAndRetainerItems != null && personalAndRetainerItems.Count > 0;
+                if (inventoryComplete)
                 {
-                    var retainer = data.RetainerData[retainerIndex];
-                    var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerID);
-                    nonEmpty.AddRange(retainerItems.Where(i => i.Quantity > 0));
-
-                    var retainerLookupResult = await PostgresWriter.WriteRetainerLookupAsync(
-                        retainer.RetainerID, data.CID, retainer.Name,
-                        retainer.Job, retainer.Gil, retainer.HasVenture, retainer.VentureID,
-                        retainer.VentureBeginsAt, retainer.VentureEndsAt, retainer.Level, retainerIndex, Configuration.UseRemoteConnection);
-
-                    if (!retainerLookupResult.StartsWith("Success"))
-                        Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
+                    foreach (var retainer in data.RetainerData)
+                    {
+                        var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerID);
+                        if (retainerItems == null)
+                        {
+                            inventoryComplete = false;
+                            break;
+                        }
+                        personalAndRetainerItems!.AddRange(retainerItems.Where(i => i.Quantity > 0));
+                    }
                 }
 
                 // FC chest data comes from the FC's own ID, not from a
-                // character's personal items.
-                var personalAndRetainerItems = nonEmpty;
-                List<AllaganToolsConnector.ParsedItem> fcChestItems = new();
+                // character's personal items. Null when it could not be read.
+                List<AllaganToolsConnector.ParsedItem>? fcChestItems = null;
                 if (data.FCID != 0)
                 {
-                    var fcItems = AllaganTools.GetCharacterItems(data.FCID);
-                    fcChestItems = fcItems
+                    fcChestItems = AllaganTools.GetCharacterItems(data.FCID)?
                         .Where(i => i.Quantity > 0 && i.SortedContainer >= 20000 && i.SortedContainer <= 20004)
                         .ToList();
                 }
@@ -254,29 +279,36 @@ public sealed class Plugin : IDalamudPlugin
                 // Salvage item quantities (bags + retainers for the character, chest for
                 // the FC). Only recorded when AllaganTools actually returned items, so a
                 // missing cache is never stored as a real drop to zero.
-                if (nonEmpty.Count > 0)
+                if (inventoryComplete)
                 {
                     foreach (var salvageId in SalvageItemIds)
                         AddMetric(metrics, "character", data.CID, $"item_qty:{salvageId}",
-                            nonEmpty.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
+                            personalAndRetainerItems!.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
                 }
 
-                if (data.FCID != 0 && fcChestItems.Count > 0)
+                if (data.FCID != 0 && fcChestItems != null && fcChestItems.Count > 0)
                 {
                     foreach (var salvageId in SalvageItemIds)
                         AddMetric(metrics, "fc", data.FCID, $"item_qty:{salvageId}",
                             fcChestItems.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
                 }
 
-                var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems, Configuration.UseRemoteConnection);
+                if (inventoryComplete)
+                {
+                    var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems!, Configuration.UseRemoteConnection);
 
-                if (!invResult.StartsWith("Success"))
-                    Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.World} — {invResult}");
+                    if (!invResult.StartsWith("Success"))
+                        Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.World} — {invResult}");
+                }
+                else
+                {
+                    Log.Warning($"Fleet Companion: AllaganTools returned no inventory for {data.Name}@{data.World}; the stored inventory was left as it was.");
+                }
 
-                // Always write, even with zero items, so stale rows get cleared.
+                // Written even with zero items, so a chest that was emptied is cleared.
                 // AllaganTools only has fresh FC chest data after the in-game
-                // FC chest UI has been opened.
-                if (data.FCID != 0)
+                // FC chest UI has been opened. Skipped when the chest could not be read.
+                if (data.FCID != 0 && fcChestItems != null)
                 {
                     var fcInvResult = await PostgresWriter.WriteFCInventorySnapshotAsync(data.FCID, fcChestItems, Configuration.UseRemoteConnection);
 
