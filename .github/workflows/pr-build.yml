@@ -39,3 +39,30 @@ jobs:
         if-no-files-found: error
         retention-days: 1
 
+
+  # The plugin's database writes (FleetWriter.cs), run against a scratch Postgres.
+  writer-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Run the writer tests
+      env:
+        FLEET_TEST_DB: Host=localhost;Username=postgres;Password=postgres;Database=postgres
+      run: dotnet run --project tests/FleetWriterTests

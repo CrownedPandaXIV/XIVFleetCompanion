@@ -17,7 +17,9 @@ housing eligibility display, etc.) is left to the app.
 
 - `/xivfleet` opens the main window; the plugin installer's config button opens settings.
 - Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection.
-- The plugin syncs on the interval set in settings and runs a daily retention/downsampling cleanup.
+- The plugin syncs on the interval set in settings. Inventories, FC chests, submarines, retainers and
+  housing are written only when they changed (and in full once an hour); character snapshots and the
+  chart history every sync. It also runs a daily retention/downsampling cleanup.
   Snapshots newer than the retention window (default 2 months) are kept in full; older ones are
   thinned to one per character per downsample interval (default 1 day). For a fast cleanup on a
   large table, run `sql/003_snapshot_timestamp_index.sql` once. Long-term history for charts lives
