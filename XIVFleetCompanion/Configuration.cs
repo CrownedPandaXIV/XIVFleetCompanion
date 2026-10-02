@@ -8,8 +8,6 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 0;
 
-    public bool IsConfigWindowMovable { get; set; } = true;
-
     // Fleet Companion settings
     public bool Enabled { get; set; } = false;
     public int SyncIntervalMinutes { get; set; } = 5;

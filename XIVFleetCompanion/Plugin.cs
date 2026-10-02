@@ -80,25 +80,16 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Opens the XIV Fleet Companion main window."
         });
 
-        // Tell the UI system that we want our windows to be drawn through the window system
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
-
-        // This adds a button to the plugin installer entry of this plugin which allows
-        // toggling the display status of the configuration ui
+        // The settings and main window buttons in the plugin installer.
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
-
-        // Adds another button doing the same but for the main ui of the plugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
-        // Add a simple message to the log with level set to information
-        // Use /xllog to open the log window in-game
-        // Example Output: 00:57:54.959 | INF | [XIVFleetCompanion] ===A cool log message from Sample Plugin===
         Log.Information($"{PluginInterface.Manifest.Name} loaded — version {VersionText}.");
     }
 
     public void Dispose()
     {
-        // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
@@ -118,7 +109,6 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        // In response to the slash command, toggle the display status of our main ui
         MainWindow.Toggle();
     }
 
@@ -171,11 +161,97 @@ public sealed class Plugin : IDalamudPlugin
         return pluginConfigsRoot == null ? null : Path.Combine(pluginConfigsRoot, "FCTracker", "FCTrackerConfig.json");
     }
 
-    private async Task RunSyncAsync()
+    // What one character's sync needs from AutoRetainer, copied on the game's thread.
+    private sealed class CharacterRead
     {
-        if (AutoRetainer == null || !AutoRetainer.Ready) return;
+        public FleetWriter.CharacterSnapshot Snapshot = new();
+        public List<FleetWriter.RetainerRecord> Retainers = new();
+        public List<FleetWriter.SubmarineRecord> Subs = new();
+    }
+
+    // AutoRetainer changes its data on the game's thread, so it is copied there (this runs through
+    // Framework.RunOnFrameworkThread); the rest of the sync then works on the copy in the background.
+    // Null when AutoRetainer is not ready. Registered is how many characters AutoRetainer lists.
+    private (List<CharacterRead> Characters, int Registered)? ReadAutoRetainer()
+    {
+        if (AutoRetainer == null || !AutoRetainer.Ready) return null;
 
         var cids = AutoRetainer.GetRegisteredCharacters();
+        var characters = new List<CharacterRead>();
+        foreach (var cid in cids)
+        {
+            var data = AutoRetainer.GetOfflineCharacterData(cid);
+            if (data == null || data.CID == 0) continue;
+
+            var read = new CharacterRead
+            {
+                Snapshot = new FleetWriter.CharacterSnapshot
+                {
+                    Cid = data.CID,
+                    Name = data.Name,
+                    World = data.World,
+                    RetainerCount = data.RetainerData.Count,
+                    SubmarineCount = data.OfflineSubmarineData.Count,
+                    Gil = data.Gil,
+                    Ceruleum = data.Ceruleum,
+                    RepairKits = data.RepairKits,
+                    AccountLabel = Configuration.AccountLabel,
+                    FcId = data.FCID,
+                    NumSubSlots = data.NumSubSlots,
+                },
+                Retainers = data.RetainerData.Select((retainer, index) => new FleetWriter.RetainerRecord
+                {
+                    RetainerId = retainer.RetainerID,
+                    Name = retainer.Name,
+                    Job = retainer.Job,
+                    Gil = retainer.Gil,
+                    HasVenture = retainer.HasVenture,
+                    VentureId = retainer.VentureID,
+                    VentureBeginsAt = retainer.VentureBeginsAt,
+                    VentureEndsAt = retainer.VentureEndsAt,
+                    Level = retainer.Level,
+                    HireOrderIndex = index,
+                }).ToList(),
+            };
+
+            // AdditionalSubmarineData holds build/rank (keyed by sub name); OfflineSubmarineData is
+            // the character's list of subs in workshop order, with voyage return times. A sub is
+            // written when it is in the list and has build data (one with no build yet has nothing
+            // to write); its slot is its place in the list. Build data under a name that is no longer
+            // in the list (a renamed sub) is left out, so it does not linger as an extra sub.
+            var registeredSubs = data.OfflineSubmarineData.Select(v => v.Name).ToList();
+            foreach (var (subName, slot) in FleetWriter.PlanSubmarines(registeredSubs, data.AdditionalSubmarineData.Keys))
+            {
+                var vesselData = data.AdditionalSubmarineData[subName];
+                var voyage = data.OfflineSubmarineData.Find(v => v.Name == subName);
+
+                read.Subs.Add(new FleetWriter.SubmarineRecord
+                {
+                    SubName = subName,
+                    Level = vesselData.Level,
+                    Part1 = vesselData.Part1,
+                    Part2 = vesselData.Part2,
+                    Part3 = vesselData.Part3,
+                    Part4 = vesselData.Part4,
+                    Points = (byte[]?)vesselData.Points?.Clone() ?? Array.Empty<byte>(),
+                    ReturnTime = voyage != null ? voyage.ReturnTime : (long?)null,
+                    CurrentExp = vesselData.CurrentExp,
+                    NextLevelExp = vesselData.NextLevelExp,
+                    Slot = slot,
+                });
+            }
+
+            characters.Add(read);
+        }
+        return (characters, cids.Count);
+    }
+
+    private async Task RunSyncAsync()
+    {
+        var fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
+        if (fromAutoRetainer == null) return;
+        var (characters, registeredCount) = fromAutoRetainer.Value;
+
         var charactersWithoutFc = new HashSet<ulong>();
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
         Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
@@ -228,52 +304,27 @@ public sealed class Plugin : IDalamudPlugin
         var snapshots = new List<FleetWriter.CharacterSnapshot>();
         var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
 
-        foreach (var cid in cids)
+        foreach (var read in characters)
         {
-            var data = AutoRetainer.GetOfflineCharacterData(cid);
-            if (data == null || data.CID == 0) continue;
-            var who = $"{data.Name}@{data.World}";
+            var character = read.Snapshot;
+            var cid = character.Cid;
+            var who = $"{character.Name}@{character.World}";
 
-            snapshots.Add(new FleetWriter.CharacterSnapshot
-            {
-                Cid = data.CID,
-                Name = data.Name,
-                World = data.World,
-                RetainerCount = data.RetainerData.Count,
-                SubmarineCount = data.OfflineSubmarineData.Count,
-                Gil = data.Gil,
-                Ceruleum = data.Ceruleum,
-                RepairKits = data.RepairKits,
-                AccountLabel = Configuration.AccountLabel,
-                FcId = data.FCID,
-                NumSubSlots = data.NumSubSlots,
-            });
+            snapshots.Add(character);
 
-            AddMetric(metrics, "character", data.CID, "gil", data.Gil);
-            AddMetric(metrics, "character", data.CID, "ceruleum", data.Ceruleum);
-            AddMetric(metrics, "character", data.CID, "repair_kits", data.RepairKits);
-            AddMetric(metrics, "character", data.CID, "retainer_count", data.RetainerData.Count);
-            AddMetric(metrics, "character", data.CID, "submarine_count", data.OfflineSubmarineData.Count);
-            AddMetric(metrics, "character", data.CID, "num_sub_slots", data.NumSubSlots);
+            AddMetric(metrics, "character", cid, "gil", character.Gil);
+            AddMetric(metrics, "character", cid, "ceruleum", character.Ceruleum);
+            AddMetric(metrics, "character", cid, "repair_kits", character.RepairKits);
+            AddMetric(metrics, "character", cid, "retainer_count", character.RetainerCount);
+            AddMetric(metrics, "character", cid, "submarine_count", character.SubmarineCount);
+            AddMetric(metrics, "character", cid, "num_sub_slots", character.NumSubSlots);
 
             // Retainer details come from AutoRetainer, so they are written whether or not
             // AllaganTools is available.
-            var retainers = data.RetainerData.Select((retainer, index) => new FleetWriter.RetainerRecord
-            {
-                RetainerId = retainer.RetainerID,
-                Name = retainer.Name,
-                Job = retainer.Job,
-                Gil = retainer.Gil,
-                HasVenture = retainer.HasVenture,
-                VentureId = retainer.VentureID,
-                VentureBeginsAt = retainer.VentureBeginsAt,
-                VentureEndsAt = retainer.VentureEndsAt,
-                Level = retainer.Level,
-                HireOrderIndex = index,
-            }).ToList();
+            var retainers = read.Retainers;
             if (retainers.Count > 0)
-                await WriteIfChanged($"retainers:{data.CID}", FleetWriter.Fingerprint(retainers),
-                    () => FleetWriter.WriteRetainersAsync(conn, data.CID, retainers), $"retainers for {who}");
+                await WriteIfChanged($"retainers:{cid}", FleetWriter.Fingerprint(retainers),
+                    () => FleetWriter.WriteRetainersAsync(conn, cid, retainers), $"retainers for {who}");
 
             // Inventories are replaced as a whole, so they are only written when AllaganTools
             // actually answered. Otherwise (AllaganTools disabled, updating after a patch, or
@@ -281,7 +332,7 @@ public sealed class Plugin : IDalamudPlugin
             // was instead of being emptied.
             if (allaganToolsReady)
             {
-                var personalItems = AllaganTools!.GetCharacterItems(data.CID);
+                var personalItems = AllaganTools!.GetCharacterItems(cid);
                 var personalAndRetainerItems = personalItems?.Where(i => i.Quantity > 0).ToList();
 
                 // A character always carries something (at least the gear they wear), so
@@ -289,9 +340,9 @@ public sealed class Plugin : IDalamudPlugin
                 var inventoryComplete = personalAndRetainerItems != null && personalAndRetainerItems.Count > 0;
                 if (inventoryComplete)
                 {
-                    foreach (var retainer in data.RetainerData)
+                    foreach (var retainer in retainers)
                     {
-                        var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerID);
+                        var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerId);
                         if (retainerItems == null)
                         {
                             inventoryComplete = false;
@@ -304,9 +355,9 @@ public sealed class Plugin : IDalamudPlugin
                 // FC chest data comes from the FC's own ID, not from a
                 // character's personal items. Null when it could not be read.
                 List<AllaganToolsConnector.ParsedItem>? fcChestItems = null;
-                if (data.FCID != 0)
+                if (character.FcId != 0)
                 {
-                    fcChestItems = AllaganTools.GetCharacterItems(data.FCID)?
+                    fcChestItems = AllaganTools.GetCharacterItems(character.FcId)?
                         .Where(i => i.Quantity > 0 && i.SortedContainer >= 20000 && i.SortedContainer <= 20004)
                         .ToList();
                 }
@@ -317,22 +368,22 @@ public sealed class Plugin : IDalamudPlugin
                 if (inventoryComplete)
                 {
                     foreach (var salvageId in SalvageItemIds)
-                        AddMetric(metrics, "character", data.CID, $"item_qty:{salvageId}",
+                        AddMetric(metrics, "character", cid, $"item_qty:{salvageId}",
                             personalAndRetainerItems!.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
                 }
 
-                if (data.FCID != 0 && fcChestItems != null && fcChestItems.Count > 0)
+                if (character.FcId != 0 && fcChestItems != null && fcChestItems.Count > 0)
                 {
                     foreach (var salvageId in SalvageItemIds)
-                        AddMetric(metrics, "fc", data.FCID, $"item_qty:{salvageId}",
+                        AddMetric(metrics, "fc", character.FcId, $"item_qty:{salvageId}",
                             fcChestItems.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
                 }
 
                 if (inventoryComplete)
                 {
                     var inventory = personalAndRetainerItems!.Select(ToInventoryItem).ToList();
-                    await WriteIfChanged($"inventory:{data.CID}", FleetWriter.Fingerprint(inventory),
-                        () => FleetWriter.WriteInventoryAsync(conn, data.CID, inventory), $"inventory for {who}");
+                    await WriteIfChanged($"inventory:{cid}", FleetWriter.Fingerprint(inventory),
+                        () => FleetWriter.WriteInventoryAsync(conn, cid, inventory), $"inventory for {who}");
                 }
                 else
                 {
@@ -343,44 +394,17 @@ public sealed class Plugin : IDalamudPlugin
                 // AllaganTools only has fresh FC chest data after the in-game
                 // FC chest UI has been opened. Skipped when the chest could not be read.
                 // Keyed by FC, so characters sharing an FC do not write the same chest twice.
-                if (data.FCID != 0 && fcChestItems != null)
+                if (character.FcId != 0 && fcChestItems != null)
                 {
                     var chest = fcChestItems.Select(ToInventoryItem).ToList();
-                    await WriteIfChanged($"fcchest:{data.FCID}", FleetWriter.Fingerprint(chest),
-                        () => FleetWriter.WriteFcInventoryAsync(conn, data.FCID, chest), $"FC chest inventory for {who}");
+                    await WriteIfChanged($"fcchest:{character.FcId}", FleetWriter.Fingerprint(chest),
+                        () => FleetWriter.WriteFcInventoryAsync(conn, character.FcId, chest), $"FC chest inventory for {who}");
                 }
             }
 
-            // AdditionalSubmarineData holds build/rank (keyed by sub name); OfflineSubmarineData is
-            // the character's list of subs in workshop order, with voyage return times. A sub is
-            // written when it is in the list and has build data (one with no build yet has nothing
-            // to write); its slot is its place in the list. Build data under a name that is no longer
-            // in the list (a renamed sub) is left out, so it does not linger as an extra sub.
-            var subRecords = new List<FleetWriter.SubmarineRecord>();
-            var registeredSubs = data.OfflineSubmarineData.Select(v => v.Name).ToList();
-            foreach (var (subName, slot) in FleetWriter.PlanSubmarines(registeredSubs, data.AdditionalSubmarineData.Keys))
-            {
-                var vesselData = data.AdditionalSubmarineData[subName];
-                var voyage = data.OfflineSubmarineData.Find(v => v.Name == subName);
-
-                subRecords.Add(new FleetWriter.SubmarineRecord
-                {
-                    SubName = subName,
-                    Level = vesselData.Level,
-                    Part1 = vesselData.Part1,
-                    Part2 = vesselData.Part2,
-                    Part3 = vesselData.Part3,
-                    Part4 = vesselData.Part4,
-                    Points = vesselData.Points ?? Array.Empty<byte>(),
-                    ReturnTime = voyage != null ? voyage.ReturnTime : (long?)null,
-                    CurrentExp = vesselData.CurrentExp,
-                    NextLevelExp = vesselData.NextLevelExp,
-                    Slot = slot,
-                });
-            }
-
-            await WriteIfChanged($"subs:{data.CID}", FleetWriter.Fingerprint(subRecords),
-                () => FleetWriter.WriteSubmarinesAsync(conn, data.CID, subRecords), $"submarines for {who}");
+            var subRecords = read.Subs;
+            await WriteIfChanged($"subs:{cid}", FleetWriter.Fingerprint(subRecords),
+                () => FleetWriter.WriteSubmarinesAsync(conn, cid, subRecords), $"submarines for {who}");
 
             if (fcTrackerHousing.TryGetValue(cid, out var housing))
             {
@@ -392,23 +416,23 @@ public sealed class Plugin : IDalamudPlugin
                     AddMetric(metrics, "fc", housing.FcId, "fc_points", housing.FcPoints,
                         string.IsNullOrWhiteSpace(housing.FcMaster) ? null : housing.FcMaster);
 
-                    if (data.FCID == housing.FcId
-                        && string.Equals(data.Name, housing.FcMaster, StringComparison.OrdinalIgnoreCase))
+                    if (character.FcId == housing.FcId
+                        && string.Equals(character.Name, housing.FcMaster, StringComparison.OrdinalIgnoreCase))
                     {
-                        AddMetric(metrics, "character", data.CID, "fc_points", housing.FcPoints,
+                        AddMetric(metrics, "character", cid, "fc_points", housing.FcPoints,
                             string.IsNullOrWhiteSpace(housing.FcName) ? null : housing.FcName);
                     }
                 }
 
-                await WriteIfChanged($"housing:{data.CID}", FleetWriter.Fingerprint(housing),
-                    () => FleetWriter.WriteHousingAsync(conn, data.CID, housing), $"housing for {who}");
+                await WriteIfChanged($"housing:{cid}", FleetWriter.Fingerprint(housing),
+                    () => FleetWriter.WriteHousingAsync(conn, cid, housing), $"housing for {who}");
             }
-            else if (data.FCID == 0 && charactersWithoutFc.Contains(cid))
+            else if (character.FcId == 0 && charactersWithoutFc.Contains(cid))
             {
                 // FCTracker and AutoRetainer both say this character is in no Free Company (it
                 // left): its old FC and house details go.
-                await WriteIfChanged($"housing:{data.CID}", "no free company",
-                    () => FleetWriter.RemoveHousingAsync(conn, new[] { data.CID }), $"old Free Company details for {who}");
+                await WriteIfChanged($"housing:{cid}", "no free company",
+                    () => FleetWriter.RemoveHousingAsync(conn, new[] { cid }), $"old Free Company details for {who}");
             }
         }
 
@@ -456,7 +480,7 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
-        Log.Information($"Fleet Companion: synced {synced}/{cids.Count} characters; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
+        Log.Information($"Fleet Companion: synced {synced}/{registeredCount} characters; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
     }
 
     private static FleetWriter.InventoryItem ToInventoryItem(AllaganToolsConnector.ParsedItem item) => new()
