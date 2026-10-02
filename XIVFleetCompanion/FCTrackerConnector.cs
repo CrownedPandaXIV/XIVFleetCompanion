@@ -98,9 +98,11 @@ namespace XIVFleetCompanion
         /// <summary>
         /// Reads FCTracker's config JSON from the given path and returns a lookup of
         /// CID -> housing info, resolved through each character's FC entry.
+        /// When <paramref name="withoutFc"/> is given, it receives the characters FCTracker
+        /// knows to be in no Free Company (a character it has no entry for is left out: unknown).
         /// Never throws — returns an empty dictionary on any failure.
         /// </summary>
-        public static Dictionary<ulong, HousingInfo> ReadHousingData(string path)
+        public static Dictionary<ulong, HousingInfo> ReadHousingData(string path, HashSet<ulong>? withoutFc = null)
         {
             var result = new Dictionary<ulong, HousingInfo>();
 
@@ -120,8 +122,13 @@ namespace XIVFleetCompanion
                 foreach (var kvp in charByCid)
                 {
                     var character = kvp.Value;
-                    if (character.CID == 0 || character.FC == null || character.FC == 0)
+                    if (character.CID == 0)
                         continue;
+                    if (character.FC == null || character.FC == 0)
+                    {
+                        withoutFc?.Add(character.CID);
+                        continue;
+                    }
 
                     var fcKey = character.FC.Value.ToString();
                     if (!fcData.TryGetValue(fcKey, out var fc))

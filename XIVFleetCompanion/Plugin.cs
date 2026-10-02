@@ -201,7 +201,8 @@ public sealed class Plugin : IDalamudPlugin
         if (AutoRetainer == null || !AutoRetainer.Ready) return;
 
         var cids = AutoRetainer.GetRegisteredCharacters();
-        var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
+        var charactersWithoutFc = new HashSet<ulong>();
+        var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
         Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
 
         // Asked once per sync. When AllaganTools is not running, inventories and FC chests
@@ -426,6 +427,13 @@ public sealed class Plugin : IDalamudPlugin
                 await WriteIfChanged($"housing:{data.CID}", FleetWriter.Fingerprint(housing),
                     () => FleetWriter.WriteHousingAsync(conn, data.CID, housing), $"housing for {who}");
             }
+            else if (data.FCID == 0 && charactersWithoutFc.Contains(cid))
+            {
+                // FCTracker and AutoRetainer both say this character is in no Free Company (it
+                // left): its old FC and house details go.
+                await WriteIfChanged($"housing:{data.CID}", "no free company",
+                    () => FleetWriter.RemoveHousingAsync(conn, new[] { data.CID }), $"old Free Company details for {who}");
+            }
         }
 
         // Every character's snapshot row in one statement.
@@ -444,6 +452,11 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             synced = Math.Max(synced, await FleetWriter.WriteCurrentCharactersAsync(conn, snapshots));
+
+            // With every character's Free Company now current, chests of FCs none of them is in go.
+            var removedSlots = await FleetWriter.RemoveOrphanFcChestsAsync(conn);
+            if (removedSlots > 0)
+                Log.Information($"Fleet Companion: removed {removedSlots} chest slots of Free Companies no tracked character is in.");
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
