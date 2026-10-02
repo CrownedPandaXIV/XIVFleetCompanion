@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.4.2 - 2026-10-02
+
+- Fixed: the main window's **Read My Character Data** test showed the world the character was currently
+  on (AutoRetainer's override, for example during data center travel) instead of its home world, which
+  is what the sync, the database and the app use. It now shows the home world, and adds "(currently on
+  ...)" when the character is visiting another world. Nothing that is synced was affected.
+
 ## 0.4.1 - 2026-10-02
 
 - **Fixed: Browse... froze the game.** The FCTracker config path's Browse button opened the Windows file
