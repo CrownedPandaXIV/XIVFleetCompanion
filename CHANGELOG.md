@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.5.0 - 2026-10-02
+
+Run `sql/006_submarine_slot.sql` once (before or after updating; instant, safe to run again). Without
+it the plugin keeps working as before, just without slots.
+
+- **Renamed subs are handled.** Each sub is stored with its workshop slot (1-4), taken from its place in
+  AutoRetainer's list of the character's subs, so the app (0.8.0) can find a slot's sub whatever it is
+  called. Before, a sub renamed from `Submersible-N` was treated by the app's Parts tab as an empty slot.
+- **No leftover subs after a rename.** Only subs in AutoRetainer's current list are written; build data
+  AutoRetainer still holds under an old name is ignored.
+- **The Craft? setting follows a rename.** When a slot's sub gets a new name (and the old name is gone),
+  its Craft? setting in the app moves to the new name instead of being lost. Two subs swapping names keep
+  their own settings.
+
 ## 0.4.2 - 2026-10-02
 
 - Fixed: the main window's **Read My Character Data** test showed the world the character was currently

@@ -237,6 +237,50 @@ internal static class Program
         subRows = await Rows(conn, "SELECT sub_name FROM companion_submarine_snapshot");
         Check(Show(subRows) == "Submersible-1", "writing again replaces that character's subs: " + Show(subRows));
 
+        // Which subs are written, and their slots (from AutoRetainer's list order).
+        Check(string.Join(",", FleetWriter.PlanSubmarines(new[] { "Orca", "Submersible-2", "New One" }, new[] { "Submersible-2", "Orca", "Submersible-1" })
+                  .Select(p => $"{p.Name}:{p.Slot}")) == "Orca:1,Submersible-2:2",
+            "subs are written in list order with their slot; build data under an old name (renamed) is left out; a sub with no build yet is skipped");
+        Check(string.Join(",", FleetWriter.PlanSubmarines(Array.Empty<string>(), new[] { "Submersible-3", "Orca" })
+                  .Select(p => $"{p.Name}:{p.Slot?.ToString() ?? "?"}")) == "Orca:?,Submersible-3:3",
+            "with no list yet, every sub with build data is written, the slot from a default name or unknown");
+
+        // sql/006 adds the slot column; existing default-named rows get their slot from the name.
+        await Exec(conn, @"CREATE TABLE sub_craft_toggle (cid numeric NOT NULL, sub_name text NOT NULL,
+            craft_enabled boolean NOT NULL DEFAULT false, updated_at timestamp NOT NULL DEFAULT now(), PRIMARY KEY (cid, sub_name))");
+        await RunScript(conn, "sql/006_submarine_slot.sql");
+        await RunScript(conn, "sql/006_submarine_slot.sql");
+        subRows = await Rows(conn, "SELECT sub_name, slot FROM companion_submarine_snapshot");
+        Check(Show(subRows) == "Submersible-1,1", "006 adds the slot column and fills it from the default name (running it twice is fine): " + Show(subRows));
+
+        // A rename: slot 1 changes from Submersible-1 to Orca. Its Craft? setting follows; slot 2's stays.
+        await Exec(conn, $@"INSERT INTO sub_craft_toggle (cid, sub_name, craft_enabled) VALUES
+            ({owner}, 'Submersible-1', true), ({owner}, 'Submersible-2', true)");
+        await FleetWriter.WriteSubmarinesAsync(conn, owner, new List<FleetWriter.SubmarineRecord>
+        {
+            new() { SubName = "Submersible-1", Level = 50, Slot = 1 },
+            new() { SubName = "Submersible-2", Level = 40, Slot = 2 },
+        });
+        await FleetWriter.WriteSubmarinesAsync(conn, owner, new List<FleetWriter.SubmarineRecord>
+        {
+            new() { SubName = "Orca", Level = 50, Slot = 1 },
+            new() { SubName = "Submersible-2", Level = 41, Slot = 2 },
+        });
+        subRows = await Rows(conn, "SELECT sub_name, slot, level FROM companion_submarine_snapshot ORDER BY slot");
+        var toggles = await Rows(conn, "SELECT sub_name, craft_enabled FROM sub_craft_toggle ORDER BY sub_name");
+        Check(Show(subRows) == "Orca,1,50 / Submersible-2,2,41" && Show(toggles) == "Orca,True / Submersible-2,True",
+            $"a renamed sub keeps its slot and its Craft? setting: {Show(subRows)} | {Show(toggles)}");
+
+        // Two subs swapping names keep their own settings (neither old name is gone).
+        await Exec(conn, $"UPDATE sub_craft_toggle SET craft_enabled = false WHERE cid = {owner} AND sub_name = 'Orca'");
+        await FleetWriter.WriteSubmarinesAsync(conn, owner, new List<FleetWriter.SubmarineRecord>
+        {
+            new() { SubName = "Submersible-2", Level = 50, Slot = 1 },
+            new() { SubName = "Orca", Level = 41, Slot = 2 },
+        });
+        toggles = await Rows(conn, "SELECT sub_name, craft_enabled FROM sub_craft_toggle ORDER BY sub_name");
+        Check(Show(toggles) == "Orca,False / Submersible-2,True", "when two subs swap names, no setting is moved: " + Show(toggles));
+
         // Retainers: inserted, then updated in place.
         var retainers = new List<FleetWriter.RetainerRecord>
         {

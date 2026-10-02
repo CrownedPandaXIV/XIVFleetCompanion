@@ -351,16 +351,16 @@ public sealed class Plugin : IDalamudPlugin
                 }
             }
 
-            // AdditionalSubmarineData holds build/rank (keyed by sub name);
-            // OfflineSubmarineData holds voyage return time (as a list,
-            // matched by its own Name field). Only subs present in
-            // AdditionalSubmarineData are written - a sub with no entry
-            // there has no build at all yet (matches Parse Parts Needed's
-            // own "no build exists for this slot" case from the old n8n
-            // logic), so there's nothing raw to write for it.
+            // AdditionalSubmarineData holds build/rank (keyed by sub name); OfflineSubmarineData is
+            // the character's list of subs in workshop order, with voyage return times. A sub is
+            // written when it is in the list and has build data (one with no build yet has nothing
+            // to write); its slot is its place in the list. Build data under a name that is no longer
+            // in the list (a renamed sub) is left out, so it does not linger as an extra sub.
             var subRecords = new List<FleetWriter.SubmarineRecord>();
-            foreach (var (subName, vesselData) in data.AdditionalSubmarineData)
+            var registeredSubs = data.OfflineSubmarineData.Select(v => v.Name).ToList();
+            foreach (var (subName, slot) in FleetWriter.PlanSubmarines(registeredSubs, data.AdditionalSubmarineData.Keys))
             {
+                var vesselData = data.AdditionalSubmarineData[subName];
                 var voyage = data.OfflineSubmarineData.Find(v => v.Name == subName);
 
                 subRecords.Add(new FleetWriter.SubmarineRecord
@@ -374,7 +374,8 @@ public sealed class Plugin : IDalamudPlugin
                     Points = vesselData.Points ?? Array.Empty<byte>(),
                     ReturnTime = voyage != null ? voyage.ReturnTime : (long?)null,
                     CurrentExp = vesselData.CurrentExp,
-                    NextLevelExp = vesselData.NextLevelExp
+                    NextLevelExp = vesselData.NextLevelExp,
+                    Slot = slot,
                 });
             }
 
