@@ -1,3 +1,4 @@
+-- Only for databases that still have companion_character_snapshot (plugin 0.3.x and older).
 -- OPTIONAL, run once, after 001. Copies the gil / ceruleum / repair kit history that
 -- already exists in companion_character_snapshot into companion_metric_history, keeping
 -- only the moments a value changed, so charts of those three start with real history.

@@ -1,3 +1,4 @@
+-- Only for databases that still have companion_character_snapshot (plugin 0.3.x and older).
 -- Recommended, run once (safe to run more than once). Speeds up the plugin's daily cleanup of
 -- old snapshot history: with it, a normal day's cleanup took about 0.5 s instead of 3 s on a
 -- 10-million-row table. It also lets Postgres jump straight to the old rows. About 95 MB per
