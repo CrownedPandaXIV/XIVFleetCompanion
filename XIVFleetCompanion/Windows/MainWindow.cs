@@ -108,8 +108,13 @@ public class MainWindow : Window, IDisposable
                     }
                     else
                     {
+                        // Home world, as the sync and the app use; where the character is now
+                        // (AutoRetainer's override, e.g. during data center travel) only when different.
+                        var visiting = !string.IsNullOrEmpty(data.WorldOverride) && data.WorldOverride != data.World
+                            ? $" (currently on {data.WorldOverride})"
+                            : "";
                         autoRetainerTestResult =
-                            $"{data.Name}@{data.CurrentWorld}\n" +
+                            $"{data.Name}@{data.World}{visiting}\n" +
                             $"Retainers: {data.RetainerData.Count}\n" +
                             $"Submarines: {data.OfflineSubmarineData.Count}\n" +
                             $"Gil: {data.Gil:N0}\n" +
