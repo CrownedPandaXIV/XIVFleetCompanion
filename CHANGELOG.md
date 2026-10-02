@@ -3,6 +3,24 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.3.0 - 2026-10-02
+
+Needs `sql/004_character_current.sql` to be run once first (it is safe to run more than once).
+
+- **Current state per character.** Each sync updates one row per character in the new
+  `companion_character_current` table (name, world, account, gil, ceruleum, repair kits, retainers,
+  submarines, sub slots, Free Company, first seen, last synced), in one statement. The app reads this
+  instead of searching the snapshot history for each character's newest row.
+- **Identity changes are kept.** A change of name, world, account label or Free Company is logged in
+  `companion_character_changes` (by the database, whenever the current row changes).
+- **More chart history.** Retainer count, submarine count and sub slots are recorded in the metric
+  history when they change, like gil and ceruleum.
+- `sql/004` copies the existing history into these: each character's newest snapshot, every past
+  change of retainers, submarines and sub slots, and every past name, world, account and Free Company
+  change.
+- The snapshot table is still written every sync for now, as a safety net. Until `sql/004` has been
+  run, the plugin skips the current table with one warning per session and works as before.
+
 ## 0.2.0 - 2026-10-02
 
 - **Much less database writing.** Inventories, FC chests, submarines, retainers and housing are
