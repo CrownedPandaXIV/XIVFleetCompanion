@@ -6,6 +6,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using ECommons;
 using ECommons.EzEventManager;
+using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -38,6 +39,10 @@ public sealed class Plugin : IDalamudPlugin
     private bool syncInProgress = false;
     private DateTime lastRetentionCheck = DateTime.MinValue;
     private bool retentionInProgress = false;
+
+    // What was last written per character / FC, so unchanged data is not written again every
+    // sync. Forgotten once an hour, so everything is rewritten at least hourly.
+    private readonly ChangeTracker changes = new(TimeSpan.FromHours(1), DateTime.UtcNow);
 
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
     private ConfigWindow ConfigWindow { get; init; }
@@ -197,7 +202,6 @@ public sealed class Plugin : IDalamudPlugin
         var cids = AutoRetainer.GetRegisteredCharacters();
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath);
         Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
-        int successCount = 0;
 
         // Asked once per sync. When AllaganTools is not running, inventories and FC chests
         // keep their last stored contents (see below).
@@ -205,22 +209,68 @@ public sealed class Plugin : IDalamudPlugin
         if (!allaganToolsReady)
             Log.Warning("Fleet Companion: AllaganTools is not available; inventories and FC chests were not updated this sync.");
 
+        // One connection for the whole sync. A sync that cannot connect is reported by the
+        // caller and simply tried again next time.
+        await using var openConnection = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
+        if (openConnection == null)
+        {
+            Log.Warning("Fleet Companion: no saved Postgres credential; nothing was synced.");
+            return;
+        }
+        NpgsqlConnection conn = openConnection;
+
+        changes.BeginSync(DateTime.UtcNow);
+        var written = 0;
+        var unchanged = 0;
+        var failed = 0;
+
+        // Writes only when the data differs from what this plugin last wrote for the same key.
+        // A database error (for example a constraint) is logged and that entry is retried next
+        // sync; a lost connection ends the sync.
+        async Task WriteIfChanged(string key, string fingerprint, Func<Task> write, string what)
+        {
+            if (changes.IsUnchanged(key, fingerprint))
+            {
+                unchanged++;
+                return;
+            }
+            try
+            {
+                await write();
+                changes.Remember(key, fingerprint);
+                written++;
+            }
+            catch (PostgresException ex)
+            {
+                changes.Forget(key);
+                failed++;
+                Log.Warning($"Fleet Companion: failed to write {what} — {ex.Message}");
+            }
+        }
+
+        var snapshots = new List<FleetWriter.CharacterSnapshot>();
         var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
 
         foreach (var cid in cids)
         {
             var data = AutoRetainer.GetOfflineCharacterData(cid);
             if (data == null || data.CID == 0) continue;
+            var who = $"{data.Name}@{data.World}";
 
-            var result = await PostgresWriter.WriteCharacterSnapshotAsync(
-                data.CID, data.Name, data.World,
-                data.RetainerData.Count, data.OfflineSubmarineData.Count,
-                data.Gil, data.Ceruleum, data.RepairKits, Configuration.AccountLabel, data.FCID, data.NumSubSlots, Configuration.UseRemoteConnection);
-
-            if (result == "Success.")
-                successCount++;
-            else
-                Log.Warning($"Fleet Companion: failed to write snapshot for {data.Name}@{data.World} — {result}");
+            snapshots.Add(new FleetWriter.CharacterSnapshot
+            {
+                Cid = data.CID,
+                Name = data.Name,
+                World = data.World,
+                RetainerCount = data.RetainerData.Count,
+                SubmarineCount = data.OfflineSubmarineData.Count,
+                Gil = data.Gil,
+                Ceruleum = data.Ceruleum,
+                RepairKits = data.RepairKits,
+                AccountLabel = Configuration.AccountLabel,
+                FcId = data.FCID,
+                NumSubSlots = data.NumSubSlots,
+            });
 
             AddMetric(metrics, "character", data.CID, "gil", data.Gil);
             AddMetric(metrics, "character", data.CID, "ceruleum", data.Ceruleum);
@@ -228,22 +278,27 @@ public sealed class Plugin : IDalamudPlugin
 
             // Retainer details come from AutoRetainer, so they are written whether or not
             // AllaganTools is available.
-            for (int retainerIndex = 0; retainerIndex < data.RetainerData.Count; retainerIndex++)
+            var retainers = data.RetainerData.Select((retainer, index) => new FleetWriter.RetainerRecord
             {
-                var retainer = data.RetainerData[retainerIndex];
-                var retainerLookupResult = await PostgresWriter.WriteRetainerLookupAsync(
-                    retainer.RetainerID, data.CID, retainer.Name,
-                    retainer.Job, retainer.Gil, retainer.HasVenture, retainer.VentureID,
-                    retainer.VentureBeginsAt, retainer.VentureEndsAt, retainer.Level, retainerIndex, Configuration.UseRemoteConnection);
+                RetainerId = retainer.RetainerID,
+                Name = retainer.Name,
+                Job = retainer.Job,
+                Gil = retainer.Gil,
+                HasVenture = retainer.HasVenture,
+                VentureId = retainer.VentureID,
+                VentureBeginsAt = retainer.VentureBeginsAt,
+                VentureEndsAt = retainer.VentureEndsAt,
+                Level = retainer.Level,
+                HireOrderIndex = index,
+            }).ToList();
+            if (retainers.Count > 0)
+                await WriteIfChanged($"retainers:{data.CID}", FleetWriter.Fingerprint(retainers),
+                    () => FleetWriter.WriteRetainersAsync(conn, data.CID, retainers), $"retainers for {who}");
 
-                if (!retainerLookupResult.StartsWith("Success"))
-                    Log.Warning($"Fleet Companion: failed to write retainer lookup for {retainer.Name} (owner {data.Name}) — {retainerLookupResult}");
-            }
-
-            // Inventories are replaced on every sync, so they are only written when
-            // AllaganTools actually answered. Otherwise (AllaganTools disabled, updating
-            // after a patch, or with nothing cached for this character yet) the stored
-            // inventory is left as it was instead of being emptied.
+            // Inventories are replaced as a whole, so they are only written when AllaganTools
+            // actually answered. Otherwise (AllaganTools disabled, updating after a patch, or
+            // with nothing cached for this character yet) the stored inventory is left as it
+            // was instead of being emptied.
             if (allaganToolsReady)
             {
                 var personalItems = AllaganTools!.GetCharacterItems(data.CID);
@@ -295,25 +350,24 @@ public sealed class Plugin : IDalamudPlugin
 
                 if (inventoryComplete)
                 {
-                    var invResult = await PostgresWriter.WriteInventorySnapshotAsync(cid, personalAndRetainerItems!, Configuration.UseRemoteConnection);
-
-                    if (!invResult.StartsWith("Success"))
-                        Log.Warning($"Fleet Companion: failed to write inventory for {data.Name}@{data.World} — {invResult}");
+                    var inventory = personalAndRetainerItems!.Select(ToInventoryItem).ToList();
+                    await WriteIfChanged($"inventory:{data.CID}", FleetWriter.Fingerprint(inventory),
+                        () => FleetWriter.WriteInventoryAsync(conn, data.CID, inventory), $"inventory for {who}");
                 }
                 else
                 {
-                    Log.Warning($"Fleet Companion: AllaganTools returned no inventory for {data.Name}@{data.World}; the stored inventory was left as it was.");
+                    Log.Warning($"Fleet Companion: AllaganTools returned no inventory for {who}; the stored inventory was left as it was.");
                 }
 
                 // Written even with zero items, so a chest that was emptied is cleared.
                 // AllaganTools only has fresh FC chest data after the in-game
                 // FC chest UI has been opened. Skipped when the chest could not be read.
+                // Keyed by FC, so characters sharing an FC do not write the same chest twice.
                 if (data.FCID != 0 && fcChestItems != null)
                 {
-                    var fcInvResult = await PostgresWriter.WriteFCInventorySnapshotAsync(data.FCID, fcChestItems, Configuration.UseRemoteConnection);
-
-                    if (!fcInvResult.StartsWith("Success"))
-                        Log.Warning($"Fleet Companion: failed to write FC chest inventory for {data.Name}@{data.World} — {fcInvResult}");
+                    var chest = fcChestItems.Select(ToInventoryItem).ToList();
+                    await WriteIfChanged($"fcchest:{data.FCID}", FleetWriter.Fingerprint(chest),
+                        () => FleetWriter.WriteFcInventoryAsync(conn, data.FCID, chest), $"FC chest inventory for {who}");
                 }
             }
 
@@ -324,12 +378,12 @@ public sealed class Plugin : IDalamudPlugin
             // there has no build at all yet (matches Parse Parts Needed's
             // own "no build exists for this slot" case from the old n8n
             // logic), so there's nothing raw to write for it.
-            var subRecords = new List<PostgresWriter.SubmarineRecord>();
+            var subRecords = new List<FleetWriter.SubmarineRecord>();
             foreach (var (subName, vesselData) in data.AdditionalSubmarineData)
             {
                 var voyage = data.OfflineSubmarineData.Find(v => v.Name == subName);
 
-                subRecords.Add(new PostgresWriter.SubmarineRecord
+                subRecords.Add(new FleetWriter.SubmarineRecord
                 {
                     SubName = subName,
                     Level = vesselData.Level,
@@ -344,10 +398,8 @@ public sealed class Plugin : IDalamudPlugin
                 });
             }
 
-            var subResult = await PostgresWriter.WriteSubmarineSnapshotAsync(cid, subRecords, Configuration.UseRemoteConnection);
-
-            if (!subResult.StartsWith("Success"))
-                Log.Warning($"Fleet Companion: failed to write submarines for {data.Name}@{data.World} — {subResult}");
+            await WriteIfChanged($"subs:{data.CID}", FleetWriter.Fingerprint(subRecords),
+                () => FleetWriter.WriteSubmarinesAsync(conn, data.CID, subRecords), $"submarines for {who}");
 
             if (fcTrackerHousing.TryGetValue(cid, out var housing))
             {
@@ -367,12 +419,22 @@ public sealed class Plugin : IDalamudPlugin
                     }
                 }
 
-                var housingResult = await PostgresWriter.WriteHousingSnapshotAsync(cid, housing, Configuration.UseRemoteConnection);
-
-                if (!housingResult.StartsWith("Success"))
-                    Log.Warning($"Fleet Companion: failed to write housing for {data.Name}@{data.World} — {housingResult}");
+                await WriteIfChanged($"housing:{data.CID}", FleetWriter.Fingerprint(housing),
+                    () => FleetWriter.WriteHousingAsync(conn, data.CID, housing), $"housing for {who}");
             }
         }
+
+        // Every character's snapshot row in one statement.
+        var synced = 0;
+        try
+        {
+            synced = await FleetWriter.WriteCharacterSnapshotsAsync(conn, snapshots);
+        }
+        catch (PostgresException ex)
+        {
+            Log.Warning($"Fleet Companion: failed to write character snapshots — {ex.Message}");
+        }
+
         var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint
         {
             SubjectType = kv.Key.Type,
@@ -382,13 +444,27 @@ public sealed class Plugin : IDalamudPlugin
             Label = kv.Value.Label
         }).ToList();
 
-        var metricResult = await PostgresWriter.WriteMetricsAsync(metricPoints, Configuration.UseRemoteConnection);
+        var metricResult = await PostgresWriter.WriteMetricsAsync(conn, metricPoints);
         if (!metricResult.StartsWith("Success"))
             Log.Warning($"Fleet Companion: failed to write metric history — {metricResult}");
 
-        Configuration.LastSyncTimestamp = DateTime.Now;
-        Configuration.Save();
+        // "Last sync" means the characters were actually written.
+        if (synced > 0)
+        {
+            Configuration.LastSyncTimestamp = DateTime.Now;
+            Configuration.Save();
+        }
 
-        Log.Information($"Fleet Companion: synced {successCount}/{cids.Count} characters.");
+        Log.Information($"Fleet Companion: synced {synced}/{cids.Count} characters; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
     }
+
+    private static FleetWriter.InventoryItem ToInventoryItem(AllaganToolsConnector.ParsedItem item) => new()
+    {
+        RetainerId = item.RetainerId,
+        SortedContainer = item.SortedContainer,
+        SortedSlotIndex = item.SortedSlotIndex,
+        ItemId = item.ItemId,
+        Quantity = item.Quantity,
+        GearSetIds = item.GearSetIds,
+    };
 }

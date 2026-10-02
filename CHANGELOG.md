@@ -3,6 +3,22 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.2.0 - 2026-10-02
+
+- **Much less database writing.** Inventories, FC chests, submarines, retainers and housing are
+  now written only when they changed since the plugin last wrote them, instead of every sync.
+  Everything is still rewritten once an hour (and on the first sync after the plugin loads), so the
+  database catches up if it was changed or restored from elsewhere. Character snapshots and the
+  chart history are written every sync as before.
+- **Fewer round trips.** A sync uses one database connection, and each table is written in one
+  statement per character (every character's snapshot in a single statement) instead of one
+  statement per item. Before, a sync sent about 15,000 separate inventory inserts.
+- The plugin log line now says how many entries were written, skipped as unchanged, or failed.
+- "Last sync" in the plugin window only updates when the characters were actually written.
+- A password containing `;` or `=` no longer breaks the connection settings.
+- New automatic tests run the database writes against a scratch Postgres
+  (`tests/FleetWriterTests`).
+
 ## 0.1.2 - 2026-10-02
 
 - Inventories are no longer emptied when AllaganTools is not running. Before, a sync while
