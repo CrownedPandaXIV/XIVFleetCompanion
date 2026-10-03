@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="..\..\XIVFleetCompanion\FleetWriter.cs" Link="FleetWriter.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FCTrackerConnector.cs" Link="FCTrackerConnector.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\SyncSchedule.cs" Link="SyncSchedule.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />

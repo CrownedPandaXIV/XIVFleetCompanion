@@ -3,6 +3,18 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.6.0 - 2026-10-03
+
+No database changes.
+
+- **Instant sync after AutoRetainer finishes a character.** AutoRetainer logs a character out once it
+  has collected and resent its subs and retainers; the plugin now syncs about 5 seconds after any
+  logout instead of waiting up to the sync interval, so the app and the Discord alerts (app 0.11.0) see
+  that character's subs straight away. At most one sync every 30 seconds, so quick relogs do not start
+  one each; a logout during a sync gets its own sync once that one finishes. The regular interval still
+  runs as before. "Also sync right after a character logs out" in settings (on by default) turns it off.
+- The sync timing is in its own small class (SyncSchedule.cs), checked by tests/FleetWriterTests.
+
 ## 0.5.1 - 2026-10-02
 
 No database changes.

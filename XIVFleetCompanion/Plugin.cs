@@ -35,7 +35,7 @@ public sealed class Plugin : IDalamudPlugin
     public Configuration Configuration { get; init; }
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
-    private DateTime lastSyncCheck = DateTime.MinValue;
+    private readonly SyncSchedule schedule = new();
     private bool syncInProgress = false;
 
     // What was last written per character / FC, so unchanged data is not written again every
@@ -66,6 +66,7 @@ public sealed class Plugin : IDalamudPlugin
         AllaganTools = new AllaganToolsConnector(PluginInterface);
 
         Framework.Update += OnFrameworkUpdate;
+        ClientState.Logout += OnLogout;
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
@@ -102,6 +103,7 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandName);
 
         Framework.Update -= OnFrameworkUpdate;
+        ClientState.Logout -= OnLogout;
 
         AutoRetainer?.Dispose();
         ECommonsMain.Dispose();
@@ -115,16 +117,25 @@ public sealed class Plugin : IDalamudPlugin
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
 
+    // AutoRetainer logs a character out once it has finished with it: sync that news soon instead of
+    // waiting for the next interval (see SyncSchedule).
+    private void OnLogout(int type, int code)
+    {
+        if (Configuration.Enabled && Configuration.SyncAfterLogout)
+            schedule.RequestSoon(DateTime.UtcNow);
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         if (!Configuration.Enabled) return;
 
         var now = DateTime.UtcNow;
-
-        if (!syncInProgress && now - lastSyncCheck >= TimeSpan.FromMinutes(Configuration.SyncIntervalMinutes))
+        var reason = schedule.ShouldStart(now, TimeSpan.FromMinutes(Configuration.SyncIntervalMinutes), syncInProgress);
+        if (reason != null)
         {
-            lastSyncCheck = now;
+            schedule.Started(now);
             syncInProgress = true;
+            if (reason == "after logout") Log.Information("Fleet Companion: syncing after a character logged out.");
 
             Task.Run(async () =>
             {

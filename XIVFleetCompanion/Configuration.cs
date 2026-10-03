@@ -11,6 +11,8 @@ public class Configuration : IPluginConfiguration
     // Fleet Companion settings
     public bool Enabled { get; set; } = false;
     public int SyncIntervalMinutes { get; set; } = 5;
+    // Also sync a few seconds after a character logs out (AutoRetainer finished with it).
+    public bool SyncAfterLogout { get; set; } = true;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";

@@ -375,6 +375,24 @@ internal static class Program
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
 
+        // Sync schedule: every interval, and 5 seconds after a logout, but at most every 30 seconds.
+        var five = TimeSpan.FromMinutes(5);
+        var sched = new SyncSchedule();
+        Check(sched.ShouldStart(start, five, busy: false) == "interval", "the first sync starts straight away");
+        sched.Started(start);
+        Check(sched.ShouldStart(start.AddMinutes(2), five, busy: false) == null, "no sync before the interval");
+        sched.RequestSoon(start.AddMinutes(2));
+        Check(sched.ShouldStart(start.AddMinutes(2).AddSeconds(3), five, busy: false) == null, "not in the first seconds after a logout");
+        Check(sched.ShouldStart(start.AddMinutes(2).AddSeconds(5), five, busy: true) == null, "not while a sync is running");
+        Check(sched.ShouldStart(start.AddMinutes(2).AddSeconds(6), five, busy: false) == "after logout", "a few seconds after a logout, once the last sync is done");
+        sched.Started(start.AddMinutes(2).AddSeconds(6));
+        Check(!sched.Requested, "that sync covers the logout");
+        sched.RequestSoon(start.AddMinutes(2).AddSeconds(10));
+        Check(sched.ShouldStart(start.AddMinutes(2).AddSeconds(20), five, busy: false) == null, "quick relogs wait for the 30-second gap");
+        Check(sched.ShouldStart(start.AddMinutes(2).AddSeconds(36), five, busy: false) == "after logout", "then sync");
+        sched.Started(start.AddMinutes(2).AddSeconds(36));
+        Check(sched.ShouldStart(start.AddMinutes(7).AddSeconds(36), five, busy: false) == "interval", "the interval counts from the last sync");
+
         // sql/005 removes the old history table, but only once nothing has written it for 10 minutes.
         string? refused = null;
         try { await RunScript(conn, "sql/005_remove_character_snapshot.sql"); }
