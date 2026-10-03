@@ -73,7 +73,7 @@ public class MainWindow : Window, IDisposable
     {
         RefreshStatus();
 
-        ImGui.Text($"Sync interval: {plugin.Configuration.SyncIntervalMinutes} minute(s).");
+        ImGui.Text($"Sync interval: {plugin.Configuration.SyncIntervalMinutes} minute(s){(plugin.Configuration.SyncAfterLogout ? ", and right after a character logs out" : "")}.");
 
         if (ImGui.Button("Show Settings"))
         {

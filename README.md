@@ -17,7 +17,9 @@ housing eligibility display, etc.) is left to the app.
 
 - `/xivfleet` opens the main window; the plugin installer's config button opens settings.
 - Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection. The form shows the saved details (never the password); leave the password box empty to keep the saved one. "Clear Saved Credentials" asks for a second click.
-- The plugin syncs on the interval set in settings. Inventories, FC chests, submarines, retainers and
+- The plugin syncs on the interval set in settings, and also about 5 seconds after a character logs
+  out (AutoRetainer logs a character out once it has finished with it), at most once every 30 seconds;
+  "Also sync right after a character logs out" in settings turns that off. Inventories, FC chests, submarines, retainers and
   housing are written only when they changed (and in full once an hour); each character's current
   row and the chart history every sync (the chart history stores only values that changed).
   Dismissed retainers, chests of Free Companies none of your characters is in any more, and the old
