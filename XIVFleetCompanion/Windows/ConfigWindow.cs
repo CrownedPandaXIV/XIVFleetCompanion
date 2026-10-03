@@ -89,6 +89,15 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        var syncAfterLogout = configuration.SyncAfterLogout;
+        if (ImGui.Checkbox("Also sync right after a character logs out", ref syncAfterLogout))
+        {
+            configuration.SyncAfterLogout = syncAfterLogout;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app and the Discord alerts see its subs a few seconds later instead of at the next interval.");
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
