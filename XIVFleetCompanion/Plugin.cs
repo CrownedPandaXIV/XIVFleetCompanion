@@ -414,6 +414,13 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             var subRecords = read.Subs;
+
+            // Each sub's rank and experience, by workshop slot, so the app can see how fast it ranks up.
+            foreach (var sub in subRecords.Where(s => s.Slot != null))
+            {
+                AddMetric(metrics, "character", cid, $"sub_rank:{sub.Slot}", sub.Level, sub.SubName);
+                AddMetric(metrics, "character", cid, $"sub_exp:{sub.Slot}", sub.CurrentExp, sub.SubName);
+            }
             await WriteIfChanged($"subs:{cid}", FleetWriter.Fingerprint(subRecords),
                 () => FleetWriter.WriteSubmarinesAsync(conn, cid, subRecords), $"submarines for {who}");
 
