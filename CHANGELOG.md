@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.7.0 - 2026-10-04
+
+No database changes.
+
+- **Sub rank and experience history.** Each sub's rank and experience are recorded in the metric history
+  (as `sub_rank:N` and `sub_exp:N` for workshop slot N, labelled with the sub's name), only when they
+  change plus the hourly reminder, like gil and ceruleum. App 0.17.0 uses them for each sub's rank-up
+  date.
+
 ## 0.6.0 - 2026-10-03
 
 No database changes.
