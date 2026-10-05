@@ -143,8 +143,10 @@ namespace XIVFleetCompanion
                         TotalMembers = fc.TotalMembers,
                         HasHouse = fc.House != null,
                         HouseCity = fc.House?.City,
-                        HouseWard = fc.House?.Ward,
-                        HousePlot = fc.House?.Plot,
+                        // FCTracker saves the game's 0-based numbers (Ward 7 Plot 28 is saved as 6 and 27)
+                        // and adds 1 only when it shows them; the real address is stored here.
+                        HouseWard = fc.House?.Ward + 1,
+                        HousePlot = fc.House?.Plot + 1,
                         HouseLastVisited = fc.House?.LastVisited,
                         FcMaster = fc.MasterString,
                         FcHomeWorldId = fc.HomeWorldId,

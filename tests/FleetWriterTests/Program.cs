@@ -337,11 +337,16 @@ internal static class Program
                 ""1"": {""CID"": 1, ""FC"": 9000001},
                 ""2"": {""CID"": 2, ""FC"": null},
                 ""3"": {""CID"": 3, ""FC"": 0},
-                ""4"": {""CID"": 4, ""FC"": 9000077}},
-            ""FCData"": {""9000001"": {""FCName"": ""Panda Co"", ""FCPoints"": 5, ""House"": null}}}}");
+                ""4"": {""CID"": 4, ""FC"": 9000077},
+                ""5"": {""CID"": 5, ""FC"": 9000002}},
+            ""FCData"": {""9000001"": {""FCName"": ""Panda Co"", ""FCPoints"": 5, ""House"": null},
+                ""9000002"": {""FCName"": ""Ember Haven"", ""House"": {""City"": 2, ""Ward"": 6, ""Plot"": 27}}}}}");
         var withoutFc = new HashSet<ulong>();
         var parsed = FCTrackerConnector.ReadHousingData(fcTrackerFile, withoutFc);
         System.IO.File.Delete(fcTrackerFile);
+        Check(parsed.TryGetValue(5, out var withHouse) && withHouse.HasHouse && withHouse.HouseCity == 2 && withHouse.HouseWard == 7 && withHouse.HousePlot == 28,
+            "FCTracker: the house address is the real one (FCTracker saves Ward 7 Plot 28 as 6 and 27)");
+        parsed.Remove(5);
         Check(string.Join(",", parsed.Keys.OrderBy(k => k)) == "1" && !parsed[1].HasHouse
               && string.Join(",", withoutFc.OrderBy(k => k)) == "2,3",
             $"FCTracker: in an FC {string.Join(",", parsed.Keys)}, in none {string.Join(",", withoutFc.OrderBy(k => k))} (an FC it has no details for is neither)");

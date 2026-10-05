@@ -3,6 +3,16 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.8.1 - 2026-10-05
+
+No database changes.
+
+- **House addresses were one ward and one plot too low.** FCTracker saves the game's own 0-based
+  numbers (Ward 7 Plot 28 is saved as 6 and 27) and adds 1 only when it shows them; the plugin copied
+  them as saved. It now stores the real address, so the app's Roster, Free Companies tab and house
+  warning show it correctly. Each plugin rewrites housing within the hour after updating, which corrects
+  the stored addresses.
+
 ## 0.8.0 - 2026-10-05
 
 No database changes.
