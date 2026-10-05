@@ -375,6 +375,25 @@ internal static class Program
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
 
+        // Which characters are synced: every one except the unticked, or only the ticked.
+        var chosen = new HashSet<ulong>();
+        var skipped = new HashSet<ulong>();
+        Check(CharacterChoice.ShouldSync(11, false, chosen, skipped), "by default every character is synced");
+        CharacterChoice.Set(11, false, false, chosen, skipped);
+        Check(!CharacterChoice.ShouldSync(11, false, chosen, skipped) && CharacterChoice.ShouldSync(12, false, chosen, skipped),
+            "an unticked character is left out; others (and new ones) are still synced");
+        Check(!CharacterChoice.ShouldSync(12, true, chosen, skipped), "with only ticked characters, a new character is left out");
+        CharacterChoice.Set(13, true, true, chosen, skipped);
+        Check(CharacterChoice.ShouldSync(13, true, chosen, skipped) && !CharacterChoice.ShouldSync(11, true, chosen, skipped),
+            "with only ticked characters, the ticked one is synced");
+        Check(!CharacterChoice.ShouldSync(11, false, chosen, skipped), "switching back keeps the earlier unticked list");
+        CharacterChoice.SetExactly(new ulong[] { 11, 12, 13, 14 }, new HashSet<ulong> { 14 }, true, chosen, skipped);
+        Check(new ulong[] { 11, 12, 13, 14 }.Where(c => CharacterChoice.ShouldSync(c, true, chosen, skipped)).SequenceEqual(new ulong[] { 14 }),
+            "ticking exactly some characters (e.g. those with subs) unticks the rest");
+        CharacterChoice.SetExactly(new ulong[] { 11, 12 }, new HashSet<ulong>(), false, chosen, skipped);
+        Check(!CharacterChoice.ShouldSync(12, false, chosen, skipped) && CharacterChoice.ShouldSync(99, false, chosen, skipped),
+            "untick all leaves out every listed character, but not one added later");
+
         // Sync schedule: every interval, and 5 seconds after a logout, but at most every 30 seconds.
         var five = TimeSpan.FromMinutes(5);
         var sched = new SyncSchedule();

@@ -3,6 +3,19 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.8.0 - 2026-10-05
+
+No database changes.
+
+- **Choose which characters are synced.** A Characters section in settings lists every character
+  AutoRetainer knows on this client, each with a tick box. Either sync every character except the ones
+  unticked (the default, so nothing changes for existing setups and new characters are synced), or only
+  the ones ticked (for an account with many characters of which only a few should reach the app; new
+  characters are then left out until ticked). Each way keeps its own list. Buttons tick only the
+  characters with subs, all, or none. Left-out characters are not read or sent at all, and the sync log
+  says how many were left out.
+- The choice is in its own small class (CharacterChoice.cs), checked by tests/FleetWriterTests.
+
 ## 0.7.0 - 2026-10-04
 
 No database changes.

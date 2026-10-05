@@ -182,15 +182,23 @@ public sealed class Plugin : IDalamudPlugin
 
     // AutoRetainer changes its data on the game's thread, so it is copied there (this runs through
     // Framework.RunOnFrameworkThread); the rest of the sync then works on the copy in the background.
-    // Null when AutoRetainer is not ready. Registered is how many characters AutoRetainer lists.
-    private (List<CharacterRead> Characters, int Registered)? ReadAutoRetainer()
+    // Null when AutoRetainer is not ready. Registered is how many characters AutoRetainer lists;
+    // Left out is how many of those are not chosen for syncing in settings (they are not read at all).
+    private (List<CharacterRead> Characters, int Registered, int LeftOut)? ReadAutoRetainer()
     {
         if (AutoRetainer == null || !AutoRetainer.Ready) return null;
 
         var cids = AutoRetainer.GetRegisteredCharacters();
         var characters = new List<CharacterRead>();
+        var leftOut = 0;
         foreach (var cid in cids)
         {
+            if (!Configuration.ShouldSync(cid))
+            {
+                leftOut++;
+                continue;
+            }
+
             var data = AutoRetainer.GetOfflineCharacterData(cid);
             if (data == null || data.CID == 0) continue;
 
@@ -254,14 +262,14 @@ public sealed class Plugin : IDalamudPlugin
 
             characters.Add(read);
         }
-        return (characters, cids.Count);
+        return (characters, cids.Count, leftOut);
     }
 
     private async Task RunSyncAsync()
     {
         var fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
         if (fromAutoRetainer == null) return;
-        var (characters, registeredCount) = fromAutoRetainer.Value;
+        var (characters, registeredCount, leftOutCount) = fromAutoRetainer.Value;
 
         var charactersWithoutFc = new HashSet<ulong>();
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
@@ -498,7 +506,8 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.Save();
         }
 
-        Log.Information($"Fleet Companion: synced {synced}/{registeredCount} characters; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
+        var leftOutText = leftOutCount > 0 ? $" ({leftOutCount} left out in settings)" : "";
+        Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
     }
 
     private static FleetWriter.InventoryItem ToInventoryItem(AllaganToolsConnector.ParsedItem item) => new()
