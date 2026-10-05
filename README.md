@@ -101,7 +101,7 @@ needs the other updated.
 Requires XIVLauncher, FFXIV and Dalamud installed, and the .NET SDK.
 
 1. Clone with submodules: `git clone --recurse-submodules`
-2. Open `XIVFleetCompanion.slnx` in Visual Studio or Rider and build, or open the repository folder in VS Code and press `Ctrl+Shift+B` (`.vscode/tasks.json` builds Release; Terminal > Run Task also has a Debug build). From a terminal: `dotnet build XIVFleetCompanion/XIVFleetCompanion.csproj -c Release`.
+2. Open `XIVFleetCompanion.slnx` in Visual Studio or Rider and build.
 3. Add the built `XIVFleetCompanion.dll` under Dev Plugin Locations in `/xlsettings`, then enable it in `/xlplugins`.
 
 Licensed under the terms in `LICENSE.md`.
