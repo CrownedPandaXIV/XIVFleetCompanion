@@ -24,6 +24,11 @@ housing eligibility display, etc.) is left to the app.
   row and the chart history every sync (the chart history stores only values that changed).
   Dismissed retainers, chests of Free Companies none of your characters is in any more, and the old
   Free Company details of a character that left its FC are removed as they are noticed.
+- **Characters** in settings chooses which characters are synced: every character AutoRetainer knows
+  except the ones unticked (the default), or only the ones ticked, for an account where only a few of
+  many characters should reach the app. "Tick only those with subs" ticks just the characters with a
+  workshop. Left-out characters are not read or sent at all; anything they sent before can be removed
+  with the app's Remove button on the Roster.
 
 ## Current state per character
 

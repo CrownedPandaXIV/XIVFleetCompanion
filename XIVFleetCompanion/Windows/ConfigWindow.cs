@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.ImGuiFileDialog;
@@ -11,6 +13,12 @@ namespace XIVFleetCompanion.Windows;
 public class ConfigWindow : Window, IDisposable
 {
     private readonly Configuration configuration;
+    private readonly Plugin plugin;
+
+    // Every character AutoRetainer knows on this client, read when the window opens or on Refresh
+    // (not every frame). Null until read; empty when AutoRetainer is not ready.
+    private sealed record KnownCharacter(ulong Cid, string Name, string World, int Subs);
+    private List<KnownCharacter>? knownCharacters;
 
     // Dalamud's file picker: drawn inside the game like this window, so the game keeps running while
     // it is open (the Windows one froze the game until it was closed).
@@ -42,11 +50,99 @@ public class ConfigWindow : Window, IDisposable
         SizeCondition = ImGuiCond.FirstUseEver;
 
         configuration = plugin.Configuration;
+        this.plugin = plugin;
     }
 
     public void Dispose() { }
 
-    public override void OnOpen() => LoadSavedCredential();
+    public override void OnOpen()
+    {
+        LoadSavedCredential();
+        knownCharacters = null;
+    }
+
+    // Reads the characters AutoRetainer knows (this runs on the game's thread, like all drawing).
+    private void ReadKnownCharacters()
+    {
+        var autoRetainer = plugin.AutoRetainer;
+        knownCharacters = new List<KnownCharacter>();
+        if (autoRetainer == null || !autoRetainer.Ready) return;
+        foreach (var cid in autoRetainer.GetRegisteredCharacters())
+        {
+            var data = autoRetainer.GetOfflineCharacterData(cid);
+            if (data == null || data.CID == 0) continue;
+            knownCharacters.Add(new KnownCharacter(data.CID, data.Name, data.World, data.OfflineSubmarineData.Count));
+        }
+        knownCharacters.Sort((a, b) => string.Compare($"{a.Name} {a.World}", $"{b.Name} {b.World}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void SetSync(ulong cid, bool sync)
+    {
+        CharacterChoice.Set(cid, sync, configuration.SyncOnlyChosen, configuration.ChosenCharacters, configuration.SkippedCharacters);
+        configuration.Save();
+    }
+
+    private void SetSyncExactly(Func<KnownCharacter, bool> sync)
+    {
+        if (knownCharacters == null) return;
+        CharacterChoice.SetExactly(knownCharacters.Select(c => c.Cid), knownCharacters.Where(sync).Select(c => c.Cid).ToHashSet(),
+            configuration.SyncOnlyChosen, configuration.ChosenCharacters, configuration.SkippedCharacters);
+        configuration.Save();
+    }
+
+    // Which characters are synced: every one except the unticked, or only the ticked (for an account
+    // with many characters of which only a few should reach the app).
+    private void DrawCharacters()
+    {
+        if (!ImGui.CollapsingHeader("Characters")) return;
+        if (knownCharacters == null) ReadKnownCharacters();
+
+        if (ImGui.RadioButton("Sync every character (untick any to leave out)", !configuration.SyncOnlyChosen))
+        {
+            configuration.SyncOnlyChosen = false;
+            configuration.Save();
+        }
+        if (ImGui.RadioButton("Only sync the characters I tick", configuration.SyncOnlyChosen))
+        {
+            configuration.SyncOnlyChosen = true;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("New characters are then left out until ticked.");
+
+        if (ImGui.Button("Refresh list")) ReadKnownCharacters();
+        ImGui.SameLine();
+        if (ImGui.Button("Tick only those with subs")) SetSyncExactly(c => c.Subs > 0);
+        ImGui.SameLine();
+        if (ImGui.Button("Tick all")) SetSyncExactly(_ => true);
+        ImGui.SameLine();
+        if (ImGui.Button("Untick all")) SetSyncExactly(_ => false);
+
+        var list = knownCharacters!;
+        if (list.Count == 0)
+        {
+            ImGui.TextWrapped("AutoRetainer is not running or knows no characters on this client.");
+            return;
+        }
+
+        var syncing = list.Count(c => configuration.ShouldSync(c.Cid));
+        ImGui.Text($"Syncing {syncing} of {list.Count} characters.");
+        ImGui.TextDisabled("Left-out characters are not read or sent. Anything they sent before can be removed with the app's Remove button on the Roster.");
+
+        using (var child = ImRaii.Child("##characters", new Vector2(0, Math.Min(list.Count, 10) * ImGui.GetFrameHeightWithSpacing() + 8), true))
+        {
+            if (child.Success)
+            {
+                foreach (var c in list)
+                {
+                    var sync = configuration.ShouldSync(c.Cid);
+                    var subs = c.Subs > 0 ? $"  ({c.Subs} sub{(c.Subs == 1 ? "" : "s")})" : "";
+                    if (ImGui.Checkbox($"{c.Name} @ {c.World}{subs}##{c.Cid}", ref sync))
+                        SetSync(c.Cid, sync);
+                }
+            }
+        }
+    }
 
     // Fills the form from the saved credential for the current connection mode (or the defaults).
     private void LoadSavedCredential()
@@ -97,6 +193,9 @@ public class ConfigWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app and the Discord alerts see its subs a few seconds later instead of at the next interval.");
+
+        ImGui.Spacing();
+        DrawCharacters();
 
         ImGui.Spacing();
         ImGui.Separator();
