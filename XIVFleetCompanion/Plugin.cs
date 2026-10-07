@@ -282,7 +282,12 @@ public sealed class Plugin : IDalamudPlugin
     private async Task RunSyncAsync()
     {
         var fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
-        if (fromAutoRetainer == null) return;
+        if (fromAutoRetainer == null)
+        {
+            await ReportAutoRetainerNotRunningAsync();
+            return;
+        }
+        autoRetainerMissedSyncs = 0;
         var (characters, registeredCount, leftOutCount) = fromAutoRetainer.Value;
 
         var charactersWithoutFc = new HashSet<ulong>();
@@ -337,6 +342,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // What this PC could not see this sync, in plain sentences, for the app's PCs panel.
         var problems = new List<string>();
+        var fcsWithSubs = characters.Where(c => c.Snapshot.SubmarineCount > 0 && c.Snapshot.FcId != 0).Select(c => c.Snapshot.FcId).ToHashSet();
         if (!allaganToolsReady) problems.Add("AllaganTools is not running: bags, retainers' items and FC chests are not updated.");
 
         var snapshots = new List<FleetWriter.CharacterSnapshot>();
@@ -451,10 +457,14 @@ public sealed class Plugin : IDalamudPlugin
                 if (character.FcId != 0)
                 {
                     var chestSeen = SeenItems(character.FcId);
+                    // Only asked for when the FC has subs: it holds their ceruleum, repair kits and salvage.
                     if (chestSeen == null)
                     {
-                        problems.Add($"Open the Free Company chest of {who}'s FC.");
-                        WarnOnce($"chest:{character.FcId}", $"Fleet Companion: AllaganTools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
+                        if (fcsWithSubs.Contains(character.FcId))
+                        {
+                            problems.Add($"Open the Free Company chest of {who}'s FC.");
+                            WarnOnce($"chest:{character.FcId}", $"Fleet Companion: AllaganTools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
+                        }
                     }
                     else
                     {
@@ -619,6 +629,24 @@ public sealed class Plugin : IDalamudPlugin
         return root == null ? null : Path.Combine(root, name);
     }
 
+    // Syncs in a row that found AutoRetainer not running.
+    private int autoRetainerMissedSyncs = 0;
+
+    // Nothing can be synced without AutoRetainer, but the app's PCs tab is told this PC's AutoRetainer is
+    // not running (sql/008). Only from the second sync in a row, so AutoRetainer still loading as the game
+    // starts is not reported.
+    private async Task ReportAutoRetainerNotRunningAsync()
+    {
+        if (++autoRetainerMissedSyncs < 2) return;
+        WarnOnce("autoretainer", "Fleet Companion: AutoRetainer is not running; nothing can be synced until it is.");
+        if (!detailsTablesReady && DateTime.UtcNow >= detailsTablesAskAgainAt) detailsTablesReady = true;
+        if (!detailsTablesReady) return;
+        await using var conn = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
+        if (conn == null) return;
+        if (!await DetailsWriter.WriteAutoRetainerNotRunningAsync(conn, Environment.MachineName, Configuration.AccountLabel ?? "", VersionText))
+            DetailsTablesMissing();
+    }
+
     // AutoRetainer's statistics files already read, by when they last changed, so unchanged ones are not
     // read again.
     private readonly Dictionary<string, DateTime> ventureFilesRead = new();
@@ -649,7 +677,7 @@ public sealed class Plugin : IDalamudPlugin
                 WarnOnce("submarinetracker", $"Fleet Companion: could not read SubmarineTracker's loot ({stPath}) — {ex.Message}");
             }
         }
-        else if (!stFound && fcIds.Count > 0)
+        else if (!stFound && characters.Any(c => c.Snapshot.SubmarineCount > 0))
         {
             problems.Add("SubmarineTracker was not found: loot per voyage is not recorded.");
         }
@@ -687,7 +715,8 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
-        if (!fcTrackerFound) problems.Add("FCTracker's file was not found: Free Company and house details are not updated.");
+        // FCTracker is optional (only Free Company house details): its column on the app's PCs tab says
+        // whether it was found, without listing it as a problem.
         var status = new DetailsWriter.PcStatus
         {
             PcName = Environment.MachineName,

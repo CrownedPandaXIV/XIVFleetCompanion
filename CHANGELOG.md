@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.11.0 - 2026-10-07
+
+No database change. For app 0.21.0.
+
+- **AutoRetainer status.** When AutoRetainer is not running, nothing can be synced, but the app's PCs tab
+  is now told so (from the second sync attempt in a row, so AutoRetainer still loading as the game starts
+  is not reported). The PC keeps its last sync's time and counts.
+- **Only what is used is asked for.** For players who run only retainers or only subs:
+  - The Free Company chest is only asked for when the FC has subs (it holds their ceruleum, repair kits and
+    salvage). A chest that was opened is still read.
+  - SubmarineTracker missing is only reported when a synced character has subs.
+  - FCTracker is optional (only Free Company house details): not finding it is shown, but no longer listed as
+    something to fix, here or in **Check what I can see**.
+
 ## 0.10.1 - 2026-10-07
 
 Optional database change: `sql/009_voyage_sector_order.sql` (adds one column; safe to run more than once).

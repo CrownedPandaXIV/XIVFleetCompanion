@@ -505,6 +505,16 @@ internal static class Program
         Check(report.Contains("Bex @ Maduin\r\n  Last synced: 3 days ago".Replace("\r\n", Environment.NewLine)) && report.Contains("  Free Company: none")
               && CheckReport.ToFix(facts.Characters[1], facts).Count == 0, "a character with nothing to fix has no ! lines");
 
+        // The FC chest holds the subs' supplies: it is only asked for when the FC has subs. FCTracker is
+        // optional, so not finding it is said but not counted as something to fix.
+        facts.Characters[0].Subs = 0;
+        facts.FcTrackerFound = false;
+        report = CheckReport.ToText(facts);
+        Check(!report.Contains("Open the Free Company chest") && report.Contains("FCTracker: not found, optional") && CheckReport.ToFixCount(facts) == 1,
+            "an FC without subs is not asked to open its chest, and a missing FCTracker is not a thing to fix:\n" + report);
+        facts.Characters[0].Subs = 4;
+        facts.FcTrackerFound = true;
+
         facts.AllaganToolsReady = false;
         facts.DatabaseProblem = "no saved connection (Settings → Postgres).";
         report = CheckReport.ToText(facts);
@@ -545,6 +555,16 @@ internal static class Program
         pc.Problems.Clear();
         await DetailsWriter.WritePcStatusAsync(conn, pc);
         Check(await DetailsWriter.WritePcCheckAsync(conn, "DESKTOP-1", "Account 1", "0.10.0", "Nothing to fix.", 0), "a check result is written");
+        Check(await DetailsWriter.WriteAutoRetainerNotRunningAsync(conn, "DESKTOP-1", "Account 1", "0.11.0")
+              && Show(await Rows(conn, "SELECT autoretainer_ready, characters_synced, last_sync_at IS NOT NULL, problems[1], plugin_version FROM companion_pc_status")) ==
+                 "False,2,True,AutoRetainer is not running: nothing can be synced.,0.11.0",
+            "AutoRetainer not running: said, keeping the last sync's time and counts");
+        await DetailsWriter.WriteAutoRetainerNotRunningAsync(conn, "LAPTOP", "Account 2", "0.11.0");
+        Check(Show(await Rows(conn, "SELECT autoretainer_ready, last_sync_at IS NULL FROM companion_pc_status WHERE pc_name = 'LAPTOP'")) == "False,True",
+            "a PC that has never synced is listed with AutoRetainer not running");
+        await Exec(conn, "DELETE FROM companion_pc_status WHERE pc_name = 'LAPTOP'");
+        pc.PluginVersion = "0.11.0";
+        await DetailsWriter.WritePcStatusAsync(conn, pc);
         var pcRows = await Rows(conn, "SELECT pc_name, account_label, characters_synced, cardinality(problems), check_text, check_to_fix, last_sync_at IS NOT NULL FROM companion_pc_status");
         Check(Show(pcRows) == "DESKTOP-1,Account 1,2,0,Nothing to fix.,0,True",
             "one row per PC and account: the newest status, and the check kept beside it: " + Show(pcRows));

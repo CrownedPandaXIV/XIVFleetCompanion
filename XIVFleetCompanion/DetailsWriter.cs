@@ -63,6 +63,27 @@ namespace XIVFleetCompanion
             });
         }
 
+        // AutoRetainer is not running on this PC, so nothing was synced: says so, keeping the last sync's time
+        // and counts (they are what the app still shows).
+        public const string AutoRetainerNotRunning = "AutoRetainer is not running: nothing can be synced.";
+
+        public static async Task<bool> WriteAutoRetainerNotRunningAsync(NpgsqlConnection conn, string pcName, string accountLabel, string pluginVersion)
+        {
+            return await IfTableExists(async () =>
+            {
+                await using var cmd = new NpgsqlCommand(@"
+                    INSERT INTO companion_pc_status (pc_name, account_label, plugin_version, autoretainer_ready, problems)
+                    VALUES (@pc, @account, @version, false, @problems)
+                    ON CONFLICT (pc_name, account_label) DO UPDATE SET
+                        plugin_version = EXCLUDED.plugin_version, autoretainer_ready = false, problems = EXCLUDED.problems", conn);
+                cmd.Parameters.AddWithValue("pc", pcName);
+                cmd.Parameters.AddWithValue("account", accountLabel);
+                cmd.Parameters.AddWithValue("version", pluginVersion);
+                cmd.Parameters.AddWithValue("problems", new[] { AutoRetainerNotRunning });
+                await cmd.ExecuteNonQueryAsync();
+            });
+        }
+
         // The last "Check what I can see" result, so the app can show it.
         public static async Task<bool> WritePcCheckAsync(NpgsqlConnection conn, string pcName, string accountLabel, string pluginVersion, string text, int toFix)
         {

@@ -95,7 +95,8 @@ public static class CheckReport
                 fixes.Add($"Log in as {c.Name} on this PC once, so AllaganTools sees their bags.");
             foreach (var r in c.Retainers.Where(r => r.Items == null))
                 fixes.Add($"Open {r.Name} at a summoning bell on this PC.");
-            if (c.Chest != null && c.Chest.Items == null)
+            // The FC chest holds the subs' ceruleum, repair kits and salvage: only asked for when the FC has subs.
+            if (c.Chest != null && c.Chest.Items == null && FcHasSubs(c.FcId, f))
                 fixes.Add($"Open the Free Company chest{(string.IsNullOrEmpty(c.FcName) ? "" : $" of {c.FcName}")} on this PC.");
         }
         if (f.FcTrackerFound && c.FcId != 0 && c.Housing == null)
@@ -105,6 +106,9 @@ public static class CheckReport
         return fixes;
     }
 
+    // Whether any character here in that Free Company has subs.
+    public static bool FcHasSubs(ulong fcId, Facts f) => fcId != 0 && f.Characters.Any(x => x.FcId == fcId && x.Subs > 0);
+
     public static int ToFixCount(Facts f) => f.Characters.Sum(c => ToFix(c, f).Count) + ToolProblems(f).Count;
 
     // Problems with the other plugins or the database, which affect every character.
@@ -113,7 +117,6 @@ public static class CheckReport
         var problems = new List<string>();
         if (!f.AutoRetainerReady) problems.Add("AutoRetainer is not running: nothing can be synced.");
         if (!f.AllaganToolsReady) problems.Add("AllaganTools is not running: bags, retainers' items and FC chests are not updated.");
-        if (!f.FcTrackerFound) problems.Add("FCTracker's file was not found (Settings → FCTracker Config Path): Free Company and house details are not updated.");
         if (f.DatabaseProblem != null) problems.Add($"Database not checked: {f.DatabaseProblem}");
         return problems;
     }
@@ -128,7 +131,9 @@ public static class CheckReport
             ? $"AutoRetainer: running, {Plural(f.Registered, "character")}" + (f.LeftOut > 0 ? $" ({f.LeftOut} left out in settings)" : "")
             : "AutoRetainer: not running");
         sb.AppendLine($"AllaganTools: {(f.AllaganToolsReady ? "running" : "not running")}");
-        sb.AppendLine($"FCTracker: {(f.FcTrackerFound ? "found" : "not found")} ({f.FcTrackerPath})");
+        sb.AppendLine(f.FcTrackerFound
+            ? $"FCTracker: found ({f.FcTrackerPath})"
+            : $"FCTracker: not found, optional: only for Free Company house details (Settings → FCTracker Config Path: {f.FcTrackerPath})");
         sb.AppendLine($"Database: {(databaseChecked ? "checked" : "not checked, " + f.DatabaseProblem)}");
 
         var total = ToFixCount(f);
