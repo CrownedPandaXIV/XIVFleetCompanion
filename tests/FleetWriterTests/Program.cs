@@ -560,6 +560,23 @@ internal static class Program
               && newestVoyage != null && newestVoyage.Count == 1 && newestVoyage[9000001] == 1790000000,
             "each sector is stored once, and the newest voyage per FC is known so only newer ones are read");
 
+        // sql/009: the order a voyage ran its sectors in. Voyages stored before it count as not read yet,
+        // so the next sync fills in their order; a stored order is not changed.
+        await RunScript(conn, "sql/009_voyage_sector_order.sql");
+        await RunScript(conn, "sql/009_voyage_sector_order.sql");
+        var beforeLegs = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001 });
+        loot[0].Leg = 2;
+        loot[1].Leg = 1;
+        Check(beforeLegs != null && beforeLegs.Count == 0 && await DetailsWriter.WriteVoyageLootAsync(conn, loot),
+            "after sql/009 (run twice), voyages stored without their order are read again");
+        loot[0].Leg = 1;
+        loot[1].Leg = 2;
+        await DetailsWriter.WriteVoyageLootAsync(conn, loot);
+        var legRows = await Rows(conn, "SELECT sector, leg FROM companion_voyage_loot ORDER BY leg");
+        var afterLegs = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001 });
+        Check(Show(legRows) == "22,1 / 15,2" && afterLegs != null && afterLegs[9000001] == 1790000000,
+            "their order is filled in once, and then they count as read: " + Show(legRows));
+
         var ventures = new List<DetailsWriter.VentureRow>
         {
             new() { OwnerCid = 18014498578000001, RetainerName = "Oldret", At = 1790000100, ItemId = 5111, Quantity = 120, VentureId = 395 },
@@ -626,14 +643,17 @@ internal static class Program
                     INSERT INTO submarine VALUES (x'ce00895440', 1700000000, 'Sub-1');
                     INSERT INTO loot VALUES (x'ce00895440', 1700000000, 1790000000, 15, 22500, 3, 0, 22505, 1, 0, 1790000000, 1);
                     INSERT INTO loot VALUES (x'ce00895440', 1700000000, 1790090000, 15, 22500, 2, 0, 0, 0, 0, 1790090000, 1);
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000000, 1790090000, 4, 22501, 1, 0, 0, 0, 0, 1790090000, 1);
                     INSERT INTO loot VALUES (x'ce00895441', 1700000001, 1790090000, 3, 22501, 1, 0, 0, 0, 0, 1790090000, 0);";
                 cmd.ExecuteNonQuery();
             }
             var all = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long>(), new ulong[] { 0x895440 });
             var newer = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long> { [0x895440] = 1790000000 }, new ulong[] { 0x895440, 0x895441 });
-            Check(all.Count == 2 && all[0].SubName == "Sub-1" && all[0].AdditionalItem == 22505 && all[0].PrimaryCount == 3
-                  && newer.Count == 2 && newer.All(r => r.Return == 1790090000) && newer.Any(r => r.FcId == 0x895441 && !r.Valid && r.SubName == null),
+            Check(all.Count == 3 && all[0].SubName == "Sub-1" && all[0].AdditionalItem == 22505 && all[0].PrimaryCount == 3
+                  && newer.Count == 3 && newer.All(r => r.Return == 1790090000) && newer.Any(r => r.FcId == 0x895441 && !r.Valid && r.SubName == null),
                 "SubmarineTracker's loot is read per FC asked for, only newer than what is stored, with the sub's name");
+            Check(string.Join(" ", all.Select(r => $"{r.Sector}:{r.Leg}")) == "15:1 15:1 4:2" && newer.First(r => r.FcId == 0x895441).Leg == 1,
+                "each sector's leg is the order SubmarineTracker added it in (the order it was visited), counted per voyage");
 
             var statFile = System.IO.Path.Combine(dir, "0040000000ABCDEF_Oldret.statistic.json");
             System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700},{""I"":0,""T"":1790003800}],""PlayerName"":""Aki@Maduin"",""RetainerName"":""Oldret""}");

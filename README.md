@@ -85,7 +85,9 @@ then), each sync also stores:
   ...). The last **Check what I can see** result is kept beside it.
 - **Loot per voyage** (`companion_voyage_loot`): one row per sector of each voyage SubmarineTracker
   recorded, for the Free Companies of the characters synced here. Only voyages newer than those stored
-  are read.
+  are read. From 0.10.1, with `sql/009_voyage_sector_order.sql` run once, each sector also has its place
+  in the route (`leg`: 1 for the first sector visited), so routes show in the order they were run; the
+  next sync fills it in for the voyages already stored.
 - **Venture rewards** (`companion_venture_result`): one row per reward from AutoRetainer's statistics
   files of the characters synced here. Only new rewards are added.
 - **Market listings** (`companion_market_listing`): what each retainer AllaganTools has seen has up for

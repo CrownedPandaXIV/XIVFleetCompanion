@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.10.1 - 2026-10-07
+
+Optional database change: `sql/009_voyage_sector_order.sql` (adds one column; safe to run more than once).
+Everything works as before until it has been run. For app 0.20.2.
+
+- **Route order.** Each voyage's sectors are stored with the order they were run in (the order
+  SubmarineTracker recorded them), so the app shows routes as they were run instead of by sector number.
+  The first sync after sql/009 fills in the order of the voyages already stored.
+
 ## 0.10.0 - 2026-10-07
 
 Optional database change: `sql/008_pcs_loot_ventures_listings.sql` (adds four tables; safe to run more
