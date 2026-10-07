@@ -3,6 +3,18 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.11.1 - 2026-10-07
+
+No database change.
+
+- **A database error no longer cuts a sync short.** If saving this PC's status, voyage loot or venture
+  rewards fails, it is logged and the rest of the sync (the history for Trends, the last sync time) still
+  saves. Before, the sync stopped there.
+- **"Open the Free Company chest" is listed once per FC** on the app's PCs tab, not once for every
+  character in it.
+- Tidying, with no change in what the plugin does: shared code for finding other plugins' folders, for
+  asking again for the sql/008 tables, and for counting items in **Check what I can see**.
+
 ## 0.11.0 - 2026-10-07
 
 No database change. For app 0.21.0.

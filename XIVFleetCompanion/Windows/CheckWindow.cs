@@ -169,17 +169,14 @@ public class CheckWindow : Window, IDisposable
 
     // How many items AllaganTools has for a character or retainer (empty slots left out), or null
     // when it has never seen it (it then answers with nothing at all, not even empty slots).
-    private int? ItemCount(ulong id)
+    private int? ItemCount(ulong id, Func<AllaganToolsConnector.ParsedItem, bool>? where = null)
     {
         var raw = plugin.AllaganTools?.GetCharacterItems(id);
-        return raw == null || raw.Count == 0 ? null : raw.Count(i => i.Quantity > 0);
+        return raw == null || raw.Count == 0 ? null : raw.Count(i => i.Quantity > 0 && (where == null || where(i)));
     }
 
-    private int? ChestCount(ulong fcId)
-    {
-        var raw = plugin.AllaganTools?.GetCharacterItems(fcId);
-        return raw == null || raw.Count == 0 ? null : raw.Count(i => i.Quantity > 0 && i.SortedContainer >= 20000 && i.SortedContainer <= 20004);
-    }
+    // The FC chest's items only (AllaganTools' containers 20000-20004).
+    private int? ChestCount(ulong fcId) => ItemCount(fcId, i => i.SortedContainer >= 20000 && i.SortedContainer <= 20004);
 
     public override void Draw()
     {
