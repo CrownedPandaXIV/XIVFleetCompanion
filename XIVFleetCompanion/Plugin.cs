@@ -46,6 +46,7 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+    private CheckWindow CheckWindow { get; init; }
 
     public Plugin()
     {
@@ -72,13 +73,15 @@ public sealed class Plugin : IDalamudPlugin
 
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this, submarineImagePath);
+        CheckWindow = new CheckWindow(this);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
+        WindowSystem.AddWindow(CheckWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion main window."
+            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character, without writing anything."
         });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
@@ -99,6 +102,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ConfigWindow.Dispose();
         MainWindow.Dispose();
+        CheckWindow.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
 
@@ -111,8 +115,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        MainWindow.Toggle();
+        if (args.Trim().Equals("check", StringComparison.OrdinalIgnoreCase))
+            OpenCheck();
+        else
+            MainWindow.Toggle();
     }
+
+    public void OpenCheck() => CheckWindow.OpenAndRun();
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
@@ -345,79 +354,65 @@ public sealed class Plugin : IDalamudPlugin
                 await WriteIfChanged($"retainers:{cid}", FleetWriter.Fingerprint(retainers),
                     () => FleetWriter.WriteRetainersAsync(conn, cid, retainers), $"retainers for {who}");
 
-            // Inventories are replaced as a whole, so they are only written when AllaganTools
-            // actually answered. Otherwise (AllaganTools disabled, updating after a patch, or
-            // with nothing cached for this character yet) the stored inventory is left as it
-            // was instead of being emptied.
+            // Items come from AllaganTools per source: the character's own bags and each retainer.
+            // AllaganTools answers with nothing at all (not even empty slots) for a source it has
+            // never seen, such as a retainer never opened at a bell on this PC; that source keeps its
+            // last stored items instead of being cleared, and the log says which retainer to open.
             if (allaganToolsReady)
             {
-                var personalItems = AllaganTools!.GetCharacterItems(cid);
-                var personalAndRetainerItems = personalItems?.Where(i => i.Quantity > 0).ToList();
-
-                // A character always carries something (at least the gear they wear), so
-                // an empty answer means AllaganTools has no data for them, not an empty bag.
-                var inventoryComplete = personalAndRetainerItems != null && personalAndRetainerItems.Count > 0;
-                if (inventoryComplete)
+                var sources = new List<FleetWriter.InventorySource>
                 {
-                    foreach (var retainer in retainers)
+                    new() { Id = cid, Name = who, SeenItems = SeenItems(cid) },
+                };
+                foreach (var retainer in retainers)
+                    sources.Add(new() { Id = retainer.RetainerId, Name = retainer.Name, SeenItems = SeenItems(retainer.RetainerId) });
+
+                var plan = FleetWriter.PlanInventory(cid, sources, retainerListKnown: retainers.Count > 0);
+                if (!plan.BagsSeen)
+                    WarnOnce($"bags:{cid}", $"Fleet Companion: AllaganTools has not seen {who}'s bags on this PC (log in as {who} once with AllaganTools running); their last stored items are kept.");
+                foreach (var unseen in plan.Unseen)
+                    WarnOnce($"retainer:{unseen.Id}", $"Fleet Companion: AllaganTools has not seen retainer {unseen.Name}'s items ({who}); open {unseen.Name} at a summoning bell on this PC. Its last stored items are kept.");
+
+                if (plan.Read.Count > 0)
+                {
+                    await WriteIfChanged($"inventory:{cid}", FleetWriter.Fingerprint(plan),
+                        () => FleetWriter.WriteInventoryAsync(conn, cid, plan), $"inventory for {who}");
+
+                    // Salvage item quantities for the salvage and income charts, from what is now
+                    // stored (fresh items, plus the last stored items of any retainer not seen), so a
+                    // retainer AllaganTools missed is never recorded as a drop to zero.
+                    try
                     {
-                        var retainerItems = AllaganTools.GetCharacterItems(retainer.RetainerId);
-                        if (retainerItems == null)
-                        {
-                            inventoryComplete = false;
-                            break;
-                        }
-                        personalAndRetainerItems!.AddRange(retainerItems.Where(i => i.Quantity > 0));
+                        var totals = await FleetWriter.ReadItemTotalsAsync(conn, cid, SalvageItemIds);
+                        foreach (var salvageId in SalvageItemIds)
+                            AddMetric(metrics, "character", cid, $"item_qty:{salvageId}", totals[salvageId]);
+                    }
+                    catch (PostgresException ex)
+                    {
+                        Log.Warning($"Fleet Companion: could not read stored salvage counts for {who} — {ex.Message}");
                     }
                 }
 
-                // FC chest data comes from the FC's own ID, not from a
-                // character's personal items. Null when it could not be read.
-                List<AllaganToolsConnector.ParsedItem>? fcChestItems = null;
+                // FC chest data comes from the FC's own id. A chest AllaganTools has never seen (not
+                // opened on this PC) answers with nothing and is left as stored; a seen chest is
+                // written even with zero items, so a chest that was emptied is cleared. Keyed by FC,
+                // so characters sharing an FC do not write the same chest twice.
                 if (character.FcId != 0)
                 {
-                    fcChestItems = AllaganTools.GetCharacterItems(character.FcId)?
-                        .Where(i => i.Quantity > 0 && i.SortedContainer >= 20000 && i.SortedContainer <= 20004)
-                        .ToList();
-                }
-
-                // Salvage item quantities (bags + retainers for the character, chest for
-                // the FC). Only recorded when AllaganTools actually returned items, so a
-                // missing cache is never stored as a real drop to zero.
-                if (inventoryComplete)
-                {
-                    foreach (var salvageId in SalvageItemIds)
-                        AddMetric(metrics, "character", cid, $"item_qty:{salvageId}",
-                            personalAndRetainerItems!.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
-                }
-
-                if (character.FcId != 0 && fcChestItems != null && fcChestItems.Count > 0)
-                {
-                    foreach (var salvageId in SalvageItemIds)
-                        AddMetric(metrics, "fc", character.FcId, $"item_qty:{salvageId}",
-                            fcChestItems.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
-                }
-
-                if (inventoryComplete)
-                {
-                    var inventory = personalAndRetainerItems!.Select(ToInventoryItem).ToList();
-                    await WriteIfChanged($"inventory:{cid}", FleetWriter.Fingerprint(inventory),
-                        () => FleetWriter.WriteInventoryAsync(conn, cid, inventory), $"inventory for {who}");
-                }
-                else
-                {
-                    Log.Warning($"Fleet Companion: AllaganTools returned no inventory for {who}; the stored inventory was left as it was.");
-                }
-
-                // Written even with zero items, so a chest that was emptied is cleared.
-                // AllaganTools only has fresh FC chest data after the in-game
-                // FC chest UI has been opened. Skipped when the chest could not be read.
-                // Keyed by FC, so characters sharing an FC do not write the same chest twice.
-                if (character.FcId != 0 && fcChestItems != null)
-                {
-                    var chest = fcChestItems.Select(ToInventoryItem).ToList();
-                    await WriteIfChanged($"fcchest:{character.FcId}", FleetWriter.Fingerprint(chest),
-                        () => FleetWriter.WriteFcInventoryAsync(conn, character.FcId, chest), $"FC chest inventory for {who}");
+                    var chestSeen = SeenItems(character.FcId);
+                    if (chestSeen == null)
+                    {
+                        WarnOnce($"chest:{character.FcId}", $"Fleet Companion: AllaganTools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
+                    }
+                    else
+                    {
+                        var chest = chestSeen.Where(i => i.SortedContainer >= 20000 && i.SortedContainer <= 20004).ToList();
+                        foreach (var salvageId in SalvageItemIds)
+                            AddMetric(metrics, "fc", character.FcId, $"item_qty:{salvageId}",
+                                chest.Where(i => i.ItemId == salvageId).Sum(i => (long)i.Quantity));
+                        await WriteIfChanged($"fcchest:{character.FcId}", FleetWriter.Fingerprint(chest),
+                            () => FleetWriter.WriteFcInventoryAsync(conn, character.FcId, chest), $"FC chest inventory for {who}");
+                    }
                 }
             }
 
@@ -508,6 +503,27 @@ public sealed class Plugin : IDalamudPlugin
 
         var leftOutText = leftOutCount > 0 ? $" ({leftOutCount} left out in settings)" : "";
         Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
+    }
+
+    // The items AllaganTools has for one character, retainer or FC (empty slots left out), or null when
+    // it has never seen that source: it then answers with nothing at all, not even empty slots.
+    private List<FleetWriter.InventoryItem>? SeenItems(ulong sourceId)
+    {
+        var raw = AllaganTools?.GetCharacterItems(sourceId);
+        if (raw == null || raw.Count == 0) return null;
+        return raw.Where(i => i.Quantity > 0).Select(ToInventoryItem).ToList();
+    }
+
+    // A warning about something only the player can fix (open a retainer at a bell) is logged once per
+    // plugin session, not every sync.
+    private readonly HashSet<string> warned = new();
+    private void WarnOnce(string key, string message)
+    {
+        lock (warned)
+        {
+            if (!warned.Add(key)) return;
+        }
+        Log.Warning(message);
     }
 
     private static FleetWriter.InventoryItem ToInventoryItem(AllaganToolsConnector.ParsedItem item) => new()

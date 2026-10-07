@@ -12,6 +12,7 @@
     <Compile Include="..\..\XIVFleetCompanion\FCTrackerConnector.cs" Link="FCTrackerConnector.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SyncSchedule.cs" Link="SyncSchedule.cs" />
     <Compile Include="..\..\XIVFleetCompanion\CharacterChoice.cs" Link="CharacterChoice.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\CheckReport.cs" Link="CheckReport.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />

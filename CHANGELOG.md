@@ -3,6 +3,29 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.9.0 - 2026-10-07
+
+No database changes. Works with any app version; app 0.18.0 lists the retainers whose items have not
+been seen.
+
+- **A retainer AllaganTools has not seen no longer loses its stored items.** AllaganTools answers with
+  nothing at all for a retainer it has never seen on this PC (not opened at a summoning bell since it was
+  installed or hired), and the plugin used to store that as an empty retainer, deleting whatever was
+  stored for it. Items are now stored per source: the bags and each retainer AllaganTools has seen are
+  replaced, and an unseen retainer keeps its last stored items. A dismissed retainer's items still go.
+  The same for the bags of a character not yet seen on this PC, and for an FC chest not opened on this
+  PC (it used to be cleared).
+- **The log says what to open.** For example: "AllaganTools has not seen retainer Newret's items (Aki
+  Main@Maduin); open Newret at a summoning bell on this PC." Once per retainer per game session, not every
+  sync.
+- **Salvage counts** for the salvage and income charts are now worked out from what is stored after the
+  upload, so they include an unseen retainer's last stored salvage instead of counting it as zero.
+- **Check what I can see** (button in the main window, or `/xivfleet check`): goes through every
+  character this plugin syncs and shows what AutoRetainer, AllaganTools (bags, each retainer, the FC
+  chest) and FCTracker (the house) have for it, when each was last stored in the database, and what to
+  open or log into to fix anything missing. It only reads; nothing is written. **Copy results** copies it
+  to share.
+
 ## 0.8.1 - 2026-10-05
 
 No database changes.

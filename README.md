@@ -10,12 +10,15 @@ housing eligibility display, etc.) is left to the app.
 ## Data sources
 
 - **AutoRetainer** (via `AutoRetainerAPI`): characters, retainers, submarines, Gil, Ceruleum, repair kits
-- **AllaganTools**: personal, retainer and Free Company chest inventory. FC chest data is only available after the in-game FC chest UI has been opened, so it can be empty on a given sync. When AllaganTools is not running, the stored inventories are kept as they were rather than emptied.
+- **AllaganTools**: personal, retainer and Free Company chest inventory. AllaganTools only knows a retainer's items once it has been opened at a summoning bell on that PC, and the FC chest once the chest has been opened; until then their last stored items are kept (the log names what to open), and so is everything when AllaganTools is not running.
 - **FCTracker**: Free Company housing, founding date and eligibility data (read from its config file)
 
 ## Usage
 
 - `/xivfleet` opens the main window; the plugin installer's config button opens settings.
+- `/xivfleet check` (or **Check what I can see** in the main window) shows, per character, what the plugin
+  can see from AutoRetainer, AllaganTools and FCTracker, when each part was last stored, and what to open
+  to fix anything missing. It writes nothing; **Copy results** copies it to share.
 - Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection. The form shows the saved details (never the password); leave the password box empty to keep the saved one. "Clear Saved Credentials" asks for a second click.
 - The plugin syncs on the interval set in settings, and also about 5 seconds after a character logs
   out (AutoRetainer logs a character out once it has finished with it), at most once every 30 seconds;
@@ -71,7 +74,7 @@ stay small. Currently recorded:
 | `gil`, `ceruleum`, `repair_kits` | character | |
 | `retainer_count`, `submarine_count`, `num_sub_slots` | character | from 0.3.0; `sql/004` copies the earlier changes from the snapshot history |
 | `fc_points` | Free Company, and the FC leader's character when it is one of yours | from FCTracker; labelled with the leader's name (on the FC) or the FC's name (on the leader). A leader change is recorded even if the points are unchanged |
-| `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers; FC = chest, only when AllaganTools has chest data |
+| `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers as stored (an unseen retainer counts with its last stored items); FC = chest, only when AllaganTools has chest data |
 
 **Setup, once:** run `sql/001_metric_history.sql` in the database the plugin writes to. Until
 that has been run, the plugin logs a warning each sync and skips metric history (everything

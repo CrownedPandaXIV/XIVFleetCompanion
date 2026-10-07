@@ -162,39 +162,70 @@ internal static class Program
         Check(Show(changeLog) == "18014498578000002,fc_id,null,9000002 / 18014498578000002,name,Bex,Bex Renamed",
             "a rename and a new Free Company are logged; gil changes and new characters are not: " + Show(changeLog));
 
-        // Inventory: replaced as a whole, gear sets kept as int arrays.
+        // Inventory: per source (bags, each retainer), gear sets kept as int arrays.
         const ulong owner = 18014498578000001;
-        var items = new List<FleetWriter.InventoryItem>
+        const ulong retA = 33777097243660301, retB = 33777097243660302;
+        FleetWriter.InventorySource Seen(ulong id, params FleetWriter.InventoryItem[] items) => new() { Id = id, Name = $"src{id % 100}", SeenItems = items.ToList() };
+        FleetWriter.InventorySource Unseen(ulong id) => new() { Id = id, Name = $"Ret{id % 100}" };
+        FleetWriter.InventoryItem Item(uint container, int slot, uint item, uint qty, params uint[] gear) =>
+            new() { RetainerId = 0, SortedContainer = container, SortedSlotIndex = slot, ItemId = item, Quantity = qty, GearSetIds = gear };
+
+        var plan = FleetWriter.PlanInventory(owner, new[]
         {
-            new() { RetainerId = owner, SortedContainer = 0, SortedSlotIndex = 0, ItemId = 22500, Quantity = 12 },
-            new() { RetainerId = owner, SortedContainer = 1000, SortedSlotIndex = 3, ItemId = 40000, Quantity = 1, GearSetIds = new uint[] { 1, 4 } },
-            new() { RetainerId = 33777097243660301, SortedContainer = 10000, SortedSlotIndex = 7, ItemId = 21792, Quantity = 2 },
-        };
-        await FleetWriter.WriteInventoryAsync(conn, owner, items);
-        var inv = await Rows(conn, "SELECT retainer_id, sorted_container, sorted_slot_index, item_id, quantity, gear_set_ids FROM companion_inventory_snapshot ORDER BY sorted_container");
-        Check(Show(inv) == $"{owner},0,0,22500,12,null / {owner},1000,3,40000,1,{{1,4}} / 33777097243660301,10000,7,21792,2,null",
-            "inventory rows are written in one statement, with gear sets as arrays and none as empty: " + Show(inv));
+            Seen(owner, Item(0, 0, 22500, 12), Item(1000, 3, 40000, 1, 1, 4)),
+            Seen(retA, Item(10000, 7, 21792, 2), Item(10000, 8, 22500, 5)),
+            Seen(retB, Item(10000, 1, 22501, 3)),
+        }, retainerListKnown: true);
+        await FleetWriter.WriteInventoryAsync(conn, owner, plan);
+        var inv = await Rows(conn, "SELECT retainer_id, sorted_container, sorted_slot_index, item_id, quantity, gear_set_ids FROM companion_inventory_snapshot ORDER BY retainer_id, sorted_container, sorted_slot_index");
+        Check(Show(inv) == $"{owner},0,0,22500,12,null / {owner},1000,3,40000,1,{{1,4}} / {retA},10000,7,21792,2,null / {retA},10000,8,22500,5,null / {retB},10000,1,22501,3,null",
+            "items are stored under the source they were read from, with gear sets as arrays and none as empty: " + Show(inv));
 
-        await FleetWriter.WriteInventoryAsync(conn, owner, items.Take(1).ToList());
-        inv = await Rows(conn, "SELECT item_id, quantity FROM companion_inventory_snapshot");
-        Check(Show(inv) == "22500,12", "writing again replaces the whole inventory (removed items disappear): " + Show(inv));
+        var totals = await FleetWriter.ReadItemTotalsAsync(conn, owner, new uint[] { 22500, 22501, 22502 });
+        Check(totals[22500] == 17 && totals[22501] == 3 && totals[22502] == 0, $"stored item totals add bags and retainers, 0 when none: {totals[22500]},{totals[22501]},{totals[22502]}");
 
-        await FleetWriter.WriteInventoryAsync(conn, 18014498578000002, items.Take(2).Select(i => new FleetWriter.InventoryItem
-            { RetainerId = 18014498578000002, SortedContainer = i.SortedContainer, SortedSlotIndex = i.SortedSlotIndex, ItemId = i.ItemId, Quantity = i.Quantity }).ToList());
+        // Retainer A not seen this time (AllaganTools answered with nothing): it keeps its items while
+        // the bags and retainer B are replaced.
+        plan = FleetWriter.PlanInventory(owner, new[] { Seen(owner, Item(0, 0, 22500, 10)), Unseen(retA), Seen(retB) }, retainerListKnown: true);
+        Check(plan.BagsSeen && plan.Unseen.Count == 1 && plan.Unseen[0].Name == "Ret1" && string.Join(",", plan.Read) == $"{owner},{retB}",
+            "the plan names the unseen retainer and reads only the seen sources");
+        await FleetWriter.WriteInventoryAsync(conn, owner, plan);
+        inv = await Rows(conn, "SELECT retainer_id, item_id, quantity FROM companion_inventory_snapshot ORDER BY retainer_id, sorted_slot_index");
+        Check(Show(inv) == $"{owner},22500,10 / {retA},21792,2 / {retA},22500,5",
+            "an unseen retainer keeps its last items; seen sources are replaced (retainer B, now empty, has none): " + Show(inv));
+
+        // Bags not seen either: nothing is read, everything is kept.
+        plan = FleetWriter.PlanInventory(owner, new[] { Unseen(owner), Unseen(retA) }, retainerListKnown: true);
+        Check(!plan.BagsSeen && plan.Read.Count == 0 && plan.Unseen.Count == 1, "unseen bags are not listed as a retainer, and nothing is read");
+
+        // Retainer A dismissed (no longer in AutoRetainer's list): its items go.
+        plan = FleetWriter.PlanInventory(owner, new[] { Seen(owner, Item(0, 0, 22500, 10)), Seen(retB, Item(10000, 1, 22501, 3)) }, retainerListKnown: true);
+        await FleetWriter.WriteInventoryAsync(conn, owner, plan);
+        inv = await Rows(conn, "SELECT retainer_id, item_id FROM companion_inventory_snapshot ORDER BY retainer_id");
+        Check(Show(inv) == $"{owner},22500 / {retB},22501", "a dismissed retainer's items are removed: " + Show(inv));
+
+        // Without AutoRetainer's retainer list, only what was read is replaced.
+        await Exec(conn, $"INSERT INTO companion_inventory_snapshot (owner_cid, retainer_id, sorted_container, sorted_slot_index, item_id, quantity) VALUES ({owner}, {retA}, 10000, 0, 22502, 1)");
+        plan = FleetWriter.PlanInventory(owner, new[] { Seen(owner, Item(0, 0, 22500, 9)) }, retainerListKnown: false);
+        await FleetWriter.WriteInventoryAsync(conn, owner, plan);
+        inv = await Rows(conn, "SELECT retainer_id, item_id, quantity FROM companion_inventory_snapshot ORDER BY retainer_id");
+        Check(Show(inv) == $"{owner},22500,9 / {retA},22502,1 / {retB},22501,3", "with no retainer list, other sources are left alone: " + Show(inv));
+
+        await FleetWriter.WriteInventoryAsync(conn, 18014498578000002, FleetWriter.PlanInventory(18014498578000002,
+            new[] { Seen(18014498578000002, Item(0, 0, 22500, 1), Item(0, 1, 22501, 1)) }, retainerListKnown: true));
         var counts = await Rows(conn, "SELECT owner_cid, count(*) FROM companion_inventory_snapshot GROUP BY 1 ORDER BY 1");
-        Check(Show(counts) == $"{owner},1 / 18014498578000002,2", "another character's inventory does not touch the first one: " + Show(counts));
-
-        await FleetWriter.WriteInventoryAsync(conn, owner, new List<FleetWriter.InventoryItem>());
-        counts = await Rows(conn, $"SELECT count(*) FROM companion_inventory_snapshot WHERE owner_cid = {owner}");
-        Check(Show(counts) == "0", "an empty list clears that character's inventory");
+        Check(Show(counts) == $"{owner},3 / 18014498578000002,2", "another character's inventory does not touch the first one: " + Show(counts));
 
         // A failed write leaves the old inventory in place (all or nothing).
-        await FleetWriter.WriteInventoryAsync(conn, owner, items);
-        var duplicate = new List<FleetWriter.InventoryItem> { items[0], items[0] };
+        var duplicate = FleetWriter.PlanInventory(owner, new[] { Seen(owner, Item(0, 0, 22500, 1), Item(0, 0, 22500, 1)) }, retainerListKnown: true);
         var failed = false;
         try { await FleetWriter.WriteInventoryAsync(conn, owner, duplicate); } catch (PostgresException) { failed = true; }
         counts = await Rows(conn, $"SELECT count(*) FROM companion_inventory_snapshot WHERE owner_cid = {owner}");
         Check(failed && Show(counts) == "3", "a write that fails (two items in the same slot) changes nothing: " + Show(counts));
+
+        Check(FleetWriter.Fingerprint(FleetWriter.PlanInventory(owner, new[] { Seen(owner), Unseen(retA) }, true))
+              != FleetWriter.Fingerprint(FleetWriter.PlanInventory(owner, new[] { Seen(owner), Seen(retA) }, true)),
+            "a retainer becoming seen (even with no items) changes the fingerprint, so it is written");
 
         // FC chest.
         const ulong fc = 9000001;
@@ -352,6 +383,12 @@ internal static class Program
             $"FCTracker: in an FC {string.Join(",", parsed.Keys)}, in none {string.Join(",", withoutFc.OrderBy(k => k))} (an FC it has no details for is neither)");
 
         // Fingerprints: same data in another order is the same; any change is different.
+        var items = new List<FleetWriter.InventoryItem>
+        {
+            new() { RetainerId = owner, SortedContainer = 0, SortedSlotIndex = 0, ItemId = 22500, Quantity = 12 },
+            new() { RetainerId = owner, SortedContainer = 1000, SortedSlotIndex = 3, ItemId = 40000, Quantity = 1, GearSetIds = new uint[] { 1, 4 } },
+            new() { RetainerId = retA, SortedContainer = 10000, SortedSlotIndex = 7, ItemId = 21792, Quantity = 2 },
+        };
         var shuffled = items.AsEnumerable().Reverse().ToList();
         Check(FleetWriter.Fingerprint(items) == FleetWriter.Fingerprint(shuffled), "the same items in a different order count as unchanged");
         var moreQty = items.Select(i => new FleetWriter.InventoryItem { RetainerId = i.RetainerId, SortedContainer = i.SortedContainer, SortedSlotIndex = i.SortedSlotIndex, ItemId = i.ItemId, Quantity = i.Quantity, GearSetIds = i.GearSetIds }).ToList();
@@ -429,5 +466,47 @@ internal static class Program
         await RunScript(conn, "sql/005_remove_character_snapshot.sql");
         var gone = Show(await Rows(conn, "SELECT to_regclass('companion_character_snapshot') IS NULL, (SELECT count(*) FROM companion_character_current)"));
         Check(gone == "True,3", "005 removes the old table (running it again is harmless); the current rows stay: " + gone);
+        // "Check what I can see": when things were stored (read only), and the report's wording.
+        await Exec(conn, "UPDATE companion_inventory_snapshot SET updated_at = now() - interval '3 hours' WHERE retainer_id = 33777097243660301");
+        var ages = await FleetWriter.ReadStoredAgesAsync(conn, new ulong[] { owner, 18014498578000099 }, new ulong[] { fc, 9999998 });
+        Check(ages.Synced.ContainsKey(owner) && !ages.Synced.ContainsKey(18014498578000099)
+              && ages.Inventory.ContainsKey((owner, owner)) && ages.Inventory[(owner, retA)].TotalHours >= 2.9 && ages.Inventory[(owner, retA)].TotalHours < 3.1
+              && !ages.Inventory.ContainsKey((18014498578000002, 18014498578000002))
+              && ages.Chest.ContainsKey(fc) && !ages.Chest.ContainsKey(9999998),
+            $"stored ages: per character, per inventory source and per chest, only for the ones asked: retainer A {ages.Inventory[(owner, retA)].TotalHours:0.0}h");
+
+        var facts = new CheckReport.Facts
+        {
+            Version = "0.9.0", At = new DateTime(2026, 10, 7, 12, 0, 0), AccountLabel = "acct1",
+            AutoRetainerReady = true, Registered = 40, LeftOut = 38, AllaganToolsReady = true, FcTrackerPath = @"C:\fct.json", FcTrackerFound = true,
+        };
+        facts.Characters.Add(new CheckReport.Character
+        {
+            Cid = 1, Name = "Aki Main", World = "Maduin", Subs = 4, FcId = 9000001, FcName = "Panda Co", SyncedAgo = TimeSpan.FromMinutes(5),
+            Bags = new() { Id = 1, Name = "Bags", Items = 143, StoredAgo = TimeSpan.FromMinutes(5) },
+            Retainers = { new() { Id = 2, Name = "Oldret", Items = 80, StoredAgo = TimeSpan.FromHours(1) }, new() { Id = 3, Name = "Newret" } },
+            Chest = new() { Id = 9000001, Name = "FC chest" },
+            Housing = new FCTrackerConnector.HousingInfo { FcId = 9000001, HasHouse = true, HouseCity = 2, HouseWard = 7, HousePlot = 28 },
+        });
+        facts.Characters.Add(new CheckReport.Character
+        {
+            Cid = 4, Name = "Bex", World = "Maduin", Bags = new() { Id = 4, Name = "Bags", Items = 1, StoredAgo = TimeSpan.FromDays(3) }, SyncedAgo = TimeSpan.FromDays(3),
+        });
+        var report = CheckReport.ToText(facts);
+        Check(report.Contains("AutoRetainer: running, 40 characters (38 left out in settings)") && report.Contains("2 things to fix (marked !)."),
+            "the report starts with the other plugins and how many things to fix:\n" + report);
+        Check(report.Contains("  Retainer Oldret: 80 items, stored 1 hour ago") && report.Contains("  Retainer Newret: not seen, nothing stored")
+              && report.Contains("  ! Open Newret at a summoning bell on this PC.") && report.Contains("  ! Open the Free Company chest of Panda Co on this PC.")
+              && report.Contains("  House: Lavender Beds, Ward 7, Plot 28") && report.Contains("  Bags: 143 items, stored 5 minutes ago"),
+            "per character: each part, when it was stored, the house, and what to open");
+        Check(report.Contains("Bex @ Maduin\r\n  Last synced: 3 days ago".Replace("\r\n", Environment.NewLine)) && report.Contains("  Free Company: none")
+              && CheckReport.ToFix(facts.Characters[1], facts).Count == 0, "a character with nothing to fix has no ! lines");
+
+        facts.AllaganToolsReady = false;
+        facts.DatabaseProblem = "no saved connection (Settings → Postgres).";
+        report = CheckReport.ToText(facts);
+        Check(report.Contains("! AllaganTools is not running") && report.Contains("Database: not checked, no saved connection")
+              && !report.Contains("Last synced") && !report.Contains("Newret: not seen") && CheckReport.ToFixCount(facts) == 2,
+            "without AllaganTools or the database, the report says so once instead of listing every part:\n" + report);
     }
 }
