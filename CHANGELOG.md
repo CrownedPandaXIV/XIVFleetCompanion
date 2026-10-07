@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.9.1 - 2026-10-07
+
+Optional database change: `sql/007_retainer_items_seen.sql` (adds one column; safe to run more than
+once). Everything works as before until it has been run. For app 0.19.0.
+
+- **When each retainer was last seen.** With sql/007, the plugin records when AllaganTools saw each
+  retainer's items, even when it holds nothing, so the app no longer lists an empty retainer as unseen.
+- **Supplies across bags and retainers.** Ceruleum tanks and Magitek repair materials held in bags and
+  retainers are recorded (`item_qty:10155`, `item_qty:10373`), so the app can tell supplies used on
+  voyages from supplies moved to a retainer.
+- **First-time items are marked.** `inventory_sources` records how many sources have items stored; it
+  goes up when a retainer's items are stored for the first time (a new PC, a new retainer), so the app
+  does not count those items as income.
+
 ## 0.9.0 - 2026-10-07
 
 No database changes. Works with any app version; app 0.18.0 lists the retainers whose items have not

@@ -168,6 +168,11 @@ public sealed class Plugin : IDalamudPlugin
     // (same items the app's Salvage view prices).
     private static readonly uint[] SalvageItemIds = { 22500, 22501, 22502, 22503, 22504, 22505, 22506, 22507 };
 
+    // Ceruleum tanks and Magitek repair materials across bags and retainers, so the app can tell supplies
+    // used on voyages (the total goes down) from supplies moved to a retainer (it does not).
+    private static readonly uint[] SupplyItemIds = { 10155, 10373 };
+    private bool warnedNoItemsSeenColumn = false;
+
     private static void AddMetric(
         Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)> metrics,
         string subjectType, ulong subjectId, string metric, decimal value, string? label = null)
@@ -378,14 +383,33 @@ public sealed class Plugin : IDalamudPlugin
                     await WriteIfChanged($"inventory:{cid}", FleetWriter.Fingerprint(plan),
                         () => FleetWriter.WriteInventoryAsync(conn, cid, plan), $"inventory for {who}");
 
-                    // Salvage item quantities for the salvage and income charts, from what is now
-                    // stored (fresh items, plus the last stored items of any retainer not seen), so a
-                    // retainer AllaganTools missed is never recorded as a drop to zero.
+                    // When AllaganTools saw each retainer (sql/007), so the app can tell an empty retainer
+                    // from one never opened at a bell.
+                    var seenRetainers = plan.Read.Where(id => id != cid).ToList();
                     try
                     {
-                        var totals = await FleetWriter.ReadItemTotalsAsync(conn, cid, SalvageItemIds);
-                        foreach (var salvageId in SalvageItemIds)
-                            AddMetric(metrics, "character", cid, $"item_qty:{salvageId}", totals[salvageId]);
+                        if (!warnedNoItemsSeenColumn && !await FleetWriter.MarkRetainersSeenAsync(conn, seenRetainers))
+                        {
+                            warnedNoItemsSeenColumn = true;
+                            Log.Information("Fleet Companion: run sql/007_retainer_items_seen.sql once so the app can tell empty retainers from unseen ones.");
+                        }
+                    }
+                    catch (PostgresException ex)
+                    {
+                        Log.Warning($"Fleet Companion: could not record when {who}'s retainers were seen — {ex.Message}");
+                    }
+
+                    // Salvage and supply quantities for the charts, income and supplies, from what is now
+                    // stored (fresh items, plus the last stored items of any retainer not seen), so a
+                    // retainer AllaganTools missed is never recorded as a drop to zero. inventory_sources
+                    // goes up when a source's items are stored for the first time, which the app does not
+                    // count as income.
+                    try
+                    {
+                        var totals = await FleetWriter.ReadItemTotalsAsync(conn, cid, SalvageItemIds.Concat(SupplyItemIds).ToArray());
+                        foreach (var itemId in SalvageItemIds.Concat(SupplyItemIds))
+                            AddMetric(metrics, "character", cid, $"item_qty:{itemId}", totals[itemId]);
+                        AddMetric(metrics, "character", cid, "inventory_sources", await FleetWriter.ReadStoredSourceCountAsync(conn, cid));
                     }
                     catch (PostgresException ex)
                     {

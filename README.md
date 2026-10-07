@@ -63,6 +63,12 @@ From 0.5.0 each stored sub has its workshop slot (1-4), so renaming a sub does n
 the app finds each slot's sub by slot, and a renamed sub's Craft? setting moves to its new name. Run
 `sql/006_submarine_slot.sql` once to add the column (the plugin writes subs without slots until then).
 
+## Retainers seen
+
+From 0.9.1 the plugin records when AllaganTools last saw each retainer's items, so the app can tell a
+retainer that holds nothing from one never opened at a summoning bell. Run
+`sql/007_retainer_items_seen.sql` once to add the column (everything works as before until then).
+
 ## History for charts
 
 The plugin records selected values into a general history table (`companion_metric_history`) so they can be charted over time. A value is
@@ -75,6 +81,8 @@ stay small. Currently recorded:
 | `retainer_count`, `submarine_count`, `num_sub_slots` | character | from 0.3.0; `sql/004` copies the earlier changes from the snapshot history |
 | `fc_points` | Free Company, and the FC leader's character when it is one of yours | from FCTracker; labelled with the leader's name (on the FC) or the FC's name (on the leader). A leader change is recorded even if the points are unchanged |
 | `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers as stored (an unseen retainer counts with its last stored items); FC = chest, only when AllaganTools has chest data |
+| `item_qty:10155`, `item_qty:10373` (ceruleum tanks, Magitek repair materials) | character | from 0.9.1; bags + retainers as stored, so the app can tell supplies used from supplies moved to a retainer |
+| `inventory_sources` | character | from 0.9.1; how many sources (bags, retainers) have items stored. It goes up when a retainer's items are stored for the first time, which the app does not count as income |
 
 **Setup, once:** run `sql/001_metric_history.sql` in the database the plugin writes to. Until
 that has been run, the plugin logs a warning each sync and skips metric history (everything
