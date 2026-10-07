@@ -92,6 +92,7 @@ namespace XIVFleetCompanion
             public uint Register;      // when the sub was registered: SubmarineTracker's id for it
             public uint Return;        // Unix seconds, when the loot was collected
             public uint Sector;
+            public int Leg;            // 1 for the first sector visited, 2 for the next, ...
             public string? SubName;
             public uint PrimaryItem;
             public int PrimaryCount;
@@ -102,15 +103,18 @@ namespace XIVFleetCompanion
             public bool Valid;
         }
 
-        // The newest voyage already stored per FC (Unix seconds), so only newer ones are read.
+        // The newest voyage already stored per FC (Unix seconds), so only newer ones are read. With sql/009,
+        // only voyages whose sector order is stored count, so the first sync after it fills in the order of
+        // those already stored.
         public static async Task<Dictionary<ulong, long>?> ReadNewestVoyagesAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> fcIds)
         {
             var newest = new Dictionary<ulong, long>();
             var ok = await IfTableExists(async () =>
             {
-                await using var cmd = new NpgsqlCommand(@"
+                var hasLeg = await HasLegAsync(conn);
+                await using var cmd = new NpgsqlCommand($@"
                     SELECT fc_id, extract(epoch FROM max(returned_at))::bigint FROM companion_voyage_loot
-                    WHERE fc_id = ANY(@ids::numeric[]) GROUP BY fc_id", conn);
+                    WHERE fc_id = ANY(@ids::numeric[]){(hasLeg ? " AND leg IS NOT NULL" : "")} GROUP BY fc_id", conn);
                 cmd.Parameters.AddWithValue("ids", fcIds.Select(f => (decimal)f).ToArray());
                 await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync()) newest[(ulong)reader.GetDecimal(0)] = reader.GetInt64(1);
@@ -118,13 +122,30 @@ namespace XIVFleetCompanion
             return ok ? newest : null;
         }
 
-        // Adds voyages; one already stored (same FC, sub, return time and sector) is left as is.
+        // Whether sql/009 (the leg column: the order a voyage ran its sectors in) has been run.
+        private static async Task<bool> HasLegAsync(NpgsqlConnection conn)
+        {
+            await using var cmd = new NpgsqlCommand(@"
+                SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_schema = current_schema() AND table_name = 'companion_voyage_loot' AND column_name = 'leg')", conn);
+            return (bool)(await cmd.ExecuteScalarAsync())!;
+        }
+
+        // Adds voyages; one already stored (same FC, sub, return time and sector) is left as is, except that
+        // its sector order is filled in when missing (sql/009; without it, voyages are stored without it).
         public static async Task<bool> WriteVoyageLootAsync(NpgsqlConnection conn, IReadOnlyList<LootRow> rows)
         {
             if (rows.Count == 0) return true;
             return await IfTableExists(async () =>
             {
-                await using var cmd = new NpgsqlCommand(@"
+                var hasLeg = await HasLegAsync(conn);
+                await using var cmd = new NpgsqlCommand(hasLeg ? @"
+                    INSERT INTO companion_voyage_loot (fc_id, sub_register, returned_at, sector, sub_name,
+                        primary_item, primary_count, primary_hq, additional_item, additional_count, additional_hq, valid, leg)
+                    SELECT * FROM unnest(@fc::numeric[], @reg::bigint[], @ret::timestamptz[], @sector::int[], @name::text[],
+                        @pi::int[], @pc::int[], @phq::boolean[], @ai::int[], @ac::int[], @ahq::boolean[], @valid::boolean[], @leg::int[])
+                    ON CONFLICT (fc_id, sub_register, returned_at, sector) DO UPDATE SET leg = EXCLUDED.leg
+                    WHERE companion_voyage_loot.leg IS NULL" : @"
                     INSERT INTO companion_voyage_loot (fc_id, sub_register, returned_at, sector, sub_name,
                         primary_item, primary_count, primary_hq, additional_item, additional_count, additional_hq, valid)
                     SELECT * FROM unnest(@fc::numeric[], @reg::bigint[], @ret::timestamptz[], @sector::int[], @name::text[],
@@ -142,6 +163,7 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("ac", rows.Select(r => r.AdditionalCount).ToArray());
                 cmd.Parameters.AddWithValue("ahq", rows.Select(r => r.AdditionalHq).ToArray());
                 cmd.Parameters.AddWithValue("valid", rows.Select(r => r.Valid).ToArray());
+                if (hasLeg) cmd.Parameters.AddWithValue("leg", rows.Select(r => r.Leg).ToArray());
                 await cmd.ExecuteNonQueryAsync();
             });
         }

@@ -29,7 +29,8 @@ namespace XIVFleetCompanion
         }
 
         // Voyages that came back after `since` (Unix seconds) for each Free Company asked for (an FC
-        // missing from `since` gets all of its voyages), with the sub's current name.
+        // missing from `since` gets all of its voyages), with the sub's current name. SubmarineTracker adds
+        // a voyage's sectors in the order they were visited, so that order is each sector's leg (1, 2, ...).
         public static List<DetailsWriter.LootRow> ReadLoot(string path, IReadOnlyDictionary<ulong, long> since, IReadOnlyCollection<ulong> fcIds)
         {
             var rows = new List<DetailsWriter.LootRow>();
@@ -54,11 +55,12 @@ namespace XIVFleetCompanion
                 }
             }
 
+            var legs = new Dictionary<(ulong, long, long), int>();
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT FreeCompanyId, SubmarineId, Return, Sector, PrimaryItem, PrimaryCount, PrimaryHQ,
                                            AdditionalItem, AdditionalCount, AdditionalHQ, Valid
-                                    FROM loot WHERE Return > $since ORDER BY Return";
+                                    FROM loot WHERE Return > $since ORDER BY Return, rowid";
                 cmd.Parameters.AddWithValue("$since", oldest);
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())
@@ -67,12 +69,15 @@ namespace XIVFleetCompanion
                     var returned = reader.GetInt64(2);
                     if (since.TryGetValue(fc, out var after) && returned <= after) continue;
                     var register = reader.GetInt64(1);
+                    var leg = legs.TryGetValue((fc, register, returned), out var before) ? before + 1 : 1;
+                    legs[(fc, register, returned)] = leg;
                     rows.Add(new DetailsWriter.LootRow
                     {
                         FcId = fc,
                         Register = (uint)register,
                         Return = (uint)returned,
                         Sector = (uint)reader.GetInt64(3),
+                        Leg = leg,
                         SubName = names.TryGetValue((fc, register), out var name) ? name : null,
                         PrimaryItem = (uint)reader.GetInt64(4),
                         PrimaryCount = (int)reader.GetInt64(5),
