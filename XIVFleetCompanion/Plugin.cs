@@ -36,7 +36,7 @@ public sealed class Plugin : IDalamudPlugin
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
     private readonly SyncSchedule schedule = new();
-    private bool syncInProgress = false;
+    private volatile bool syncInProgress = false;
 
     // What was last written per character / FC, so unchanged data is not written again every
     // sync. Forgotten once an hour, so everything is rewritten at least hourly.
@@ -182,8 +182,8 @@ public sealed class Plugin : IDalamudPlugin
     // folder, under pluginConfigs\FCTracker. Null if that folder cannot be worked out.
     internal static string? DefaultFcTrackerConfigPath()
     {
-        var pluginConfigsRoot = Directory.GetParent(PluginInterface.ConfigDirectory.FullName)?.FullName;
-        return pluginConfigsRoot == null ? null : Path.Combine(pluginConfigsRoot, "FCTracker", "FCTrackerConfig.json");
+        var folder = OtherPluginFolder("FCTracker");
+        return folder == null ? null : Path.Combine(folder, "FCTrackerConfig.json");
     }
 
     // What one character's sync needs from AutoRetainer, copied on the game's thread.
@@ -311,7 +311,7 @@ public sealed class Plugin : IDalamudPlugin
         NpgsqlConnection conn = openConnection;
 
         changes.BeginSync(DateTime.UtcNow);
-        if (!detailsTablesReady && DateTime.UtcNow >= detailsTablesAskAgainAt) detailsTablesReady = true;
+        AskAgainForDetailsTables();
         var written = 0;
         var unchanged = 0;
         var failed = 0;
@@ -342,6 +342,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // What this PC could not see this sync, in plain sentences, for the app's PCs panel.
         var problems = new List<string>();
+        var chestsReported = new HashSet<ulong>();
         var fcsWithSubs = characters.Where(c => c.Snapshot.SubmarineCount > 0 && c.Snapshot.FcId != 0).Select(c => c.Snapshot.FcId).ToHashSet();
         if (!allaganToolsReady) problems.Add("AllaganTools is not running: bags, retainers' items and FC chests are not updated.");
 
@@ -460,7 +461,8 @@ public sealed class Plugin : IDalamudPlugin
                     // Only asked for when the FC has subs: it holds their ceruleum, repair kits and salvage.
                     if (chestSeen == null)
                     {
-                        if (fcsWithSubs.Contains(character.FcId))
+                        // Said once per FC, not once per character in it.
+                        if (fcsWithSubs.Contains(character.FcId) && chestsReported.Add(character.FcId))
                         {
                             problems.Add($"Open the Free Company chest of {who}'s FC.");
                             WarnOnce($"chest:{character.FcId}", $"Fleet Companion: AllaganTools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
@@ -543,8 +545,19 @@ public sealed class Plugin : IDalamudPlugin
             Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
 
+        // A database error here (other than sql/008 not being run) is logged, and the rest of the sync
+        // (the history for Trends, the last sync time) still saves.
         if (detailsTablesReady)
-            await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady, fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath), problems);
+        {
+            try
+            {
+                await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady, fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath), problems);
+            }
+            catch (PostgresException ex)
+            {
+                Log.Warning($"Fleet Companion: failed to write this PC's status, voyage loot or venture rewards — {ex.Message}");
+            }
+        }
 
         var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint
         {
@@ -613,6 +626,12 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool loggedDetailsTablesMissing = false;
 
+    // After 30 minutes, the sql/008 tables are tried again.
+    private void AskAgainForDetailsTables()
+    {
+        if (!detailsTablesReady && DateTime.UtcNow >= detailsTablesAskAgainAt) detailsTablesReady = true;
+    }
+
     private void DetailsTablesMissing()
     {
         if (!loggedDetailsTablesMissing)
@@ -639,7 +658,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (++autoRetainerMissedSyncs < 2) return;
         WarnOnce("autoretainer", "Fleet Companion: AutoRetainer is not running; nothing can be synced until it is.");
-        if (!detailsTablesReady && DateTime.UtcNow >= detailsTablesAskAgainAt) detailsTablesReady = true;
+        AskAgainForDetailsTables();
         if (!detailsTablesReady) return;
         await using var conn = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
         if (conn == null) return;
