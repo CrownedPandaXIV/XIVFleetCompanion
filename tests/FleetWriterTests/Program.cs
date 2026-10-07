@@ -194,6 +194,9 @@ internal static class Program
         Check(Show(inv) == $"{owner},22500,10 / {retA},21792,2 / {retA},22500,5",
             "an unseen retainer keeps its last items; seen sources are replaced (retainer B, now empty, has none): " + Show(inv));
 
+        Check(await FleetWriter.ReadStoredSourceCountAsync(conn, owner) == 2 && await FleetWriter.ReadStoredSourceCountAsync(conn, 1) == 0,
+            "stored sources are counted per character (bags and retainer A; retainer B now holds nothing)");
+
         // Bags not seen either: nothing is read, everything is kept.
         plan = FleetWriter.PlanInventory(owner, new[] { Unseen(owner), Unseen(retA) }, retainerListKnown: true);
         Check(!plan.BagsSeen && plan.Read.Count == 0 && plan.Unseen.Count == 1, "unseen bags are not listed as a retainer, and nothing is read");
@@ -508,5 +511,14 @@ internal static class Program
         Check(report.Contains("! AllaganTools is not running") && report.Contains("Database: not checked, no saved connection")
               && !report.Contains("Last synced") && !report.Contains("Newret: not seen") && CheckReport.ToFixCount(facts) == 2,
             "without AllaganTools or the database, the report says so once instead of listing every part:\n" + report);
+        // sql/007: when each retainer's items were last seen. Without the column nothing fails.
+        await Exec(conn, $"INSERT INTO companion_retainer_lookup (retainer_id, owner_cid, name) VALUES (77001, {owner}, 'Empty Ret') ON CONFLICT DO NOTHING");
+        Check(!await FleetWriter.MarkRetainersSeenAsync(conn, new ulong[] { 77001 }), "before sql/007, marking retainers seen reports the column is missing");
+        await RunScript(conn, "sql/007_retainer_items_seen.sql");
+        await RunScript(conn, "sql/007_retainer_items_seen.sql");
+        Check(await FleetWriter.MarkRetainersSeenAsync(conn, new ulong[] { 77001 })
+              && Show(await Rows(conn, "SELECT items_seen_at > now() - interval '1 minute' FROM companion_retainer_lookup WHERE retainer_id = 77001")) == "True"
+              && Show(await Rows(conn, "SELECT count(*) FROM companion_retainer_lookup WHERE items_seen_at IS NOT NULL")) == "1",
+            "after sql/007 (run twice), a seen retainer gets its time, even with no items; others are untouched");
     }
 }

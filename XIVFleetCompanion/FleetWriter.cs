@@ -507,6 +507,36 @@ namespace XIVFleetCompanion
         private static string? GearSetText(uint[]? ids)
             => ids == null || ids.Length == 0 ? null : "{" + string.Join(",", ids) + "}";
 
+        // How many sources (bags, retainers) have items stored for one character. When it goes up, items
+        // were stored for a source for the first time (a retainer seen on this PC for the first time), so
+        // the app does not count those items as new income.
+        public static async Task<int> ReadStoredSourceCountAsync(NpgsqlConnection conn, ulong ownerCid)
+        {
+            await using var cmd = new NpgsqlCommand(
+                "SELECT count(DISTINCT retainer_id)::int FROM companion_inventory_snapshot WHERE owner_cid = @owner", conn);
+            cmd.Parameters.AddWithValue("owner", (decimal)ownerCid);
+            return (int)(await cmd.ExecuteScalarAsync() ?? 0);
+        }
+
+        // Records that AllaganTools saw these retainers' items just now (sql/007), even when they hold
+        // nothing. Returns false when the column is not there yet (sql/007 not run); nothing else changes.
+        public static async Task<bool> MarkRetainersSeenAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> retainerIds)
+        {
+            if (retainerIds.Count == 0) return true;
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    "UPDATE companion_retainer_lookup SET items_seen_at = now() WHERE retainer_id = ANY(@ids::numeric[])", conn);
+                cmd.Parameters.AddWithValue("ids", retainerIds.Select(id => (decimal)id).ToArray());
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+            {
+                return false;
+            }
+        }
+
         // How long ago things were last stored, for "Check what I can see" (reads only): each
         // character's row, each inventory source (bags under the character's own id, or a retainer)
         // and each FC chest. Missing from a dictionary: nothing stored.
