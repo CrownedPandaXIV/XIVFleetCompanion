@@ -520,5 +520,133 @@ internal static class Program
               && Show(await Rows(conn, "SELECT items_seen_at > now() - interval '1 minute' FROM companion_retainer_lookup WHERE retainer_id = 77001")) == "True"
               && Show(await Rows(conn, "SELECT count(*) FROM companion_retainer_lookup WHERE items_seen_at IS NOT NULL")) == "1",
             "after sql/007 (run twice), a seen retainer gets its time, even with no items; others are untouched");
+
+        await DetailsChecks(conn);
+        ReaderChecks();
+    }
+
+    // sql/008 and DetailsWriter: PCs, voyage loot, venture rewards and market listings.
+    private static async Task DetailsChecks(NpgsqlConnection conn)
+    {
+        var pc = new DetailsWriter.PcStatus
+        {
+            PcName = "DESKTOP-1", AccountLabel = "Account 1", PluginVersion = "0.10.0", AutoRetainerReady = true, AllaganToolsReady = true,
+            FcTrackerFound = true, SubmarineTrackerFound = false, VentureStatsFound = true, CharactersSynced = 1, CharactersLeftOut = 39,
+            Problems = new() { "Open retainer Newret (Aki@Maduin) at a summoning bell." },
+        };
+        Check(!await DetailsWriter.WritePcStatusAsync(conn, pc) && await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 1 }) == null
+              && !await DetailsWriter.WriteVenturesAsync(conn, new[] { new DetailsWriter.VentureRow { OwnerCid = 1, RetainerName = "R", At = 1, ItemId = 1 } }),
+            "before sql/008, the new writes report their tables are missing and change nothing");
+        await RunScript(conn, "sql/008_pcs_loot_ventures_listings.sql");
+        await RunScript(conn, "sql/008_pcs_loot_ventures_listings.sql");
+
+        Check(await DetailsWriter.WritePcStatusAsync(conn, pc), "after sql/008 (run twice), a PC's status is written");
+        pc.CharactersSynced = 2;
+        pc.Problems.Clear();
+        await DetailsWriter.WritePcStatusAsync(conn, pc);
+        Check(await DetailsWriter.WritePcCheckAsync(conn, "DESKTOP-1", "Account 1", "0.10.0", "Nothing to fix.", 0), "a check result is written");
+        var pcRows = await Rows(conn, "SELECT pc_name, account_label, characters_synced, cardinality(problems), check_text, check_to_fix, last_sync_at IS NOT NULL FROM companion_pc_status");
+        Check(Show(pcRows) == "DESKTOP-1,Account 1,2,0,Nothing to fix.,0,True",
+            "one row per PC and account: the newest status, and the check kept beside it: " + Show(pcRows));
+
+        var loot = new List<DetailsWriter.LootRow>
+        {
+            new() { FcId = 9000001, Register = 1700000000, Return = 1790000000, Sector = 15, SubName = "Sub-1", PrimaryItem = 22500, PrimaryCount = 3, AdditionalItem = 22505, AdditionalCount = 1, AdditionalHq = false, Valid = true },
+            new() { FcId = 9000001, Register = 1700000000, Return = 1790000000, Sector = 22, SubName = "Sub-1", PrimaryItem = 22507, PrimaryCount = 1, Valid = true },
+        };
+        Check(await DetailsWriter.WriteVoyageLootAsync(conn, loot) && await DetailsWriter.WriteVoyageLootAsync(conn, loot), "voyage loot is written, and writing it again is harmless");
+        var newestVoyage = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001, 9000002 });
+        Check(Show(await Rows(conn, "SELECT count(*), sum(primary_count) FROM companion_voyage_loot")) == "2,4"
+              && newestVoyage != null && newestVoyage.Count == 1 && newestVoyage[9000001] == 1790000000,
+            "each sector is stored once, and the newest voyage per FC is known so only newer ones are read");
+
+        var ventures = new List<DetailsWriter.VentureRow>
+        {
+            new() { OwnerCid = 18014498578000001, RetainerName = "Oldret", At = 1790000100, ItemId = 5111, Quantity = 120, VentureId = 395 },
+            new() { OwnerCid = 18014498578000001, RetainerName = "Oldret", At = 1790003700, ItemId = 12345, Hq = true, Quantity = 1, VentureId = 395 },
+        };
+        Check(await DetailsWriter.WriteVenturesAsync(conn, ventures) && await DetailsWriter.WriteVenturesAsync(conn, ventures), "venture rewards are written, and again harmlessly");
+        var newestVenture = await DetailsWriter.ReadNewestVenturesAsync(conn, new ulong[] { 18014498578000001 });
+        Check(Show(await Rows(conn, "SELECT count(*), sum(quantity) FROM companion_venture_result")) == "2,121"
+              && newestVenture != null && newestVenture[(18014498578000001, "Oldret")] == 1790003700,
+            "each reward is stored once, with the newest per retainer known");
+
+        // Listings: a listing still up keeps when it was first seen, even after the list closes up or a
+        // price change; a new one starts now; a retainer not seen keeps its stored listings.
+        var listed = new List<DetailsWriter.Listing>
+        {
+            new() { RetainerId = 501, Slot = 0, ItemId = 22500, Quantity = 10, UnitPrice = 9000 },
+            new() { RetainerId = 501, Slot = 1, ItemId = 44000, Quantity = 1, Hq = true, UnitPrice = 250000 },
+            new() { RetainerId = 502, Slot = 0, ItemId = 5111, Quantity = 99, UnitPrice = 50 },
+        };
+        Check(await DetailsWriter.WriteListingsAsync(conn, 18014498578000001, new ulong[] { 501, 502 }, listed), "market listings are written");
+        await Exec(conn, "UPDATE companion_market_listing SET first_seen_at = now() - interval '10 days'");
+        var later = new List<DetailsWriter.Listing>
+        {
+            new() { RetainerId = 501, Slot = 0, ItemId = 44000, Quantity = 1, Hq = true, UnitPrice = 199000 },
+            new() { RetainerId = 501, Slot = 1, ItemId = 30000, Quantity = 5, UnitPrice = 100 },
+        };
+        await DetailsWriter.WriteListingsAsync(conn, 18014498578000001, new ulong[] { 501 }, later);
+        var listingRows = await Rows(conn, "SELECT retainer_id, slot, item_id, unit_price, first_seen_at < now() - interval '9 days' FROM companion_market_listing ORDER BY retainer_id, slot");
+        Check(Show(listingRows) == "501,0,44000,199000,True / 501,1,30000,100,False / 502,0,5111,50,True",
+            "a repriced listing keeps its first-seen time after the list closed up, a sold one goes, a new one starts now: " + Show(listingRows));
+        var carried = DetailsWriter.CarryFirstSeen(
+            new List<DetailsWriter.Listing>
+            {
+                new() { RetainerId = 1, Slot = 0, ItemId = 7, Quantity = 1, FirstSeenAt = new DateTime(2026, 1, 1) },
+                new() { RetainerId = 1, Slot = 1, ItemId = 7, Quantity = 1, FirstSeenAt = new DateTime(2026, 2, 1) },
+            },
+            new List<DetailsWriter.Listing> { new() { RetainerId = 1, Slot = 0, ItemId = 7, Quantity = 1 }, new() { RetainerId = 1, Slot = 1, ItemId = 7, Quantity = 2 } });
+        Check(carried[0].FirstSeenAt == new DateTime(2026, 1, 1) && carried[1].FirstSeenAt == null,
+            "two identical listings, one sold: the one left keeps the older time; a different quantity is a new listing");
+    }
+
+    // SubmarineTracker's file and AutoRetainer's statistics files, read as the plugin reads them.
+    private static void ReaderChecks()
+    {
+        Check(SubmarineTrackerReader.DecodeId(new byte[] { 0xcf, 0, 0x40, 0, 0, 0, 0x89, 0x54, 0x40 }) == 0x0040000000895440UL
+              && SubmarineTrackerReader.DecodeId(new byte[] { 0x05 }) == 5 && SubmarineTrackerReader.DecodeId(new byte[] { 0xcd, 1, 0 }) == 256
+              && SubmarineTrackerReader.DecodeId(new byte[] { 0xa1, 0x41 }) == null && SubmarineTrackerReader.DecodeId(null) == null,
+            "SubmarineTracker's Free Company ids are decoded from MessagePack");
+
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fleet-reader-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            var db = System.IO.Path.Combine(dir, SubmarineTrackerReader.FileName);
+            using (var sqlite = new System.Data.SQLite.SQLiteConnection($"Data Source={db}"))
+            {
+                sqlite.Open();
+                using var cmd = sqlite.CreateCommand();
+                cmd.CommandText = @"
+                    CREATE TABLE submarine (FreeCompanyId BLOB NOT NULL, SubmarineId INTEGER NOT NULL, Name TEXT NOT NULL);
+                    CREATE TABLE loot (FreeCompanyId BLOB NOT NULL, SubmarineId INTEGER NOT NULL, Return INTEGER NOT NULL, Sector INTEGER NOT NULL,
+                        PrimaryItem INTEGER NOT NULL, PrimaryCount INTEGER NOT NULL, PrimaryHQ BOOLEAN NOT NULL, AdditionalItem INTEGER NOT NULL,
+                        AdditionalCount INTEGER NOT NULL, AdditionalHQ BOOLEAN NOT NULL, Date INTEGER NOT NULL, Valid BOOLEAN NOT NULL);
+                    INSERT INTO submarine VALUES (x'ce00895440', 1700000000, 'Sub-1');
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000000, 1790000000, 15, 22500, 3, 0, 22505, 1, 0, 1790000000, 1);
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000000, 1790090000, 15, 22500, 2, 0, 0, 0, 0, 1790090000, 1);
+                    INSERT INTO loot VALUES (x'ce00895441', 1700000001, 1790090000, 3, 22501, 1, 0, 0, 0, 0, 1790090000, 0);";
+                cmd.ExecuteNonQuery();
+            }
+            var all = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long>(), new ulong[] { 0x895440 });
+            var newer = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long> { [0x895440] = 1790000000 }, new ulong[] { 0x895440, 0x895441 });
+            Check(all.Count == 2 && all[0].SubName == "Sub-1" && all[0].AdditionalItem == 22505 && all[0].PrimaryCount == 3
+                  && newer.Count == 2 && newer.All(r => r.Return == 1790090000) && newer.Any(r => r.FcId == 0x895441 && !r.Valid && r.SubName == null),
+                "SubmarineTracker's loot is read per FC asked for, only newer than what is stored, with the sub's name");
+
+            var statFile = System.IO.Path.Combine(dir, "0040000000ABCDEF_Oldret.statistic.json");
+            System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700},{""I"":0,""T"":1790003800}],""PlayerName"":""Aki@Maduin"",""RetainerName"":""Oldret""}");
+            var parsed = VentureStatsReader.ParseFileName("0040000000ABCDEF_Oldret.statistic.json");
+            var rewards = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", 1790000100);
+            Check(parsed is { } p && p.Cid == 0x0040000000ABCDEF && p.Retainer == "Oldret"
+                  && VentureStatsReader.ParseFileName("DefaultConfig.json") == null && VentureStatsReader.ParseFileName("123_Short.statistic.json") == null
+                  && rewards.Count == 1 && rewards[0].ItemId == 12345 && rewards[0].Hq && rewards[0].Quantity == 1 && rewards[0].VentureId == 0,
+                "AutoRetainer's statistics: file names give the character and retainer, records newer than stored are read with its defaults");
+        }
+        finally
+        {
+            System.IO.Directory.Delete(dir, true);
+        }
     }
 }

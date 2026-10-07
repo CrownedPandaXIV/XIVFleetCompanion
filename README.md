@@ -12,13 +12,18 @@ housing eligibility display, etc.) is left to the app.
 - **AutoRetainer** (via `AutoRetainerAPI`): characters, retainers, submarines, Gil, Ceruleum, repair kits
 - **AllaganTools**: personal, retainer and Free Company chest inventory. AllaganTools only knows a retainer's items once it has been opened at a summoning bell on that PC, and the FC chest once the chest has been opened; until then their last stored items are kept (the log names what to open), and so is everything when AllaganTools is not running.
 - **FCTracker**: Free Company housing, founding date and eligibility data (read from its config file)
+- **SubmarineTracker** (optional, from 0.10.0): the loot of every voyage, read from its
+  `submarine-sqlite.db` (read only), for the app's loot per voyage
+- **AutoRetainer's venture statistics** (optional, from 0.10.0): every venture's reward, read from its
+  `*.statistic.json` files (its "Record statistics" option, on by default), for the app's venture income
 
 ## Usage
 
 - `/xivfleet` opens the main window; the plugin installer's config button opens settings.
 - `/xivfleet check` (or **Check what I can see** in the main window) shows, per character, what the plugin
   can see from AutoRetainer, AllaganTools and FCTracker, when each part was last stored, and what to open
-  to fix anything missing. It writes nothing; **Copy results** copies it to share.
+  to fix anything missing. **Copy results** copies it to share. With sql/008 the result is also stored, so
+  the app's PCs panel shows it; nothing else is written.
 - Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection. The form shows the saved details (never the password); leave the password box empty to keep the saved one. "Clear Saved Credentials" asks for a second click.
 - The plugin syncs on the interval set in settings, and also about 5 seconds after a character logs
   out (AutoRetainer logs a character out once it has finished with it), at most once every 30 seconds;
@@ -68,6 +73,23 @@ the app finds each slot's sub by slot, and a renamed sub's Craft? setting moves 
 From 0.9.1 the plugin records when AllaganTools last saw each retainer's items, so the app can tell a
 retainer that holds nothing from one never opened at a summoning bell. Run
 `sql/007_retainer_items_seen.sql` once to add the column (everything works as before until then).
+
+## PCs, loot, ventures and listings
+
+From 0.10.0, with `sql/008_pcs_loot_ventures_listings.sql` run once (everything works as before until
+then), each sync also stores:
+
+- **This PC's status** (`companion_pc_status`, one row per PC name and account label): plugin version,
+  last sync, whether AutoRetainer, AllaganTools, FCTracker, SubmarineTracker and AutoRetainer's venture
+  statistics were found, how many characters were synced, and what could not be seen (a retainer to open,
+  ...). The last **Check what I can see** result is kept beside it.
+- **Loot per voyage** (`companion_voyage_loot`): one row per sector of each voyage SubmarineTracker
+  recorded, for the Free Companies of the characters synced here. Only voyages newer than those stored
+  are read.
+- **Venture rewards** (`companion_venture_result`): one row per reward from AutoRetainer's statistics
+  files of the characters synced here. Only new rewards are added.
+- **Market listings** (`companion_market_listing`): what each retainer AllaganTools has seen has up for
+  sale, at what price, and since when the plugin first saw it (a repriced listing keeps that time).
 
 ## History for charts
 

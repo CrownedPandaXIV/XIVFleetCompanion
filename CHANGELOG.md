@@ -3,6 +3,23 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.10.0 - 2026-10-07
+
+Optional database change: `sql/008_pcs_loot_ventures_listings.sql` (adds four tables; safe to run more
+than once). Everything works as before until it has been run. For app 0.20.0.
+
+- **PCs.** Each sync stores this PC's status: plugin version, last sync, which of AutoRetainer,
+  AllaganTools, FCTracker, SubmarineTracker and AutoRetainer's venture statistics it found, and what it
+  could not see. **Check what I can see** also stores its result. The app shows every PC in one place.
+- **Loot per voyage.** The loot SubmarineTracker records for each voyage is copied to the database
+  (read only from its file; only new voyages), for exact income per sub and route in the app.
+- **Venture rewards.** The rewards AutoRetainer records for each venture are copied to the database
+  (only new ones), for the app's venture income.
+- **Market listings.** What each retainer has up for sale (from AllaganTools), at what price and since
+  when, for the app's listings that have sat unsold.
+- Uses the SQLite engine Dalamud already loads (the same package SubmarineTracker uses) to read
+  SubmarineTracker's file.
+
 ## 0.9.1 - 2026-10-07
 
 Optional database change: `sql/007_retainer_items_seen.sql` (adds one column; safe to run more than

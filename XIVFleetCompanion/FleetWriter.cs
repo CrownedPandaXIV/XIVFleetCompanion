@@ -39,6 +39,9 @@ namespace XIVFleetCompanion
             public uint ItemId;
             public uint Quantity;
             public uint[] GearSetIds = Array.Empty<uint>();
+            // Not stored with the items: used for the market listings (DetailsWriter).
+            public long MarketPrice;
+            public bool Hq;
         }
 
         // One row of raw AutoRetainer submarine data - built by Plugin.cs

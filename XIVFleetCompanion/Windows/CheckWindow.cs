@@ -12,7 +12,7 @@ namespace XIVFleetCompanion.Windows;
 /// <summary>
 /// "Check what I can see" (/xivfleet check): goes through every character the plugin would sync and
 /// shows what AutoRetainer, AllaganTools and FCTracker have for it, and when each part was last stored.
-/// Nothing is written: the database is only read. The result can be copied to share.
+/// The result can be copied to share, and is stored for the app's PCs panel (nothing else is written).
 /// </summary>
 public class CheckWindow : Window, IDisposable
 {
@@ -49,6 +49,7 @@ public class CheckWindow : Window, IDisposable
                 text = CheckReport.ToText(facts);
                 var count = CheckReport.ToFixCount(facts);
                 status = count == 0 ? "Nothing to fix." : $"{count} thing{(count == 1 ? "" : "s")} to fix (marked !).";
+                await StoreResult(text, count);
             }
             catch (Exception ex)
             {
@@ -60,6 +61,22 @@ public class CheckWindow : Window, IDisposable
                 running = false;
             }
         });
+    }
+
+    // Keeps the result in the database (sql/008), so the app's PCs panel shows it. Nothing else is written.
+    private async Task StoreResult(string result, int toFix)
+    {
+        try
+        {
+            await using var conn = await PostgresWriter.OpenConnectionAsync(plugin.Configuration.UseRemoteConnection);
+            if (conn == null) return;
+            if (!await DetailsWriter.WritePcCheckAsync(conn, Environment.MachineName, plugin.Configuration.AccountLabel ?? "", Plugin.VersionText, result, toFix))
+                status += " (Run sql/008 so the app can show this too.)";
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.Warning($"Fleet Companion: could not store the check for the app — {ex.Message}");
+        }
     }
 
     // Reads AutoRetainer and AllaganTools on the game's thread (as the sync does), then FCTracker's
@@ -168,7 +185,7 @@ public class CheckWindow : Window, IDisposable
     {
         ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the bags, " +
                           "each retainer and the FC chest (from AllaganTools), the house (from FCTracker) and when each was last " +
-                          "stored. Nothing is written.");
+                          "stored. Only the result itself is saved, for the app's PCs panel.");
         using (ImRaii.Disabled(running))
         {
             if (ImGui.Button(running ? "Checking..." : "Check again")) Run();
