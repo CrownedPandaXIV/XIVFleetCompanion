@@ -39,7 +39,7 @@
         "type": "Direct",
         "requested": "[2.0.3, )",
         "resolved": "2.0.3",
-        "contentHash": "CLBy7KdGhK3SaKC5hEus7tQ0ctEsM/bRaYHRUg5QSNVnx9tCqgqH0tp9hN/qUAwfTQUHCkYOInLeXSQ530hU5w=="
+        "contentHash": "5I9dVqmHp1v0dhco21btIRkUE47zHSy4t6bRLwIO6nGZ1mxGIL1f1yp1zWI/AAZFfdUz7n6RrH1hyi/6EhlIeQ=="
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
