@@ -152,15 +152,78 @@ namespace XIVFleetCompanion
             return await cmd.ExecuteNonQueryAsync();
         }
 
-        // Replaces one character's stored inventory (bags and retainers) in one transaction.
-        public static async Task WriteInventoryAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyList<InventoryItem> items)
+        // Where one character's items come from: its own bags (Id is the character's cid) or one of its
+        // retainers. SeenItems is null when AllaganTools has never seen that source (it answers with
+        // nothing at all, not even empty slots, for a retainer that was never opened at a bell), so its
+        // stored items are kept instead of being cleared.
+        public sealed class InventorySource
+        {
+            public ulong Id;
+            public string Name = "";
+            public List<InventoryItem>? SeenItems;
+        }
+
+        // What one character's inventory write does: replace the stored items of the sources read this
+        // sync (Read), with Items; and when the character's retainer list is known (from AutoRetainer),
+        // drop the stored items of any source not in Current (a dismissed retainer). Unseen are the
+        // retainers whose last stored items are kept.
+        public sealed class InventoryPlan
+        {
+            public List<ulong> Read = new();
+            public List<ulong>? Current;
+            public List<InventoryItem> Items = new();
+            public List<InventorySource> Unseen = new();
+            public bool BagsSeen;
+        }
+
+        public static InventoryPlan PlanInventory(ulong ownerCid, IReadOnlyList<InventorySource> sources, bool retainerListKnown)
+        {
+            var plan = new InventoryPlan();
+            foreach (var source in sources)
+            {
+                if (source.SeenItems == null)
+                {
+                    if (source.Id != ownerCid) plan.Unseen.Add(source);
+                    continue;
+                }
+                if (source.Id == ownerCid) plan.BagsSeen = true;
+                plan.Read.Add(source.Id);
+                // Stored under the source they were read from, so they replace exactly that source's rows.
+                plan.Items.AddRange(source.SeenItems.Select(i => new InventoryItem
+                {
+                    RetainerId = source.Id,
+                    SortedContainer = i.SortedContainer,
+                    SortedSlotIndex = i.SortedSlotIndex,
+                    ItemId = i.ItemId,
+                    Quantity = i.Quantity,
+                    GearSetIds = i.GearSetIds,
+                }));
+            }
+            if (retainerListKnown)
+                plan.Current = sources.Select(s => s.Id).Append(ownerCid).Distinct().ToList();
+            return plan;
+        }
+
+        // Writes one character's inventory plan in one transaction: the read sources' stored items are
+        // replaced, unread sources keep theirs, and (with plan.Current) a source no longer there loses its.
+        public static async Task WriteInventoryAsync(NpgsqlConnection conn, ulong ownerCid, InventoryPlan plan)
         {
             await using var tx = await conn.BeginTransactionAsync();
-            await using (var delete = new NpgsqlCommand("DELETE FROM companion_inventory_snapshot WHERE owner_cid = @owner", conn, tx))
+            await using (var delete = new NpgsqlCommand(@"
+                DELETE FROM companion_inventory_snapshot
+                WHERE owner_cid = @owner
+                  AND (retainer_id = ANY(@read::numeric[])
+                       OR (@current::numeric[] IS NOT NULL AND NOT retainer_id = ANY(@current::numeric[])))", conn, tx))
             {
                 delete.Parameters.AddWithValue("owner", (decimal)ownerCid);
+                delete.Parameters.AddWithValue("read", plan.Read.Select(id => (decimal)id).ToArray());
+                delete.Parameters.Add(new NpgsqlParameter("current", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Numeric)
+                {
+                    Value = plan.Current == null ? DBNull.Value : plan.Current.Select(id => (decimal)id).ToArray(),
+                });
                 await delete.ExecuteNonQueryAsync();
             }
+            var items = plan.Items;
             if (items.Count > 0)
             {
                 // Gear set lists differ in length per item, so they travel as array text ("{1,4}")
@@ -182,6 +245,24 @@ namespace XIVFleetCompanion
                 await insert.ExecuteNonQueryAsync();
             }
             await tx.CommitAsync();
+        }
+
+        // How many of each item one character has stored across its bags and retainers (including the
+        // last stored items of retainers AllaganTools did not see this time). Items it has none of are
+        // returned as 0.
+        public static async Task<Dictionary<uint, long>> ReadItemTotalsAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyCollection<uint> itemIds)
+        {
+            var totals = itemIds.ToDictionary(id => id, _ => 0L);
+            await using var cmd = new NpgsqlCommand(@"
+                SELECT item_id, sum(quantity)::bigint FROM companion_inventory_snapshot
+                WHERE owner_cid = @owner AND item_id = ANY(@items::int[])
+                GROUP BY item_id", conn);
+            cmd.Parameters.AddWithValue("owner", (decimal)ownerCid);
+            cmd.Parameters.AddWithValue("items", itemIds.Select(i => (int)i).ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                totals[(uint)reader.GetInt32(0)] = reader.IsDBNull(1) ? 0 : reader.GetInt64(1);
+            return totals;
         }
 
         // Replaces one Free Company's stored chest in one transaction. Several characters in the
@@ -426,6 +507,42 @@ namespace XIVFleetCompanion
         private static string? GearSetText(uint[]? ids)
             => ids == null || ids.Length == 0 ? null : "{" + string.Join(",", ids) + "}";
 
+        // How long ago things were last stored, for "Check what I can see" (reads only): each
+        // character's row, each inventory source (bags under the character's own id, or a retainer)
+        // and each FC chest. Missing from a dictionary: nothing stored.
+        public sealed class StoredAges
+        {
+            public Dictionary<ulong, TimeSpan> Synced = new();
+            public Dictionary<(ulong Owner, ulong Source), TimeSpan> Inventory = new();
+            public Dictionary<ulong, TimeSpan> Chest = new();
+        }
+
+        public static async Task<StoredAges> ReadStoredAgesAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids, IReadOnlyCollection<ulong> fcIds)
+        {
+            var ages = new StoredAges();
+            var cidArray = cids.Select(c => (decimal)c).ToArray();
+            async Task Read(string sql, decimal[] ids, Action<NpgsqlDataReader> add)
+            {
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("ids", ids);
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) add(reader);
+            }
+            static TimeSpan Seconds(NpgsqlDataReader r, int i) => TimeSpan.FromSeconds(Math.Max(0, r.GetDouble(i)));
+
+            await Read(@"SELECT cid, extract(epoch FROM now() - last_synced_at)::float8
+                         FROM companion_character_current WHERE cid = ANY(@ids::numeric[])", cidArray,
+                r => ages.Synced[(ulong)r.GetDecimal(0)] = Seconds(r, 1));
+            await Read(@"SELECT owner_cid, retainer_id, extract(epoch FROM now() - max(updated_at))::float8
+                         FROM companion_inventory_snapshot WHERE owner_cid = ANY(@ids::numeric[]) GROUP BY 1, 2", cidArray,
+                r => ages.Inventory[((ulong)r.GetDecimal(0), (ulong)r.GetDecimal(1))] = Seconds(r, 2));
+            await Read(@"SELECT fc_id, extract(epoch FROM now()::timestamp - max(updated_at))::float8
+                         FROM companion_fc_inventory_snapshot WHERE fc_id = ANY(@ids::numeric[]) GROUP BY 1",
+                fcIds.Select(f => (decimal)f).ToArray(),
+                r => ages.Chest[(ulong)r.GetDecimal(0)] = Seconds(r, 1));
+            return ages;
+        }
+
         // ---- Fingerprints: a short digest of everything a write would store, so an unchanged
         //      inventory, chest, sub list, retainer list or housing entry is not written again. ----
 
@@ -433,6 +550,11 @@ namespace XIVFleetCompanion
             => Digest(items
                 .OrderBy(i => i.RetainerId).ThenBy(i => i.SortedContainer).ThenBy(i => i.SortedSlotIndex)
                 .Select(i => $"{i.RetainerId}|{i.SortedContainer}|{i.SortedSlotIndex}|{i.ItemId}|{i.Quantity}|{string.Join(",", i.GearSetIds ?? Array.Empty<uint>())}"));
+
+        // An inventory plan: its items and which sources it replaces or keeps.
+        public static string Fingerprint(InventoryPlan plan)
+            => Fingerprint(plan.Items) + "|" + string.Join(",", plan.Read.OrderBy(id => id))
+               + "|" + (plan.Current == null ? "-" : string.Join(",", plan.Current.OrderBy(id => id)));
 
         public static string Fingerprint(IEnumerable<SubmarineRecord> subs)
             => Digest(subs.OrderBy(s => s.SubName, StringComparer.Ordinal)

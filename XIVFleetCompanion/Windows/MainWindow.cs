@@ -79,6 +79,13 @@ public class MainWindow : Window, IDisposable
         {
             plugin.ToggleConfigUi();
         }
+        ImGui.SameLine();
+        if (ImGui.Button("Check what I can see"))
+        {
+            plugin.OpenCheck();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, AllaganTools and FCTracker have for it, without writing anything (also /xivfleet check).");
 
         ImGui.Spacing();
 
