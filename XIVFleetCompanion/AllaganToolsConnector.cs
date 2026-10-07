@@ -47,6 +47,9 @@ namespace XIVFleetCompanion
             public uint SortedContainer;
             public int SortedSlotIndex;
             public uint[] GearSetIds = Array.Empty<uint>();
+            // Only for an item up for sale on a retainer: its price per item.
+            public long MarketPrice;
+            public bool Hq;
         }
 
         /// <summary>
@@ -88,6 +91,8 @@ namespace XIVFleetCompanion
                         RetainerId = item[23],
                         SortedContainer = (uint)item[20],
                         SortedSlotIndex = (int)item[22],
+                        MarketPrice = item.Length > 24 ? (long)item[24] : 0,
+                        Hq = (item[6] & 1) != 0,
                         GearSetIds = gearSetIds
                     });
                 }

@@ -81,7 +81,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character, without writing anything."
+            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character."
         });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
@@ -306,6 +306,7 @@ public sealed class Plugin : IDalamudPlugin
         NpgsqlConnection conn = openConnection;
 
         changes.BeginSync(DateTime.UtcNow);
+        if (!detailsTablesReady && DateTime.UtcNow >= detailsTablesAskAgainAt) detailsTablesReady = true;
         var written = 0;
         var unchanged = 0;
         var failed = 0;
@@ -333,6 +334,10 @@ public sealed class Plugin : IDalamudPlugin
                 Log.Warning($"Fleet Companion: failed to write {what} — {ex.Message}");
             }
         }
+
+        // What this PC could not see this sync, in plain sentences, for the app's PCs panel.
+        var problems = new List<string>();
+        if (!allaganToolsReady) problems.Add("AllaganTools is not running: bags, retainers' items and FC chests are not updated.");
 
         var snapshots = new List<FleetWriter.CharacterSnapshot>();
         var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
@@ -373,6 +378,10 @@ public sealed class Plugin : IDalamudPlugin
                     sources.Add(new() { Id = retainer.RetainerId, Name = retainer.Name, SeenItems = SeenItems(retainer.RetainerId) });
 
                 var plan = FleetWriter.PlanInventory(cid, sources, retainerListKnown: retainers.Count > 0);
+                if (!plan.BagsSeen)
+                    problems.Add($"AllaganTools has not seen {who}'s bags: log in as {character.Name} once.");
+                foreach (var unseen in plan.Unseen)
+                    problems.Add($"Open retainer {unseen.Name} ({who}) at a summoning bell.");
                 if (!plan.BagsSeen)
                     WarnOnce($"bags:{cid}", $"Fleet Companion: AllaganTools has not seen {who}'s bags on this PC (log in as {who} once with AllaganTools running); their last stored items are kept.");
                 foreach (var unseen in plan.Unseen)
@@ -417,6 +426,24 @@ public sealed class Plugin : IDalamudPlugin
                     }
                 }
 
+                // The retainers' market listings (sql/008), for each retainer AllaganTools saw.
+                var seenSources = sources.Where(src => src.Id != cid && src.SeenItems != null).ToList();
+                if (seenSources.Count > 0 && detailsTablesReady)
+                {
+                    var listings = seenSources.SelectMany(src => src.SeenItems!
+                        .Where(i => i.SortedContainer == RetainerMarketContainer)
+                        .Select(i => new DetailsWriter.Listing
+                        {
+                            RetainerId = src.Id, Slot = i.SortedSlotIndex, ItemId = i.ItemId, Quantity = i.Quantity,
+                            Hq = i.Hq, UnitPrice = i.MarketPrice,
+                        })).ToList();
+                    var seenIds = seenSources.Select(src => src.Id).ToList();
+                    await WriteIfChanged($"listings:{cid}", string.Join(",", seenIds.OrderBy(id => id)) + "#" + DetailsWriter.Fingerprint(listings), async () =>
+                    {
+                        if (!await DetailsWriter.WriteListingsAsync(conn, cid, seenIds, listings)) DetailsTablesMissing();
+                    }, $"market listings for {who}");
+                }
+
                 // FC chest data comes from the FC's own id. A chest AllaganTools has never seen (not
                 // opened on this PC) answers with nothing and is left as stored; a seen chest is
                 // written even with zero items, so a chest that was emptied is cleared. Keyed by FC,
@@ -426,6 +453,7 @@ public sealed class Plugin : IDalamudPlugin
                     var chestSeen = SeenItems(character.FcId);
                     if (chestSeen == null)
                     {
+                        problems.Add($"Open the Free Company chest of {who}'s FC.");
                         WarnOnce($"chest:{character.FcId}", $"Fleet Companion: AllaganTools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
                     }
                     else
@@ -505,6 +533,9 @@ public sealed class Plugin : IDalamudPlugin
             Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
 
+        if (detailsTablesReady)
+            await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady, fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath), problems);
+
         var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint
         {
             SubjectType = kv.Key.Type,
@@ -558,5 +589,119 @@ public sealed class Plugin : IDalamudPlugin
         ItemId = item.ItemId,
         Quantity = item.Quantity,
         GearSetIds = item.GearSetIds,
+        MarketPrice = item.MarketPrice,
+        Hq = item.Hq,
     };
+
+    // AllaganTools' container for the items a retainer has up for sale.
+    private const uint RetainerMarketContainer = 12002;
+
+    // The sql/008 tables (PCs, voyage loot, venture rewards, market listings). Until it has been run, they
+    // are skipped after one log line; asked again every 30 minutes in case it has been run since.
+    private bool detailsTablesReady = true;
+    private DateTime detailsTablesAskAgainAt = DateTime.MinValue;
+
+    private bool loggedDetailsTablesMissing = false;
+
+    private void DetailsTablesMissing()
+    {
+        if (!loggedDetailsTablesMissing)
+            Log.Information("Fleet Companion: run sql/008_pcs_loot_ventures_listings.sql once so the app can show PCs, loot per voyage, venture income and market listings.");
+        loggedDetailsTablesMissing = true;
+        detailsTablesReady = false;
+        detailsTablesAskAgainAt = DateTime.UtcNow.AddMinutes(30);
+    }
+
+    // The other plugins' config folders sit next to this plugin's own.
+    private static string? OtherPluginFolder(string name)
+    {
+        var root = Directory.GetParent(PluginInterface.ConfigDirectory.FullName)?.FullName;
+        return root == null ? null : Path.Combine(root, name);
+    }
+
+    // AutoRetainer's statistics files already read, by when they last changed, so unchanged ones are not
+    // read again.
+    private readonly Dictionary<string, DateTime> ventureFilesRead = new();
+
+    // This PC's status, voyage loot from SubmarineTracker and venture rewards from AutoRetainer (sql/008).
+    private async Task WriteDetailsAsync(NpgsqlConnection conn, List<CharacterRead> characters, int leftOut,
+        bool allaganToolsReady, bool fcTrackerFound, List<string> problems)
+    {
+        var cids = characters.Select(c => c.Snapshot.Cid).ToList();
+        var fcIds = characters.Select(c => c.Snapshot.FcId).Where(f => f != 0).Distinct().ToList();
+
+        // Voyage loot, newer than what is stored.
+        var stFolder = OtherPluginFolder("SubmarineTracker");
+        var stPath = stFolder == null ? null : Path.Combine(stFolder, SubmarineTrackerReader.FileName);
+        var stFound = stPath != null && File.Exists(stPath);
+        if (stFound && fcIds.Count > 0)
+        {
+            try
+            {
+                var newest = await DetailsWriter.ReadNewestVoyagesAsync(conn, fcIds);
+                if (newest == null) { DetailsTablesMissing(); return; }
+                var loot = SubmarineTrackerReader.ReadLoot(stPath!, newest, fcIds);
+                if (!await DetailsWriter.WriteVoyageLootAsync(conn, loot)) { DetailsTablesMissing(); return; }
+                if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
+            }
+            catch (Exception ex) when (ex is not PostgresException)
+            {
+                WarnOnce("submarinetracker", $"Fleet Companion: could not read SubmarineTracker's loot ({stPath}) — {ex.Message}");
+            }
+        }
+        else if (!stFound && fcIds.Count > 0)
+        {
+            problems.Add("SubmarineTracker was not found: loot per voyage is not recorded.");
+        }
+
+        // Venture rewards, from the statistics files of the characters synced here.
+        var arFolder = OtherPluginFolder("AutoRetainer");
+        var statFiles = arFolder != null && Directory.Exists(arFolder)
+            ? Directory.GetFiles(arFolder, VentureStatsReader.Pattern) : Array.Empty<string>();
+        var wanted = new HashSet<ulong>(cids);
+        var changedFiles = new List<(string Path, ulong Cid, string Retainer, DateTime Changed)>();
+        foreach (var path in statFiles)
+        {
+            if (VentureStatsReader.ParseFileName(Path.GetFileName(path)) is not { } parsed || !wanted.Contains(parsed.Cid)) continue;
+            var changed = File.GetLastWriteTimeUtc(path);
+            if (ventureFilesRead.TryGetValue(path, out var read) && read == changed) continue;
+            changedFiles.Add((path, parsed.Cid, parsed.Retainer, changed));
+        }
+        if (changedFiles.Count > 0)
+        {
+            var newest = await DetailsWriter.ReadNewestVenturesAsync(conn, cids);
+            if (newest == null) { DetailsTablesMissing(); return; }
+            foreach (var file in changedFiles)
+            {
+                try
+                {
+                    var since = newest.TryGetValue((file.Cid, file.Retainer), out var s) ? s : 0;
+                    var rows = VentureStatsReader.ReadFile(file.Path, file.Cid, file.Retainer, since);
+                    if (!await DetailsWriter.WriteVenturesAsync(conn, rows)) { DetailsTablesMissing(); return; }
+                    ventureFilesRead[file.Path] = file.Changed;
+                }
+                catch (Exception ex) when (ex is not PostgresException)
+                {
+                    WarnOnce($"ventures:{file.Path}", $"Fleet Companion: could not read AutoRetainer's venture statistics ({file.Path}) — {ex.Message}");
+                }
+            }
+        }
+
+        if (!fcTrackerFound) problems.Add("FCTracker's file was not found: Free Company and house details are not updated.");
+        var status = new DetailsWriter.PcStatus
+        {
+            PcName = Environment.MachineName,
+            AccountLabel = Configuration.AccountLabel ?? "",
+            PluginVersion = VersionText,
+            AutoRetainerReady = true,
+            AllaganToolsReady = allaganToolsReady,
+            FcTrackerFound = fcTrackerFound,
+            SubmarineTrackerFound = stFound,
+            VentureStatsFound = statFiles.Length > 0,
+            CharactersSynced = characters.Count,
+            CharactersLeftOut = leftOut,
+            Problems = problems,
+        };
+        if (!await DetailsWriter.WritePcStatusAsync(conn, status)) DetailsTablesMissing();
+    }
 }
