@@ -9,11 +9,11 @@ housing eligibility display, etc.) is left to the app.
 
 ## Data sources
 
-- **AutoRetainer** (via `AutoRetainerAPI`): characters, retainers, submarines, Gil, Ceruleum, repair kits
-- **AllaganTools**: personal, retainer and Free Company chest inventory. AllaganTools only knows a retainer's items once it has been opened at a summoning bell on that PC, and the FC chest once the chest has been opened; until then their last stored items are kept (the log names what to open), and so is everything when AllaganTools is not running.
-- **FCTracker**: Free Company housing, founding date and eligibility data (read from its config file)
+- **AutoRetainer** (required, via `AutoRetainerAPI`): characters, retainers, submarines, Gil, Ceruleum, repair kits
+- **AllaganTools** (recommended): personal, retainer and Free Company chest inventory. AllaganTools only knows a retainer's items once it has been opened at a summoning bell on that PC, and the FC chest once the chest has been opened (only asked for when the FC has subs: it holds their ceruleum, repair kits and salvage); until then their last stored items are kept (the log names what to open), and so is everything when AllaganTools is not running.
+- **FCTracker** (optional): Free Company housing, founding date and eligibility data (read from its config file); without it, only the FC house details are missing
 - **SubmarineTracker** (optional, from 0.10.0): the loot of every voyage, read from its
-  `submarine-sqlite.db` (read only), for the app's loot per voyage
+  `submarine-sqlite.db` (read only), for the app's loot per voyage; only asked for when a synced character has subs
 - **AutoRetainer's venture statistics** (optional, from 0.10.0): every venture's reward, read from its
   `*.statistic.json` files (its "Record statistics" option, on by default), for the app's venture income
 
@@ -82,7 +82,8 @@ then), each sync also stores:
 - **This PC's status** (`companion_pc_status`, one row per PC name and account label): plugin version,
   last sync, whether AutoRetainer, AllaganTools, FCTracker, SubmarineTracker and AutoRetainer's venture
   statistics were found, how many characters were synced, and what could not be seen (a retainer to open,
-  ...). The last **Check what I can see** result is kept beside it.
+  ...). From 0.11.0, a PC whose AutoRetainer is not running says so (from its second sync attempt in a
+  row, so AutoRetainer still loading at game start is not reported), keeping its last sync's time and counts. The last **Check what I can see** result is kept beside it.
 - **Loot per voyage** (`companion_voyage_loot`): one row per sector of each voyage SubmarineTracker
   recorded, for the Free Companies of the characters synced here. Only voyages newer than those stored
   are read. From 0.10.1, with `sql/009_voyage_sector_order.sql` run once, each sector also has its place
