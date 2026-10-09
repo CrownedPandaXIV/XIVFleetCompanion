@@ -54,6 +54,8 @@ public static class CheckReport
         public bool AllaganToolsReady;
         public string FcTrackerPath = "";
         public bool FcTrackerFound;
+        // Whether FCTracker is loaded in this game (null: Dalamud could not be asked).
+        public bool? FcTrackerRunning;
         // Null when the database was checked; otherwise why not.
         public string? DatabaseProblem;
         public List<Character> Characters = new();
@@ -121,6 +123,18 @@ public static class CheckReport
         return problems;
     }
 
+    // FCTracker is optional (only Free Company house details): running, or installed but not running in this
+    // game (its last saved file is still read), or not found.
+    public static string FcTrackerLine(Facts f)
+    {
+        if (f.FcTrackerRunning == true) return $"FCTracker: running ({f.FcTrackerPath})";
+        if (f.FcTrackerRunning == false && f.FcTrackerFound)
+            return $"FCTracker: not running in this game, optional: its last saved details are used ({f.FcTrackerPath})";
+        return f.FcTrackerFound
+            ? $"FCTracker: found ({f.FcTrackerPath})"
+            : $"FCTracker: not found, optional: only for Free Company house details (Settings → FCTracker Config Path: {f.FcTrackerPath})";
+    }
+
     public static string ToText(Facts f)
     {
         var databaseChecked = f.DatabaseProblem == null;
@@ -131,9 +145,7 @@ public static class CheckReport
             ? $"AutoRetainer: running, {Plural(f.Registered, "character")}" + (f.LeftOut > 0 ? $" ({f.LeftOut} left out in settings)" : "")
             : "AutoRetainer: not running");
         sb.AppendLine($"AllaganTools: {(f.AllaganToolsReady ? "running" : "not running")}");
-        sb.AppendLine(f.FcTrackerFound
-            ? $"FCTracker: found ({f.FcTrackerPath})"
-            : $"FCTracker: not found, optional: only for Free Company house details (Settings → FCTracker Config Path: {f.FcTrackerPath})");
+        sb.AppendLine(FcTrackerLine(f));
         sb.AppendLine($"Database: {(databaseChecked ? "checked" : "not checked, " + f.DatabaseProblem)}");
 
         var total = ToFixCount(f);

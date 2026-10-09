@@ -515,6 +515,19 @@ internal static class Program
         facts.Characters[0].Subs = 4;
         facts.FcTrackerFound = true;
 
+        // FCTracker loaded in this game or not (Dalamud's list of loaded plugins), and its file found or not.
+        facts.FcTrackerRunning = true;
+        var running = CheckReport.FcTrackerLine(facts);
+        facts.FcTrackerRunning = false;
+        var stopped = CheckReport.FcTrackerLine(facts);
+        facts.FcTrackerFound = false;
+        var missing = CheckReport.FcTrackerLine(facts);
+        facts.FcTrackerRunning = null;
+        facts.FcTrackerFound = true;
+        Check(running.StartsWith("FCTracker: running") && stopped.StartsWith("FCTracker: not running in this game")
+              && missing.StartsWith("FCTracker: not found") && CheckReport.FcTrackerLine(facts).StartsWith("FCTracker: found"),
+            $"FCTracker is reported running, installed but not running, or not found:\n{running}\n{stopped}\n{missing}");
+
         facts.AllaganToolsReady = false;
         facts.DatabaseProblem = "no saved connection (Settings → Postgres).";
         report = CheckReport.ToText(facts);

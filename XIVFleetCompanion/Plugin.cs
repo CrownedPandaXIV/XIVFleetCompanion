@@ -289,6 +289,9 @@ public sealed class Plugin : IDalamudPlugin
         }
         autoRetainerMissedSyncs = 0;
         var (characters, registeredCount, leftOutCount) = fromAutoRetainer.Value;
+        // Whether FCTracker and SubmarineTracker are loaded in this game, for the app's PCs tab.
+        var (fcTrackerRunning, subTrackerRunning) = await Framework.RunOnFrameworkThread(
+            () => (IsPluginLoaded("FCTracker"), IsPluginLoaded("SubmarineTracker")));
 
         var charactersWithoutFc = new HashSet<ulong>();
         var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
@@ -551,7 +554,8 @@ public sealed class Plugin : IDalamudPlugin
         {
             try
             {
-                await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady, fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath), problems);
+                await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady,
+                    fcTrackerRunning ?? (fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath)), subTrackerRunning, problems);
             }
             catch (PostgresException ex)
             {
@@ -641,6 +645,23 @@ public sealed class Plugin : IDalamudPlugin
         detailsTablesAskAgainAt = DateTime.UtcNow.AddMinutes(30);
     }
 
+    // Whether another plugin is loaded in this game, from Dalamud's list of installed plugins, matched by its
+    // internal or shown name (spaces and case ignored). Null when Dalamud could not be asked. Called on the
+    // game's thread.
+    internal static bool? IsPluginLoaded(string name)
+    {
+        static bool Same(string? a, string b) => string.Equals((a ?? "").Replace(" ", ""), b, StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            return PluginInterface.InstalledPlugins.Any(p => p.IsLoaded && (Same(p.InternalName, name) || Same(p.Name, name)));
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Fleet Companion: could not list the loaded plugins — {ex.Message}");
+            return null;
+        }
+    }
+
     // The other plugins' config folders sit next to this plugin's own.
     private static string? OtherPluginFolder(string name)
     {
@@ -671,8 +692,10 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, DateTime> ventureFilesRead = new();
 
     // This PC's status, voyage loot from SubmarineTracker and venture rewards from AutoRetainer (sql/008).
+    // fcTrackerFound: FCTracker is loaded in this game (or, when that cannot be told, its file was found);
+    // subTrackerRunning: SubmarineTracker is loaded (null: cannot be told, its file decides).
     private async Task WriteDetailsAsync(NpgsqlConnection conn, List<CharacterRead> characters, int leftOut,
-        bool allaganToolsReady, bool fcTrackerFound, List<string> problems)
+        bool allaganToolsReady, bool fcTrackerFound, bool? subTrackerRunning, List<string> problems)
     {
         var cids = characters.Select(c => c.Snapshot.Cid).ToList();
         var fcIds = characters.Select(c => c.Snapshot.FcId).Where(f => f != 0).Distinct().ToList();
@@ -681,6 +704,7 @@ public sealed class Plugin : IDalamudPlugin
         var stFolder = OtherPluginFolder("SubmarineTracker");
         var stPath = stFolder == null ? null : Path.Combine(stFolder, SubmarineTrackerReader.FileName);
         var stFound = stPath != null && File.Exists(stPath);
+        var stRunning = subTrackerRunning ?? stFound;
         if (stFound && fcIds.Count > 0)
         {
             try
@@ -696,10 +720,11 @@ public sealed class Plugin : IDalamudPlugin
                 WarnOnce("submarinetracker", $"Fleet Companion: could not read SubmarineTracker's loot ({stPath}) — {ex.Message}");
             }
         }
-        else if (!stFound && characters.Any(c => c.Snapshot.SubmarineCount > 0))
-        {
-            problems.Add("SubmarineTracker was not found: loot per voyage is not recorded.");
-        }
+        // Voyages already in its file are still read while it is not running; new ones are not recorded.
+        if (!stRunning && characters.Any(c => c.Snapshot.SubmarineCount > 0))
+            problems.Add(stFound
+                ? "SubmarineTracker is not running: new voyages' loot is not recorded."
+                : "SubmarineTracker was not found: loot per voyage is not recorded.");
 
         // Venture rewards, from the statistics files of the characters synced here.
         var arFolder = OtherPluginFolder("AutoRetainer");
@@ -744,7 +769,7 @@ public sealed class Plugin : IDalamudPlugin
             AutoRetainerReady = true,
             AllaganToolsReady = allaganToolsReady,
             FcTrackerFound = fcTrackerFound,
-            SubmarineTrackerFound = stFound,
+            SubmarineTrackerFound = stRunning,
             VentureStatsFound = statFiles.Length > 0,
             CharactersSynced = characters.Count,
             CharactersLeftOut = leftOut,
