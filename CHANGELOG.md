@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.12.0 - 2026-10-09
+
+No database change. For app 0.23.2.
+
+- **FCTracker and SubmarineTracker: running, not just installed.** The app's PCs tab now shows whether each is
+  loaded in that game, for that account (from Dalamud's list of loaded plugins), like AutoRetainer and
+  AllaganTools. Before, it only showed whether their files existed, which stays true when they are turned
+  off, and on a PC running two accounts one account's files counted for both.
+- With subs and SubmarineTracker installed but not running: "SubmarineTracker is not running: new voyages'
+  loot is not recorded." Voyages already in its file are still read.
+- **Check what I can see** says whether FCTracker is running, installed but not running (its last saved
+  details are still used), or not found.
+- If Dalamud cannot be asked, the files decide, as before.
+
 ## 0.11.1 - 2026-10-07
 
 No database change.

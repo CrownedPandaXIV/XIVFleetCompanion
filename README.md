@@ -83,7 +83,9 @@ then), each sync also stores:
   last sync, whether AutoRetainer, AllaganTools, FCTracker, SubmarineTracker and AutoRetainer's venture
   statistics were found, how many characters were synced, and what could not be seen (a retainer to open,
   ...). From 0.11.0, a PC whose AutoRetainer is not running says so (from its second sync attempt in a
-  row, so AutoRetainer still loading at game start is not reported), keeping its last sync's time and counts. The last **Check what I can see** result is kept beside it.
+  row, so AutoRetainer still loading at game start is not reported), keeping its last sync's time and counts. From 0.12.0, FCTracker and SubmarineTracker
+  count as there only when they are loaded in that game (Dalamud's list of loaded plugins), not just when
+  their files exist. The last **Check what I can see** result is kept beside it.
 - **Loot per voyage** (`companion_voyage_loot`): one row per sector of each voyage SubmarineTracker
   recorded, for the Free Companies of the characters synced here. Only voyages newer than those stored
   are read. From 0.10.1, with `sql/009_voyage_sector_order.sql` run once, each sector also has its place

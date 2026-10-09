@@ -96,6 +96,7 @@ public class CheckWindow : Window, IDisposable
             var autoRetainer = plugin.AutoRetainer;
             f.AutoRetainerReady = autoRetainer != null && autoRetainer.Ready;
             f.AllaganToolsReady = plugin.AllaganTools?.IsReady() ?? false;
+            f.FcTrackerRunning = Plugin.IsPluginLoaded("FCTracker");
             if (!f.AutoRetainerReady) return f;
 
             var cids = autoRetainer!.GetRegisteredCharacters();
