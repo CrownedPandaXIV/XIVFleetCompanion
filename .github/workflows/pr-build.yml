@@ -32,7 +32,7 @@ jobs:
       run: dotnet build --configuration Release
 
     - name: Store artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: XIVFleetCompanion
         path: .\XIVFleetCompanion\bin\x64\Release\XIVFleetCompanion\*
@@ -42,7 +42,7 @@ jobs:
 
   # The plugin's database writes (FleetWriter.cs), run against a scratch Postgres.
   writer-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
