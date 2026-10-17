@@ -11,12 +11,26 @@ version="${2:?version required}"
 url="${3:?download url required}"
 icon="https://raw.githubusercontent.com/CrownedPandaXIV/XIVFleetCompanion/master/Data/submarine.png"
 
+# Dalamud shows the changelog as plain text, so the Markdown is turned into plain text: each paragraph and
+# each "- " item on one line (CHANGELOG.md wraps them), a blank line between paragraphs, and no ** or `.
+# [text](link) becomes "text (link)".
 notes=""
 if [ -f CHANGELOG.md ]; then
   notes="$(awk -v v="$version" '
     /^## / { if (found) exit; if ($2 == v) found = 1; next }
     found { print }
-  ' CHANGELOG.md | sed '/./,$!d')"
+  ' CHANGELOG.md | awk '
+    function flush() { if (line != "") print line; line = "" }
+    /^[[:space:]]*$/ { flush(); blank = 1; next }
+    {
+      text = $0; sub(/^[[:space:]]+/, "", text)
+      if (text ~ /^- / || line == "") {
+        flush(); if (blank && printed) print ""; line = text; printed = 1
+      } else line = line " " text
+      blank = 0
+    }
+    END { flush() }
+  ' | sed -E 's/\*\*//g; s/`//g; s/\[([^]]*)\]\(([^)]*)\)/\1 (\2)/g')"
 fi
 
 # The manifest can start with a byte order mark, which jq does not accept.
