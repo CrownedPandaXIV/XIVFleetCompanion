@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.13.1 - 2026-10-17
+
+No database change. Nothing changes in the plugin itself.
+
+- The changelog in the game's plugin list (`/xlplugins`) is now plain text: no stray `**` marks, and no
+  lines broken in the middle of a sentence.
+
 ## 0.13.0 - 2026-10-17
 
 No database change. Works with any app version.
