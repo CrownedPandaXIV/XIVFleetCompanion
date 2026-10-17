@@ -58,6 +58,8 @@ public static class CheckReport
         public bool? FcTrackerRunning;
         // Whether FCTracker answered directly (its IPC) rather than through its saved file.
         public bool FcTrackerLive;
+        // The version of FCTracker's IPC, when it says (newer FCTrackers).
+        public int? FcTrackerIpcVersion;
         // Null when the database was checked; otherwise why not.
         public string? DatabaseProblem;
         public List<Character> Characters = new();
@@ -129,7 +131,8 @@ public static class CheckReport
     // file is read), or installed but not running in this game (its last saved file is still read), or not found.
     public static string FcTrackerLine(Facts f)
     {
-        if (f.FcTrackerRunning == true && f.FcTrackerLive) return "FCTracker: running, details read directly from it";
+        if (f.FcTrackerRunning == true && f.FcTrackerLive)
+            return "FCTracker: running, details read directly from it" + (f.FcTrackerIpcVersion is int v ? $" (IPC version {v})" : "");
         if (f.FcTrackerRunning == true) return $"FCTracker: running, a version without IPC: its saved file is read ({f.FcTrackerPath})";
         if (f.FcTrackerRunning == false && f.FcTrackerFound)
             return $"FCTracker: not running in this game, optional: its last saved details are used ({f.FcTrackerPath})";

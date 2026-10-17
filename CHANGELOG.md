@@ -3,6 +3,16 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.13.2 - 2026-10-17
+
+No database change. Works with any app version.
+
+- **FCTracker, read in one go.** With the newest FCTracker, the plugin asks for every character's and Free
+  Company's details in two calls, instead of one call per character and Free Company. Older FCTrackers are asked
+  one at a time as before, and the oldest are still read from their file.
+- `/xivfleet check` shows FCTracker's IPC version when it says, for example "details read directly from it
+  (IPC version 1)".
+
 ## 0.13.1 - 2026-10-17
 
 No database change. Nothing changes in the plugin itself.
