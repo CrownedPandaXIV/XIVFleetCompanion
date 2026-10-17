@@ -1,159 +1,115 @@
-# XIV Fleet Companion — Dalamud Plugin
+# XIV Fleet Companion (Dalamud plugin)
 
-Dalamud plugin that syncs FFXIV fleet data to a Postgres database. The
-[desktop app](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App) reads that
-database to show rosters, submarines, parts, inventory and more.
+The in-game half of XIV Fleet Companion. While you play, or while AutoRetainer runs your characters, it quietly sends
+your characters, subs, retainers and inventories to a database. The
+[XIV Fleet Companion app](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App) then shows your whole fleet from
+there, across every account and PC.
 
-The plugin only captures raw data. Anything computed (rank progress, Gil/day,
-housing eligibility display, etc.) is left to the app.
+The plugin just collects. All the working out (income, rank-ups, what to build, alerts) happens in the app.
 
-## Data sources
+## What you need
 
-- **AutoRetainer** (required, via `AutoRetainerAPI`): characters, retainers, submarines, Gil, Ceruleum, repair kits
-- **AllaganTools** (recommended): personal, retainer and Free Company chest inventory. AllaganTools only knows a retainer's items once it has been opened at a summoning bell on that PC, and the FC chest once the chest has been opened (only asked for when the FC has subs: it holds their ceruleum, repair kits and salvage); until then their last stored items are kept (the log names what to open), and so is everything when AllaganTools is not running.
-- **FCTracker** (optional): Free Company housing, founding date and eligibility data (read from its config file); without it, only the FC house details are missing
-- **SubmarineTracker** (optional, from 0.10.0): the loot of every voyage, read from its
-  `submarine-sqlite.db` (read only), for the app's loot per voyage; only asked for when a synced character has subs
-- **AutoRetainer's venture statistics** (optional, from 0.10.0): every venture's reward, read from its
-  `*.statistic.json` files (its "Record statistics" option, on by default), for the app's venture income
-
-## Usage
-
-- `/xivfleet` opens the main window; the plugin installer's config button opens settings.
-- `/xivfleet check` (or **Check what I can see** in the main window) shows, per character, what the plugin
-  can see from AutoRetainer, AllaganTools and FCTracker, when each part was last stored, and what to open
-  to fix anything missing. **Copy results** copies it to share. With sql/008 the result is also stored, so
-  the app's PCs panel shows it; nothing else is written.
-- Enter Postgres host, port, database, user and password in the settings window. Credentials are stored in Windows Credential Manager, with separate entries for a local and a remote connection. The form shows the saved details (never the password); leave the password box empty to keep the saved one. "Clear Saved Credentials" asks for a second click.
-- The plugin syncs on the interval set in settings, and also about 5 seconds after a character logs
-  out (AutoRetainer logs a character out once it has finished with it), at most once every 30 seconds;
-  "Also sync right after a character logs out" in settings turns that off. Inventories, FC chests, submarines, retainers and
-  housing are written only when they changed (and in full once an hour); each character's current
-  row and the chart history every sync (the chart history stores only values that changed).
-  Dismissed retainers, chests of Free Companies none of your characters is in any more, and the old
-  Free Company details of a character that left its FC are removed as they are noticed.
-- **Characters** in settings chooses which characters are synced: every character AutoRetainer knows
-  except the ones unticked (the default), or only the ones ticked, for an account where only a few of
-  many characters should reach the app. "Tick only those with subs" ticks just the characters with a
-  workshop. Left-out characters are not read or sent at all; anything they sent before can be removed
-  with the app's Remove button on the Roster.
-
-## Current state per character
-
-From 0.3.0 the plugin also keeps `companion_character_current`: one row per character with what the
-app shows (name, world, account, gil, ceruleum, repair kits, retainers, submarines, sub slots, Free
-Company), when it was first seen and when it last synced. Name, world, account label and Free Company
-changes are logged in `companion_character_changes` automatically. **Run `sql/004_character_current.sql`
-once before updating the plugin to 0.3.0**; it creates both tables and fills them from the existing
-snapshot history (a minute or two on a few million rows).
-
-## The old snapshot history (removed in 0.4.0)
-
-Up to 0.3.x the plugin also wrote `companion_character_snapshot`: a full row per character on every
-sync, about 900 MB after a few months. Everything worth keeping from it is now elsewhere (current
-values in `companion_character_current`, values over time in the chart history, identity changes in
-`companion_character_changes`), so from 0.4.0 it is no longer written, and the daily
-retention/downsampling clean-up that kept it in check is gone too. To remove the table:
-
-1. Update the plugin to 0.4.0 on every PC that runs it and let it sync once.
-2. Save the table to a file: the app's `backup\save-character-snapshot.ps1` (it checks the file too).
-3. Run `sql/005_remove_character_snapshot.sql`. It refuses, changing nothing, if a plugin older than
-   0.4.0 still writes the table or a character has no current row.
-
-`sql/002` and `sql/003` only apply to databases that still have the old table.
-
-## Submarine slots
-
-From 0.5.0 each stored sub has its workshop slot (1-4), so renaming a sub does not break anything:
-the app finds each slot's sub by slot, and a renamed sub's Craft? setting moves to its new name. Run
-`sql/006_submarine_slot.sql` once to add the column (the plugin writes subs without slots until then).
-
-## Retainers seen
-
-From 0.9.1 the plugin records when AllaganTools last saw each retainer's items, so the app can tell a
-retainer that holds nothing from one never opened at a summoning bell. Run
-`sql/007_retainer_items_seen.sql` once to add the column (everything works as before until then).
-
-## PCs, loot, ventures and listings
-
-From 0.10.0, with `sql/008_pcs_loot_ventures_listings.sql` run once (everything works as before until
-then), each sync also stores:
-
-- **This PC's status** (`companion_pc_status`, one row per PC name and account label): plugin version,
-  last sync, whether AutoRetainer, AllaganTools, FCTracker, SubmarineTracker and AutoRetainer's venture
-  statistics were found, how many characters were synced, and what could not be seen (a retainer to open,
-  ...). From 0.11.0, a PC whose AutoRetainer is not running says so (from its second sync attempt in a
-  row, so AutoRetainer still loading at game start is not reported), keeping its last sync's time and counts. From 0.12.0, FCTracker and SubmarineTracker
-  count as there only when they are loaded in that game (Dalamud's list of loaded plugins), not just when
-  their files exist. The last **Check what I can see** result is kept beside it.
-- **Loot per voyage** (`companion_voyage_loot`): one row per sector of each voyage SubmarineTracker
-  recorded, for the Free Companies of the characters synced here. Only voyages newer than those stored
-  are read. From 0.10.1, with `sql/009_voyage_sector_order.sql` run once, each sector also has its place
-  in the route (`leg`: 1 for the first sector visited), so routes show in the order they were run; the
-  next sync fills it in for the voyages already stored.
-- **Venture rewards** (`companion_venture_result`): one row per reward from AutoRetainer's statistics
-  files of the characters synced here. Only new rewards are added.
-- **Market listings** (`companion_market_listing`): what each retainer AllaganTools has seen has up for
-  sale, at what price, and since when the plugin first saw it (a repriced listing keeps that time).
-
-## History for charts
-
-The plugin records selected values into a general history table (`companion_metric_history`) so they can be charted over time. A value is
-stored only when it changes, plus an hourly "still the same" marker, so slow-moving values
-stay small. Currently recorded:
-
-| Metric | Belongs to | Notes |
+| Plugin | | What it adds |
 | --- | --- | --- |
-| `gil`, `ceruleum`, `repair_kits` | character | |
-| `retainer_count`, `submarine_count`, `num_sub_slots` | character | from 0.3.0; `sql/004` copies the earlier changes from the snapshot history |
-| `fc_points` | Free Company, and the FC leader's character when it is one of yours | from FCTracker; labelled with the leader's name (on the FC) or the FC's name (on the leader). A leader change is recorded even if the points are unchanged |
-| `item_qty:<id>` for the eight salvage items (22500-22507) | character and Free Company | character = bags + retainers as stored (an unseen retainer counts with its last stored items); FC = chest, only when AllaganTools has chest data |
-| `item_qty:10155`, `item_qty:10373` (ceruleum tanks, Magitek repair materials) | character | from 0.9.1; bags + retainers as stored, so the app can tell supplies used from supplies moved to a retainer |
-| `inventory_sources` | character | from 0.9.1; how many sources (bags, retainers) have items stored. It goes up when a retainer's items are stored for the first time, which the app does not count as income |
+| **AutoRetainer** | required | Your characters, retainers, subs, gil, ceruleum and repair kits. |
+| **AllaganTools** | recommended | Everything in your bags, your retainers' and the FC chest. |
+| **FCTracker** | optional | Free Company houses, and when each was last entered. |
+| **SubmarineTracker** | optional | What every voyage brought back, for the app's income per voyage. |
 
-**Setup, once:** run `sql/001_metric_history.sql` in the database the plugin writes to. Until
-that has been run, the plugin logs a warning each sync and skips metric history (everything
-else keeps working). Optionally run `sql/002_backfill_metrics_from_snapshots.sql` afterwards
-to copy the existing gil, ceruleum and repair kit history into the new table.
+You also need the app connected to a PostgreSQL database. The plugin writes to the same database.
 
-To record something new, add another `AddMetric(...)` call in `Plugin.cs`; no schema change
-is needed.
+## Install
 
-## Versioning
+1. In the game, type `/xlsettings` and open the **Experimental** tab.
+2. Under **Custom Plugin Repositories**, paste this address, tick **Enabled**, then click **Save and Close**:
 
-The plugin uses [Semantic Versioning](https://semver.org) (`MAJOR.MINOR.PATCH`), set as
-`<Version>` in `XIVFleetCompanion/XIVFleetCompanion.csproj`. It shows in the window titles, the
-plugin installer and the log.
+   ```
+   https://raw.githubusercontent.com/CrownedPandaXIV/XIVFleetCompanion-Releases/main/repo.json
+   ```
 
-- **PATCH** (0.1.0 to 0.1.1): bug fixes, no new behavior.
-- **MINOR** (0.1.0 to 0.2.0): new data recorded or new features.
-- **MAJOR** (0.x to 1.0, then 1.0 to 2.0): 1.0 marks the first stable release; after that,
-  a change that needs a database update or a newer app first.
+3. Type `/xlplugins`, search for **XIV Fleet Companion**, and click **Install**.
 
-To release: change `<Version>`, add a section to `CHANGELOG.md`, merge. The tag `v<new>` and the GitHub release (with that
-changelog section as its description) are then created automatically by `.github/workflows/release.yml`, which
-also builds the plugin, attaches it to the release and lists it in `repo.json` in the public
-[XIVFleetCompanion-Releases](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases) repo (needs the `RELEASES_TOKEN`
-secret; that repo's README is written from `.github/releases-readme.md` the first time). The plugin and the app are versioned separately; the changelog notes when one
-needs the other updated.
+Dalamud keeps it up to date from then on.
 
-## Installing
+If you used a copy you built yourself, remove it from **Dev Plugin Locations** in `/xlsettings` first. Your settings and
+saved password carry over.
 
-1. In game, type `/xlsettings` and open the **Experimental** tab.
-2. Under **Custom Plugin Repositories**, add
-   `https://raw.githubusercontent.com/CrownedPandaXIV/XIVFleetCompanion-Releases/main/repo.json`, tick **Enabled**, then
-   **Save and Close**.
-3. In `/xlplugins`, search for **XIV Fleet Companion** and click **Install**. Dalamud keeps it up to date.
+## Set it up
 
-Switching from a copy you built yourself: remove its folder from Dev Plugin Locations first. Settings and the saved database
-password carry over.
+Type `/xivfleet` and open the settings:
 
-## Building
+- **Database:** enter the same address, port, database name, username and password as in the app. The password is
+  kept in Windows Credential Manager and never shown again. Leave the box empty to keep the saved one.
+- **Characters:** sync everyone AutoRetainer knows (the default), or only the characters you tick. "Tick only those
+  with subs" is handy for accounts where only a few characters matter.
 
-Requires XIVLauncher, FFXIV and Dalamud installed, and the .NET SDK.
+The database itself is set up by the app the first time it connects, so there's nothing to run on it. If the plugin's
+log says the database is missing something, open the app once and it'll sort it out.
+
+## Using it
+
+- **`/xivfleet`** opens the main window.
+- **`/xivfleet check`** (or **Check what I can see**) shows, character by character, what the plugin can see and
+  what you need to open in the game to fill any gaps. For example, AllaganTools only sees a retainer's items after
+  you've opened that retainer at a summoning bell. **Copy results** copies it so you can share it, and the app's PCs
+  tab shows it too.
+
+The plugin syncs on the interval in its settings, and also a few seconds after AutoRetainer finishes with a character.
+To keep things light, it only sends what's changed (plus everything once an hour).
+
+## What it records
+
+- **Each character:** name, world, account, gil, ceruleum, repair kits, retainers, subs and Free Company.
+- **Inventories:** bags, retainers and FC chests, from AllaganTools.
+- **Subs and retainers:** levels, parts, routes and ventures, plus what each voyage and venture brought back.
+- **Market listings** your retainers have up for sale.
+- **Each PC's status:** plugin version, last sync, which other plugins are running, and what it couldn't see.
+- **Values over time** for the app's charts: gil, ceruleum, repair kits, FC points and salvage. Only changes are
+  stored, so the history stays small.
+
+---
+
+## For developers
+
+### Building
+
+You need XIVLauncher, the game, Dalamud and the .NET SDK.
 
 1. Clone with submodules: `git clone --recurse-submodules`
 2. Open `XIVFleetCompanion.slnx` in Visual Studio or Rider and build.
-3. Add the built `XIVFleetCompanion.dll` under Dev Plugin Locations in `/xlsettings`, then enable it in `/xlplugins`.
+3. In `/xlsettings`, add the built `XIVFleetCompanion.dll` under **Dev Plugin Locations**, then enable it in
+   `/xlplugins`.
 
-Licensed under the terms in `LICENSE.md`.
+### Tests
+
+The database-writing code has its own tests in [tests/FleetWriterTests](tests/FleetWriterTests/README.md). They run on
+GitHub for every pull request, along with a full build.
+
+### Releasing a new version
+
+1. Raise `<Version>` in `XIVFleetCompanion/XIVFleetCompanion.csproj`.
+2. Add a section for it at the top of `CHANGELOG.md`.
+3. Merge to `master`.
+
+GitHub then tags the release, builds the plugin and publishes it to the plugin list in
+[XIVFleetCompanion-Releases](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases), where Dalamud picks it up.
+It also keeps that page's text the same as `.github/releases-readme.md`. Both need the `RELEASES_TOKEN` secret: a
+token that can write to that repository.
+
+Version numbers follow [Semantic Versioning](https://semver.org):
+
+- **0.1.0 → 0.1.1** for fixes,
+- **0.1.0 → 0.2.0** for new data or features,
+- **1.0** for the first stable release.
+
+The plugin and the app have separate version numbers. The changelog says when one needs a newer version of the other.
+
+### Database changes
+
+The app owns the database layout. A new table or column goes in the app's `db/updates/` folder, and the app applies it
+everywhere. The `sql/` files here are the history from before that. They're only needed for a database still on the old
+`companion_character_snapshot` table, from before plugin 0.4.0.
+
+### Adding a chart value
+
+Add another `AddMetric(...)` call in `Plugin.cs`. The database needs no change.

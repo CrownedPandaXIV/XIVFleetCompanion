@@ -83,3 +83,17 @@ jobs:
       run: |
         dotnet build --configuration Release
         bash .github/scripts/publish-plugin.sh "${{ steps.check.outputs.version }}"
+
+  # Keeps the download page (the Releases repo's README) the same as .github/releases-readme.md.
+  releases-readme:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Update the download page
+      env:
+        RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      run: |
+        if [ -z "$RELEASES_TOKEN" ]; then echo "No RELEASES_TOKEN secret; skipped."; exit 0; fi
+        bash .github/scripts/sync-releases-readme.sh

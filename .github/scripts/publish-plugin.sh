@@ -26,7 +26,7 @@ cp "$out/latest.zip" "$asset"
 gh release upload "$tag" "$asset" --clobber
 echo "Attached $asset to $tag."
 
-# Write repo.json (and a README the first time) to the Releases repo.
+# Write repo.json to the Releases repo (its README is kept up to date by sync-releases-readme.sh).
 put() {
   local path="$1" file="$2" message="$3" sha
   sha="$(GH_TOKEN="$RELEASES_TOKEN" gh api "repos/$releases/contents/$path" --jq .sha 2>/dev/null || true)"
@@ -36,9 +36,3 @@ put() {
 put repo.json repo.json "Plugin ${version}"
 echo "repo.json now lists ${version}."
 
-readme="$(GH_TOKEN="$RELEASES_TOKEN" gh api "repos/$releases/contents/README.md" -H 'Accept: application/vnd.github.raw' 2>/dev/null || true)"
-if ! grep -q 'repo.json' <<< "$readme"; then
-  cp .github/releases-readme.md README.releases.md
-  put README.md README.releases.md "Install instructions"
-  echo "Wrote the Releases README."
-fi
