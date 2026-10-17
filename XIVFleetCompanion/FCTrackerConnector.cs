@@ -41,7 +41,9 @@ namespace XIVFleetCompanion
             public Dictionary<string, FcEntry>? FCData { get; set; }
         }
 
-        private class CharEntry
+        // FCTracker's own shapes, only the parts used here. The same names serve its config file and its
+        // IPC (Dalamud hands another plugin's objects over by matching property names).
+        public class CharEntry
         {
             [JsonPropertyName("CID")]
             public ulong CID { get; set; }
@@ -50,7 +52,7 @@ namespace XIVFleetCompanion
             public ulong? FC { get; set; }
         }
 
-        private class FcEntry
+        public class FcEntry
         {
             [JsonPropertyName("FCName")]
             public string FCName { get; set; } = string.Empty;
@@ -80,7 +82,7 @@ namespace XIVFleetCompanion
             public HouseEntry? House { get; set; }
         }
 
-        private class HouseEntry
+        public class HouseEntry
         {
             [JsonPropertyName("City")]
             public int City { get; set; }
@@ -134,25 +136,7 @@ namespace XIVFleetCompanion
                     if (!fcData.TryGetValue(fcKey, out var fc))
                         continue;
 
-                    result[character.CID] = new HousingInfo
-                    {
-                        FcId = character.FC.Value,
-                        FcName = fc.FCName,
-                        FcPoints = fc.FCPoints,
-                        FcRank = fc.Rank,
-                        TotalMembers = fc.TotalMembers,
-                        HasHouse = fc.House != null,
-                        HouseCity = fc.House?.City,
-                        // FCTracker saves the game's 0-based numbers (Ward 7 Plot 28 is saved as 6 and 27)
-                        // and adds 1 only when it shows them; the real address is stored here.
-                        HouseWard = fc.House?.Ward + 1,
-                        HousePlot = fc.House?.Plot + 1,
-                        HouseLastVisited = fc.House?.LastVisited,
-                        FcMaster = fc.MasterString,
-                        FcHomeWorldId = fc.HomeWorldId,
-                        FcFoundingDate = fc.FoundingDate == default ? null : fc.FoundingDate,
-                        FcEligibilityOverride = fc.EligibilityDateReferenceOverride
-                    };
+                    result[character.CID] = ToHousingInfo(character.FC.Value, fc);
                 }
             }
             catch
@@ -162,5 +146,58 @@ namespace XIVFleetCompanion
 
             return result;
         }
+
+        /// <summary>
+        /// The same lookup as <see cref="ReadHousingData"/>, asked of a running FCTracker (its IPC) instead of read
+        /// from its file: <paramref name="getChar"/> and <paramref name="getFc"/> return its entry for a character or
+        /// Free Company id, or null when it has none. Each Free Company is asked for once. Exceptions are left to the
+        /// caller (FCTracker not offering the calls, or a call failing), and then nothing is added to
+        /// <paramref name="withoutFc"/>.
+        /// </summary>
+        public static Dictionary<ulong, HousingInfo> ReadHousingLive(IEnumerable<ulong> cids, Func<ulong, CharEntry?> getChar,
+            Func<ulong, FcEntry?> getFc, HashSet<ulong>? withoutFc = null)
+        {
+            var result = new Dictionary<ulong, HousingInfo>();
+            var none = new HashSet<ulong>();
+            var fcs = new Dictionary<ulong, FcEntry?>();
+            foreach (var cid in cids)
+            {
+                if (cid == 0 || result.ContainsKey(cid)) continue;
+                var character = getChar(cid);
+                if (character == null) continue;
+                if (character.FC == null || character.FC == 0)
+                {
+                    none.Add(cid);
+                    continue;
+                }
+                var fcId = character.FC.Value;
+                if (!fcs.TryGetValue(fcId, out var fc))
+                    fcs[fcId] = fc = getFc(fcId);
+                if (fc != null)
+                    result[cid] = ToHousingInfo(fcId, fc);
+            }
+            withoutFc?.UnionWith(none);
+            return result;
+        }
+
+        private static HousingInfo ToHousingInfo(ulong fcId, FcEntry fc) => new()
+        {
+            FcId = fcId,
+            FcName = fc.FCName,
+            FcPoints = fc.FCPoints,
+            FcRank = fc.Rank,
+            TotalMembers = fc.TotalMembers,
+            HasHouse = fc.House != null,
+            HouseCity = fc.House?.City,
+            // FCTracker keeps the game's 0-based numbers (Ward 7 Plot 28 is kept as 6 and 27) and adds 1 only
+            // when it shows them; the real address is stored here.
+            HouseWard = fc.House?.Ward + 1,
+            HousePlot = fc.House?.Plot + 1,
+            HouseLastVisited = fc.House?.LastVisited,
+            FcMaster = fc.MasterString,
+            FcHomeWorldId = fc.HomeWorldId,
+            FcFoundingDate = fc.FoundingDate == default ? null : fc.FoundingDate,
+            FcEligibilityOverride = fc.EligibilityDateReferenceOverride,
+        };
     }
 }

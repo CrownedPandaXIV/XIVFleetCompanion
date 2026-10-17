@@ -3,6 +3,17 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.13.0 - 2026-10-17
+
+No database change. Works with any app version.
+
+- **FCTracker, asked directly.** When FCTracker is running and has its new IPC (added by its developer, erdelf,
+  in October 2026), the plugin asks it for each character's Free Company and house details instead of reading
+  FCTracker's config file. Nothing to set up. An FCTracker without the IPC, or one that is not running, is read
+  from its file as before.
+- **Check what I can see** says which was used: "details read directly from it", or "a version without IPC: its
+  saved file is read".
+
 ## 0.12.1 - 2026-10-17
 
 No database change. Works with any app version; app 0.26.0 or newer sets up and updates the database.

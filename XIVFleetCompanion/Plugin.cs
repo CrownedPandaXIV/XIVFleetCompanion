@@ -35,6 +35,7 @@ public sealed class Plugin : IDalamudPlugin
     public Configuration Configuration { get; init; }
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
+    public FCTrackerIpc? FCTracker { get; private set; }
     private readonly SyncSchedule schedule = new();
     private volatile bool syncInProgress = false;
 
@@ -65,6 +66,7 @@ public sealed class Plugin : IDalamudPlugin
         ECommonsMain.Init(PluginInterface, this);
         AutoRetainer = new AutoRetainerApi();
         AllaganTools = new AllaganToolsConnector(PluginInterface);
+        FCTracker = new FCTrackerIpc(PluginInterface);
 
         Framework.Update += OnFrameworkUpdate;
         ClientState.Logout += OnLogout;
@@ -289,13 +291,21 @@ public sealed class Plugin : IDalamudPlugin
         }
         autoRetainerMissedSyncs = 0;
         var (characters, registeredCount, leftOutCount) = fromAutoRetainer.Value;
-        // Whether FCTracker and SubmarineTracker are loaded in this game, for the app's PCs tab.
-        var (fcTrackerRunning, subTrackerRunning) = await Framework.RunOnFrameworkThread(
-            () => (IsPluginLoaded("FCTracker"), IsPluginLoaded("SubmarineTracker")));
-
+        // Whether FCTracker and SubmarineTracker are loaded in this game, for the app's PCs tab. A running
+        // FCTracker with IPC is asked for its Free Company and house details directly; otherwise its file is read.
         var charactersWithoutFc = new HashSet<ulong>();
-        var fcTrackerHousing = FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
-        Log.Information($"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
+        var syncedCids = characters.Select(c => c.Snapshot.Cid).ToList();
+        var (fcTrackerRunning, subTrackerRunning, liveHousing) = await Framework.RunOnFrameworkThread(() =>
+        {
+            var fcRunning = IsPluginLoaded("FCTracker");
+            var live = fcRunning == false ? null : FCTracker?.ReadHousing(syncedCids, charactersWithoutFc);
+            return (fcRunning, IsPluginLoaded("SubmarineTracker"), live);
+        });
+
+        var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
+        Log.Information(liveHousing != null
+            ? $"Fleet Companion: FCTracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."
+            : $"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
 
         // Asked once per sync. When AllaganTools is not running, inventories and FC chests
         // keep their last stored contents (see below).

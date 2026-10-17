@@ -13,7 +13,7 @@ The plugin just collects. All the working out (income, rank-ups, what to build, 
 | --- | --- | --- |
 | **AutoRetainer** | required | Your characters, retainers, subs, gil, ceruleum and repair kits. |
 | **AllaganTools** | recommended | Everything in your bags, your retainers' and the FC chest. |
-| **FCTracker** | optional | Free Company houses, and when each was last entered. |
+| **FCTracker** | optional | Free Company houses, and when each was last entered. A recent FCTracker is asked directly; an older one is read from its saved file. |
 | **SubmarineTracker** | optional | What every voyage brought back, for the app's income per voyage. |
 
 You also need the app connected to a PostgreSQL database. The plugin writes to the same database.

@@ -84,6 +84,7 @@ public class CheckWindow : Window, IDisposable
     private async Task<CheckReport.Facts> Gather()
     {
         var configuration = plugin.Configuration;
+        Dictionary<ulong, FCTrackerConnector.HousingInfo>? liveHousing = null;
         var facts = await Plugin.Framework.RunOnFrameworkThread(() =>
         {
             var f = new CheckReport.Facts
@@ -98,6 +99,7 @@ public class CheckWindow : Window, IDisposable
             f.AllaganToolsReady = plugin.AllaganTools?.IsReady() ?? false;
             f.FcTrackerRunning = Plugin.IsPluginLoaded("FCTracker");
             if (!f.AutoRetainerReady) return f;
+            liveHousing = f.FcTrackerRunning == false ? null : plugin.FCTracker?.ReadHousing(autoRetainer!.GetRegisteredCharacters());
 
             var cids = autoRetainer!.GetRegisteredCharacters();
             f.Registered = cids.Count;
@@ -129,9 +131,11 @@ public class CheckWindow : Window, IDisposable
             return f;
         });
 
-        // FCTracker: which characters it has Free Company and house details for.
-        var housing = FCTrackerConnector.ReadHousingData(configuration.FCTrackerConfigPath);
-        facts.FcTrackerFound = System.IO.File.Exists(configuration.FCTrackerConfigPath);
+        // FCTracker: which characters it has Free Company and house details for, asked of it directly when it
+        // has IPC (above, on the game's thread), else from its file.
+        var housing = liveHousing ?? FCTrackerConnector.ReadHousingData(configuration.FCTrackerConfigPath);
+        facts.FcTrackerLive = liveHousing != null;
+        facts.FcTrackerFound = liveHousing != null || System.IO.File.Exists(configuration.FCTrackerConfigPath);
         foreach (var c in facts.Characters)
         {
             if (housing.TryGetValue(c.Cid, out var h)) c.Housing = h;
