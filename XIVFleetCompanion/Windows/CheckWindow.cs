@@ -63,7 +63,7 @@ public class CheckWindow : Window, IDisposable
         });
     }
 
-    // Keeps the result in the database (sql/008), so the app's PCs panel shows it. Nothing else is written.
+    // Keeps the result in the database (database version 8), so the app's PCs panel shows it. Nothing else is written.
     private async Task StoreResult(string result, int toFix)
     {
         try

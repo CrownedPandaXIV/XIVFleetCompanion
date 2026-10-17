@@ -51,7 +51,7 @@ namespace XIVFleetCompanion
             return conn;
         }
 
-        // One value to record in companion_metric_history (see sql/001_metric_history.sql).
+        // One value to record in companion_metric_history (see database version 1).
         // SubjectType is "character" or "fc"; SubjectId is the character id or FC id.
         public class MetricPoint
         {

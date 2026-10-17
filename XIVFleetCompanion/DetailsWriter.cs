@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 namespace XIVFleetCompanion
 {
     /// <summary>
-    /// The tables from sql/008 (plugin 0.10.0): each PC's status, every voyage's loot (from
+    /// The tables from database version 8 (plugin 0.10.0): each PC's status, every voyage's loot (from
     /// SubmarineTracker), every venture's reward (from AutoRetainer's statistics) and the retainers'
-    /// market listings (from AllaganTools). Until sql/008 has been run, each write answers false and
+    /// market listings (from AllaganTools). Until the database has version 8, each write answers false and
     /// changes nothing. No Dalamud here, so it is tested on its own (tests/FleetWriterTests).
     /// </summary>
     public static class DetailsWriter
@@ -124,7 +124,7 @@ namespace XIVFleetCompanion
             public bool Valid;
         }
 
-        // The newest voyage already stored per FC (Unix seconds), so only newer ones are read. With sql/009,
+        // The newest voyage already stored per FC (Unix seconds), so only newer ones are read. With database version 9,
         // only voyages whose sector order is stored count, so the first sync after it fills in the order of
         // those already stored.
         public static async Task<Dictionary<ulong, long>?> ReadNewestVoyagesAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> fcIds)
@@ -143,7 +143,7 @@ namespace XIVFleetCompanion
             return ok ? newest : null;
         }
 
-        // Whether sql/009 (the leg column: the order a voyage ran its sectors in) has been run.
+        // Whether the database has version 9 (the leg column: the order a voyage ran its sectors in).
         private static async Task<bool> HasLegAsync(NpgsqlConnection conn)
         {
             await using var cmd = new NpgsqlCommand(@"
@@ -153,7 +153,7 @@ namespace XIVFleetCompanion
         }
 
         // Adds voyages; one already stored (same FC, sub, return time and sector) is left as is, except that
-        // its sector order is filled in when missing (sql/009; without it, voyages are stored without it).
+        // its sector order is filled in when missing (database version 9; without it, voyages are stored without it).
         public static async Task<bool> WriteVoyageLootAsync(NpgsqlConnection conn, IReadOnlyList<LootRow> rows)
         {
             if (rows.Count == 0) return true;
@@ -323,8 +323,8 @@ namespace XIVFleetCompanion
             => string.Join(";", listings.OrderBy(l => l.RetainerId).ThenBy(l => l.Slot)
                 .Select(l => $"{l.RetainerId}|{l.Slot}|{l.ItemId}|{l.Quantity}|{l.Hq}|{l.UnitPrice}"));
 
-        // Runs a write; false (nothing changed) when its table is not there yet because sql/008 has not
-        // been run.
+        // Runs a write; false (nothing changed) when its table is not there yet because the database does not have version 8
+        // yet.
         private static async Task<bool> IfTableExists(Func<Task> work)
         {
             try

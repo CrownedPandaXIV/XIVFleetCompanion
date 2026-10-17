@@ -107,8 +107,7 @@ The plugin and the app have separate version numbers. The changelog says when on
 ### Database changes
 
 The app owns the database layout. A new table or column goes in the app's `db/updates/` folder, and the app applies it
-everywhere. The `sql/` files here are the history from before that. They're only needed for a database still on the old
-`companion_character_snapshot` table, from before plugin 0.4.0.
+everywhere.
 
 ### Adding a chart value
 
