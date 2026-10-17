@@ -187,7 +187,7 @@ public class CheckWindow : Window, IDisposable
     public override void Draw()
     {
         ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the bags, " +
-                          "each retainer and the FC chest (from AllaganTools), the house (from FCTracker) and when each was last " +
+                          "each retainer and the FC chest (from Allagan Tools), the house (from FC Tracker) and when each was last " +
                           "stored. Only the result itself is saved, for the app's PCs panel.");
         using (ImRaii.Disabled(running))
         {

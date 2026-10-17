@@ -98,7 +98,7 @@ public static class CheckReport
         if (f.AllaganToolsReady)
         {
             if (c.Bags.Items == null)
-                fixes.Add($"Log in as {c.Name} on this PC once, so AllaganTools sees their bags.");
+                fixes.Add($"Log in as {c.Name} on this PC once, so Allagan Tools sees their bags.");
             foreach (var r in c.Retainers.Where(r => r.Items == null))
                 fixes.Add($"Open {r.Name} at a summoning bell on this PC.");
             // The FC chest holds the subs' ceruleum, repair kits and salvage: only asked for when the FC has subs.
@@ -106,7 +106,7 @@ public static class CheckReport
                 fixes.Add($"Open the Free Company chest{(string.IsNullOrEmpty(c.FcName) ? "" : $" of {c.FcName}")} on this PC.");
         }
         if (f.FcTrackerFound && c.FcId != 0 && c.Housing == null)
-            fixes.Add($"Log in as {c.Name} with FCTracker running, so it records the Free Company and house.");
+            fixes.Add($"Log in as {c.Name} with FC Tracker running, so it records the Free Company and house.");
         if (f.DatabaseProblem == null && c.SyncedAgo == null)
             fixes.Add("Not in the database yet: it is sent at the next sync.");
         return fixes;
@@ -122,7 +122,7 @@ public static class CheckReport
     {
         var problems = new List<string>();
         if (!f.AutoRetainerReady) problems.Add("AutoRetainer is not running: nothing can be synced.");
-        if (!f.AllaganToolsReady) problems.Add("AllaganTools is not running: bags, retainers' items and FC chests are not updated.");
+        if (!f.AllaganToolsReady) problems.Add("Allagan Tools is not running: bags, retainers' items and FC chests are not updated.");
         if (f.DatabaseProblem != null) problems.Add($"Database not checked: {f.DatabaseProblem}");
         return problems;
     }
@@ -132,13 +132,13 @@ public static class CheckReport
     public static string FcTrackerLine(Facts f)
     {
         if (f.FcTrackerRunning == true && f.FcTrackerLive)
-            return "FCTracker: running, details read directly from it" + (f.FcTrackerIpcVersion is int v ? $" (IPC version {v})" : "");
-        if (f.FcTrackerRunning == true) return $"FCTracker: running, a version without IPC: its saved file is read ({f.FcTrackerPath})";
+            return "FC Tracker: running, details read directly from it" + (f.FcTrackerIpcVersion is int v ? $" (IPC version {v})" : "");
+        if (f.FcTrackerRunning == true) return $"FC Tracker: running, a version without IPC: its saved file is read ({f.FcTrackerPath})";
         if (f.FcTrackerRunning == false && f.FcTrackerFound)
-            return $"FCTracker: not running in this game, optional: its last saved details are used ({f.FcTrackerPath})";
+            return $"FC Tracker: not running in this game, optional: its last saved details are used ({f.FcTrackerPath})";
         return f.FcTrackerFound
-            ? $"FCTracker: found ({f.FcTrackerPath})"
-            : $"FCTracker: not found, optional: only for Free Company house details (Settings → FCTracker Config Path: {f.FcTrackerPath})";
+            ? $"FC Tracker: found ({f.FcTrackerPath})"
+            : $"FC Tracker: not found, optional: only for Free Company house details (Settings → FC Tracker Config Path: {f.FcTrackerPath})";
     }
 
     public static string ToText(Facts f)
@@ -150,7 +150,7 @@ public static class CheckReport
         sb.AppendLine(f.AutoRetainerReady
             ? $"AutoRetainer: running, {Plural(f.Registered, "character")}" + (f.LeftOut > 0 ? $" ({f.LeftOut} left out in settings)" : "")
             : "AutoRetainer: not running");
-        sb.AppendLine($"AllaganTools: {(f.AllaganToolsReady ? "running" : "not running")}");
+        sb.AppendLine($"Allagan Tools: {(f.AllaganToolsReady ? "running" : "not running")}");
         sb.AppendLine(FcTrackerLine(f));
         sb.AppendLine($"Database: {(databaseChecked ? "checked" : "not checked, " + f.DatabaseProblem)}");
 

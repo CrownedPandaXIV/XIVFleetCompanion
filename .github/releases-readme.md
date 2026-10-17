@@ -15,8 +15,8 @@ You'll also need **PostgreSQL** (the database) on one PC. If your PCs aren't on 
 1. Download `XIV-Fleet-Companion-Setup-<version>.exe` from the
    [latest release](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases/releases/latest).
 2. Run it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
-3. In the app, open **Settings → Database**, enter your database details, and click **Save**. The app sets up the
-   database by itself.
+3. Start the app. The first time, it asks what the PC is for and sets it up, installing PostgreSQL and Tailscale where
+   they're needed.
 
 The app updates itself. When a new version is ready, a bar at the top offers to restart into it.
 
@@ -36,9 +36,17 @@ Dalamud keeps the plugin up to date for you.
 
 **Other plugins it works with:**
 
-- **AutoRetainer** is required.
-- **AllaganTools** is recommended: it adds your inventories and retainers' items.
-- **FCTracker** (Free Company houses) and **SubmarineTracker** (what each voyage brought back) are optional, and each
-  adds more detail.
+| Plugin | | Where to get it |
+| --- | --- | --- |
+| **AutoRetainer** | required | Add `https://love.puni.sh/ment.json` in the Experimental tab, as above |
+| **Allagan Tools** | recommended: adds your inventories and retainers' items | Dalamud's own plugin list |
+| **FC Tracker** | optional: Free Company houses | Add `https://puni.sh/api/repository/erdelf` in the Experimental tab |
+| **Submarine Tracker** | optional: what each voyage brought back | Dalamud's own plugin list |
 
 Not sure everything's working? Type `/xivfleet check` in the game.
+
+## Thanks
+
+XIV Fleet Companion couldn't work without these plugins. A big thank you to the people who make them: kawaii,
+NightmareXIV and the Puni.sh team (AutoRetainer), Critical_Impact (Allagan Tools), erdelf (FC Tracker) and Infi
+(Submarine Tracker).

@@ -3,6 +3,18 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.13.4 - 2026-10-17
+
+No database change. Works with any app version.
+
+- The plugin's description in Dalamud's plugin list now says it needs AutoRetainer and works best with Allagan Tools,
+  with the repository addresses for AutoRetainer and FC Tracker, and thanks the people who make them.
+- The README lists the repository to add for each plugin it works with, and has a Thanks section: kawaii,
+  NightmareXIV and the Puni.sh team (AutoRetainer), Critical_Impact (Allagan Tools), erdelf (FC Tracker) and Infi
+  (Submarine Tracker).
+- The plugin's windows and messages now write the plugins' names the way their makers do: Allagan Tools, FC Tracker,
+  Submarine Tracker.
+
 ## 0.13.3 - 2026-10-17
 
 No database change. Works with any app version.
