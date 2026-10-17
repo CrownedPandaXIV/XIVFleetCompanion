@@ -85,7 +85,7 @@ public class MainWindow : Window, IDisposable
             plugin.OpenCheck();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, AllaganTools and FCTracker have for it, without writing anything (also /xivfleet check).");
+            ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, Allagan Tools and FC Tracker have for it, without writing anything (also /xivfleet check).");
 
         ImGui.Spacing();
 
@@ -113,7 +113,7 @@ public class MainWindow : Window, IDisposable
             var mode = statusRemote ? "Remote" : "Local";
             ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
             ImGui.BulletText(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
-            ImGui.BulletText(allaganToolsReady ? "AllaganTools: running" : "AllaganTools: not running");
+            ImGui.BulletText(allaganToolsReady ? "Allagan Tools: running" : "Allagan Tools: not running");
 
             if (ImGui.Button("Read My Character Data"))
             {
@@ -150,7 +150,7 @@ public class MainWindow : Window, IDisposable
 
             ImGui.TextWrapped(autoRetainerTestResult);
 
-            if (ImGui.Button("Read My Inventory (AllaganTools)"))
+            if (ImGui.Button("Read My Inventory (Allagan Tools)"))
             {
                 try
                 {
@@ -159,7 +159,7 @@ public class MainWindow : Window, IDisposable
 
                     if (items.Count == 0)
                     {
-                        allaganToolsTestResult = "No items found (or AllaganTools not available).";
+                        allaganToolsTestResult = "No items found (or Allagan Tools not available).";
                     }
                     else
                     {

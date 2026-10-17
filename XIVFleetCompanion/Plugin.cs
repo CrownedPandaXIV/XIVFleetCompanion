@@ -304,14 +304,14 @@ public sealed class Plugin : IDalamudPlugin
 
         var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
         Log.Information(liveHousing != null
-            ? $"Fleet Companion: FCTracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."
-            : $"Fleet Companion: FCTracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
+            ? $"Fleet Companion: FC Tracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."
+            : $"Fleet Companion: FC Tracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
 
         // Asked once per sync. When AllaganTools is not running, inventories and FC chests
         // keep their last stored contents (see below).
         var allaganToolsReady = AllaganTools != null && AllaganTools.IsReady();
         if (!allaganToolsReady)
-            Log.Warning("Fleet Companion: AllaganTools is not available; inventories and FC chests were not updated this sync.");
+            Log.Warning("Fleet Companion: Allagan Tools is not available; inventories and FC chests were not updated this sync.");
 
         // One connection for the whole sync. A sync that cannot connect is reported by the
         // caller and simply tried again next time.
@@ -357,7 +357,7 @@ public sealed class Plugin : IDalamudPlugin
         var problems = new List<string>();
         var chestsReported = new HashSet<ulong>();
         var fcsWithSubs = characters.Where(c => c.Snapshot.SubmarineCount > 0 && c.Snapshot.FcId != 0).Select(c => c.Snapshot.FcId).ToHashSet();
-        if (!allaganToolsReady) problems.Add("AllaganTools is not running: bags, retainers' items and FC chests are not updated.");
+        if (!allaganToolsReady) problems.Add("Allagan Tools is not running: bags, retainers' items and FC chests are not updated.");
 
         var snapshots = new List<FleetWriter.CharacterSnapshot>();
         var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
@@ -399,13 +399,13 @@ public sealed class Plugin : IDalamudPlugin
 
                 var plan = FleetWriter.PlanInventory(cid, sources, retainerListKnown: retainers.Count > 0);
                 if (!plan.BagsSeen)
-                    problems.Add($"AllaganTools has not seen {who}'s bags: log in as {character.Name} once.");
+                    problems.Add($"Allagan Tools has not seen {who}'s bags: log in as {character.Name} once.");
                 foreach (var unseen in plan.Unseen)
                     problems.Add($"Open retainer {unseen.Name} ({who}) at a summoning bell.");
                 if (!plan.BagsSeen)
-                    WarnOnce($"bags:{cid}", $"Fleet Companion: AllaganTools has not seen {who}'s bags on this PC (log in as {who} once with AllaganTools running); their last stored items are kept.");
+                    WarnOnce($"bags:{cid}", $"Fleet Companion: Allagan Tools has not seen {who}'s bags on this PC (log in as {who} once with Allagan Tools running); their last stored items are kept.");
                 foreach (var unseen in plan.Unseen)
-                    WarnOnce($"retainer:{unseen.Id}", $"Fleet Companion: AllaganTools has not seen retainer {unseen.Name}'s items ({who}); open {unseen.Name} at a summoning bell on this PC. Its last stored items are kept.");
+                    WarnOnce($"retainer:{unseen.Id}", $"Fleet Companion: Allagan Tools has not seen retainer {unseen.Name}'s items ({who}); open {unseen.Name} at a summoning bell on this PC. Its last stored items are kept.");
 
                 if (plan.Read.Count > 0)
                 {
@@ -478,7 +478,7 @@ public sealed class Plugin : IDalamudPlugin
                         if (fcsWithSubs.Contains(character.FcId) && chestsReported.Add(character.FcId))
                         {
                             problems.Add($"Open the Free Company chest of {who}'s FC.");
-                            WarnOnce($"chest:{character.FcId}", $"Fleet Companion: AllaganTools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
+                            WarnOnce($"chest:{character.FcId}", $"Fleet Companion: Allagan Tools has not seen the Free Company chest of {who}'s FC; open the chest on this PC. Its last stored items are kept.");
                         }
                     }
                     else
@@ -727,14 +727,14 @@ public sealed class Plugin : IDalamudPlugin
             }
             catch (Exception ex) when (ex is not PostgresException)
             {
-                WarnOnce("submarinetracker", $"Fleet Companion: could not read SubmarineTracker's loot ({stPath}) — {ex.Message}");
+                WarnOnce("submarinetracker", $"Fleet Companion: could not read Submarine Tracker's loot ({stPath}) — {ex.Message}");
             }
         }
         // Voyages already in its file are still read while it is not running; new ones are not recorded.
         if (!stRunning && characters.Any(c => c.Snapshot.SubmarineCount > 0))
             problems.Add(stFound
-                ? "SubmarineTracker is not running: new voyages' loot is not recorded."
-                : "SubmarineTracker was not found: loot per voyage is not recorded.");
+                ? "Submarine Tracker is not running: new voyages' loot is not recorded."
+                : "Submarine Tracker was not found: loot per voyage is not recorded.");
 
         // Venture rewards, from the statistics files of the characters synced here.
         var arFolder = OtherPluginFolder("AutoRetainer");

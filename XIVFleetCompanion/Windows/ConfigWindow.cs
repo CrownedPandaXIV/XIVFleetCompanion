@@ -259,8 +259,8 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text("FCTracker Config Path");
-        ImGui.TextWrapped("Points at FCTracker's config file for this XIVLauncher install, used to read FC/housing data.");
+        ImGui.Text("FC Tracker Config Path");
+        ImGui.TextWrapped("Points at FC Tracker's config file for this XIVLauncher install, used to read FC/housing data.");
 
         var fcTrackerPath = configuration.FCTrackerConfigPath;
         if (ImGui.InputText("##FCTrackerPath", ref fcTrackerPath, 260))
@@ -305,7 +305,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(fcTrackerFileFound
                 ? "Found."
-                : "Not found: Free Company and housing details are not synced until this points at FCTracker's config file.");
+                : "Not found: Free Company and housing details are not synced until this points at FC Tracker's config file.");
         }
 
         fileDialog.Draw();

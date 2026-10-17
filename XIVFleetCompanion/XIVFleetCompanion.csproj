@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.13.3</Version>
+    <Version>0.13.4</Version>
       <NoWarn>$(NoWarn);CS0618</NoWarn>
     <!-- Manifest fields (see https://github.com/goatcorp/DalamudPackager/blob/827d88dc/DalamudPackager/DalamudPackager.cs#L420) -->
     <Author>Panda</Author>
     <Name>XIV Fleet Companion</Name>
     <Punchline>Here to help manage your EMPIAH!</Punchline>
-    <Description>Got a massive fleet of submarines? Always struggling to see which ones need upgrades? Wanna see your multi-account fleet at a glance? Give this a try!</Description>
+    <Description>Got a massive fleet of submarines? Always struggling to see which ones need upgrades? Wanna see your multi-account fleet at a glance? Give this a try! Needs AutoRetainer (from https://love.puni.sh/ment.json) and works best with Allagan Tools. Optional: FC Tracker (from https://puni.sh/api/repository/erdelf) and Submarine Tracker. Thanks to kawaii, NightmareXIV and the Puni.sh team, Critical_Impact, erdelf and Infi for their plugins.</Description>
     <RepoUrl>https://github.com/CrownedPandaXIV/XIVFleetCompanion</RepoUrl>
     <Tags>submarine;fleet;tracker</Tags>
   </PropertyGroup>

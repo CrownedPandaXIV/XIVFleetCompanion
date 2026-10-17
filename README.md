@@ -9,27 +9,38 @@ The plugin just collects. All the working out (income, rank-ups, what to build, 
 
 ## What you need
 
-| Plugin | | What it adds |
-| --- | --- | --- |
-| **AutoRetainer** | required | Your characters, retainers, subs, gil, ceruleum and repair kits. |
-| **AllaganTools** | recommended | Everything in your bags, your retainers' and the FC chest. |
-| **FCTracker** | optional | Free Company houses, and when each was last entered. A recent FCTracker is asked directly; an older one is read from its saved file. |
-| **SubmarineTracker** | optional | What every voyage brought back, for the app's income per voyage. |
+| Plugin | | What it adds | Where to get it |
+| --- | --- | --- | --- |
+| **AutoRetainer** | required | Your characters, retainers, subs, gil, ceruleum and repair kits. | Repository below |
+| **Allagan Tools** | recommended | Everything in your bags, your retainers' and the FC chest. | Dalamud's own plugin list |
+| **FC Tracker** | optional | Free Company houses, and when each was last entered. A recent FC Tracker is asked directly; an older one is read from its saved file. | Repository below |
+| **Submarine Tracker** | optional | What every voyage brought back, for the app's income per voyage. | Dalamud's own plugin list |
 
 You also need the app connected to a PostgreSQL database. The plugin writes to the same database.
 
 ## Install
 
 1. In the game, type `/xlsettings` and open the **Experimental** tab.
-2. Under **Custom Plugin Repositories**, paste this address, tick **Enabled**, then click **Save and Close**:
+2. Under **Custom Plugin Repositories**, paste each of these addresses into the empty box and click **+**:
 
+   XIV Fleet Companion:
    ```
    https://raw.githubusercontent.com/CrownedPandaXIV/XIVFleetCompanion-Releases/main/repo.json
    ```
+   AutoRetainer:
+   ```
+   https://love.puni.sh/ment.json
+   ```
+   FC Tracker (optional):
+   ```
+   https://puni.sh/api/repository/erdelf
+   ```
 
-3. Type `/xlplugins`, search for **XIV Fleet Companion**, and click **Install**.
+3. Tick **Enabled** next to each, then click **Save and Close**.
+4. Type `/xlplugins` and install **XIV Fleet Companion**, **AutoRetainer**, and whichever of **Allagan Tools**,
+   **FC Tracker** and **Submarine Tracker** you want.
 
-Dalamud keeps it up to date from then on.
+Dalamud keeps them all up to date from then on.
 
 If you used a copy you built yourself, remove it from **Dev Plugin Locations** in `/xlsettings` first. Your settings and
 saved password carry over.
@@ -50,7 +61,7 @@ log says the database is missing something, open the app once and it'll sort it 
 
 - **`/xivfleet`** opens the main window.
 - **`/xivfleet check`** (or **Check what I can see**) shows, character by character, what the plugin can see and
-  what you need to open in the game to fill any gaps. For example, AllaganTools only sees a retainer's items after
+  what you need to open in the game to fill any gaps. For example, Allagan Tools only sees a retainer's items after
   you've opened that retainer at a summoning bell. **Copy results** copies it so you can share it, and the app's PCs
   tab shows it too.
 
@@ -60,7 +71,7 @@ To keep things light, it only sends what's changed (plus everything once an hour
 ## What it records
 
 - **Each character:** name, world, account, gil, ceruleum, repair kits, retainers, subs and Free Company.
-- **Inventories:** bags, retainers and FC chests, from AllaganTools.
+- **Inventories:** bags, retainers and FC chests, from Allagan Tools.
 - **Subs and retainers:** levels, parts, routes and ventures, plus what each voyage and venture brought back.
 - **Market listings** your retainers have up for sale.
 - **Each PC's status:** plugin version, last sync, which other plugins are running, and what it couldn't see.
@@ -68,6 +79,15 @@ To keep things light, it only sends what's changed (plus everything once an hour
   stored, so the history stays small.
 
 ---
+
+## Thanks
+
+XIV Fleet Companion couldn't work without these plugins. A big thank you to the people who make them:
+
+- **AutoRetainer** by kawaii, NightmareXIV and the Puni.sh team
+- **Allagan Tools** by Critical_Impact
+- **FC Tracker** by erdelf
+- **Submarine Tracker** by Infi
 
 ## For developers
 

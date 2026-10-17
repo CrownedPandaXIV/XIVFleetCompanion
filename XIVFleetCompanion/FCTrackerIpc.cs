@@ -43,7 +43,7 @@ namespace XIVFleetCompanion
             }
             catch (Exception ex)
             {
-                Plugin.Log.Debug($"Fleet Companion: FCTracker's IPC is not available ({ex.GetType().Name}); its file is read instead.");
+                Plugin.Log.Debug($"Fleet Companion: FC Tracker's IPC is not available ({ex.GetType().Name}); its file is read instead.");
                 return null;
             }
         }

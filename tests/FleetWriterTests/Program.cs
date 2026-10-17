@@ -433,11 +433,11 @@ internal static class Program
             "FCTracker IPC: without the all-at-once calls, it asks one at a time");
 
         var liveFacts = new CheckReport.Facts { FcTrackerRunning = true, FcTrackerLive = true, FcTrackerPath = "x.json" };
-        Check(CheckReport.FcTrackerLine(liveFacts) == "FCTracker: running, details read directly from it"
-              && CheckReport.FcTrackerLine(new CheckReport.Facts { FcTrackerRunning = true, FcTrackerFound = true, FcTrackerPath = "x.json" }).StartsWith("FCTracker: running, a version without IPC"),
+        Check(CheckReport.FcTrackerLine(liveFacts) == "FC Tracker: running, details read directly from it"
+              && CheckReport.FcTrackerLine(new CheckReport.Facts { FcTrackerRunning = true, FcTrackerFound = true, FcTrackerPath = "x.json" }).StartsWith("FC Tracker: running, a version without IPC"),
             "Check what I can see says whether FCTracker answered directly or its file was read");
         Check(CheckReport.FcTrackerLine(new CheckReport.Facts { FcTrackerRunning = true, FcTrackerLive = true, FcTrackerIpcVersion = 1 })
-              == "FCTracker: running, details read directly from it (IPC version 1)", "and FCTracker's IPC version, when it says");
+              == "FC Tracker: running, details read directly from it (IPC version 1)", "and FCTracker's IPC version, when it says");
 
         // Fingerprints: same data in another order is the same; any change is different.
         var items = new List<FleetWriter.InventoryItem>
@@ -564,7 +564,7 @@ internal static class Program
         facts.Characters[0].Subs = 0;
         facts.FcTrackerFound = false;
         report = CheckReport.ToText(facts);
-        Check(!report.Contains("Open the Free Company chest") && report.Contains("FCTracker: not found, optional") && CheckReport.ToFixCount(facts) == 1,
+        Check(!report.Contains("Open the Free Company chest") && report.Contains("FC Tracker: not found, optional") && CheckReport.ToFixCount(facts) == 1,
             "an FC without subs is not asked to open its chest, and a missing FCTracker is not a thing to fix:\n" + report);
         facts.Characters[0].Subs = 4;
         facts.FcTrackerFound = true;
@@ -578,14 +578,14 @@ internal static class Program
         var missing = CheckReport.FcTrackerLine(facts);
         facts.FcTrackerRunning = null;
         facts.FcTrackerFound = true;
-        Check(running.StartsWith("FCTracker: running") && stopped.StartsWith("FCTracker: not running in this game")
-              && missing.StartsWith("FCTracker: not found") && CheckReport.FcTrackerLine(facts).StartsWith("FCTracker: found"),
+        Check(running.StartsWith("FC Tracker: running") && stopped.StartsWith("FC Tracker: not running in this game")
+              && missing.StartsWith("FC Tracker: not found") && CheckReport.FcTrackerLine(facts).StartsWith("FC Tracker: found"),
             $"FCTracker is reported running, installed but not running, or not found:\n{running}\n{stopped}\n{missing}");
 
         facts.AllaganToolsReady = false;
         facts.DatabaseProblem = "no saved connection (Settings → Postgres).";
         report = CheckReport.ToText(facts);
-        Check(report.Contains("! AllaganTools is not running") && report.Contains("Database: not checked, no saved connection")
+        Check(report.Contains("! Allagan Tools is not running") && report.Contains("Database: not checked, no saved connection")
               && !report.Contains("Last synced") && !report.Contains("Newret: not seen") && CheckReport.ToFixCount(facts) == 2,
             "without AllaganTools or the database, the report says so once instead of listing every part:\n" + report);
         // sql/007: when each retainer's items were last seen. Without the column nothing fails.
