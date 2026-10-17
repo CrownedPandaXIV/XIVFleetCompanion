@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.13.3 - 2026-10-17
+
+No database change. Works with any app version.
+
+- The main window's status says "running" and "not running", the same words as `/xivfleet check`, instead of
+  "OK" and "Not found / not running". "Postgres: Configured" reads "Database: set up".
+
 ## 0.13.2 - 2026-10-17
 
 No database change. Works with any app version.
