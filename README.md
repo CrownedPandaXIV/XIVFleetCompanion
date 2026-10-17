@@ -131,8 +131,22 @@ plugin installer and the log.
   a change that needs a database update or a newer app first.
 
 To release: change `<Version>`, add a section to `CHANGELOG.md`, merge. The tag `v<new>` and the GitHub release (with that
-changelog section as its description) are then created automatically by `.github/workflows/release.yml`. The plugin and the app are versioned separately; the changelog notes when one
+changelog section as its description) are then created automatically by `.github/workflows/release.yml`, which
+also builds the plugin, attaches it to the release and lists it in `repo.json` in the public
+[XIVFleetCompanion-Releases](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases) repo (needs the `RELEASES_TOKEN`
+secret; that repo's README is written from `.github/releases-readme.md` the first time). The plugin and the app are versioned separately; the changelog notes when one
 needs the other updated.
+
+## Installing
+
+1. In game, type `/xlsettings` and open the **Experimental** tab.
+2. Under **Custom Plugin Repositories**, add
+   `https://raw.githubusercontent.com/CrownedPandaXIV/XIVFleetCompanion-Releases/main/repo.json`, tick **Enabled**, then
+   **Save and Close**.
+3. In `/xlplugins`, search for **XIV Fleet Companion** and click **Install**. Dalamud keeps it up to date.
+
+Switching from a copy you built yourself: remove its folder from Dev Plugin Locations first. Settings and the saved database
+password carry over.
 
 ## Building
 
