@@ -56,6 +56,8 @@ public static class CheckReport
         public bool FcTrackerFound;
         // Whether FCTracker is loaded in this game (null: Dalamud could not be asked).
         public bool? FcTrackerRunning;
+        // Whether FCTracker answered directly (its IPC) rather than through its saved file.
+        public bool FcTrackerLive;
         // Null when the database was checked; otherwise why not.
         public string? DatabaseProblem;
         public List<Character> Characters = new();
@@ -123,11 +125,12 @@ public static class CheckReport
         return problems;
     }
 
-    // FCTracker is optional (only Free Company house details): running, or installed but not running in this
-    // game (its last saved file is still read), or not found.
+    // FCTracker is optional (only Free Company house details): running (asked directly when it has IPC, else its
+    // file is read), or installed but not running in this game (its last saved file is still read), or not found.
     public static string FcTrackerLine(Facts f)
     {
-        if (f.FcTrackerRunning == true) return $"FCTracker: running ({f.FcTrackerPath})";
+        if (f.FcTrackerRunning == true && f.FcTrackerLive) return "FCTracker: running, details read directly from it";
+        if (f.FcTrackerRunning == true) return $"FCTracker: running, a version without IPC: its saved file is read ({f.FcTrackerPath})";
         if (f.FcTrackerRunning == false && f.FcTrackerFound)
             return $"FCTracker: not running in this game, optional: its last saved details are used ({f.FcTrackerPath})";
         return f.FcTrackerFound

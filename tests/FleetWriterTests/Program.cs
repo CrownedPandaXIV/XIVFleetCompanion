@@ -385,6 +385,42 @@ internal static class Program
               && string.Join(",", withoutFc.OrderBy(k => k)) == "2,3",
             $"FCTracker: in an FC {string.Join(",", parsed.Keys)}, in none {string.Join(",", withoutFc.OrderBy(k => k))} (an FC it has no details for is neither)");
 
+        // FCTracker's IPC: the same answers as its file, asked character by character; each FC is asked for once.
+        var liveChars = new Dictionary<ulong, FCTrackerConnector.CharEntry>
+        {
+            [1] = new() { CID = 1, FC = 9000001 }, [2] = new() { CID = 2, FC = null }, [3] = new() { CID = 3, FC = 0 },
+            [4] = new() { CID = 4, FC = 9000077 }, [5] = new() { CID = 5, FC = 9000002 }, [6] = new() { CID = 6, FC = 9000002 },
+        };
+        var liveFcs = new Dictionary<ulong, FCTrackerConnector.FcEntry>
+        {
+            [9000001] = new() { FCName = "Panda Co", FCPoints = 5 },
+            [9000002] = new() { FCName = "Ember Haven", House = new() { City = 2, Ward = 6, Plot = 27, LastVisited = new DateTime(2026, 10, 1) } },
+        };
+        var fcAsked = new List<ulong>();
+        var liveWithoutFc = new HashSet<ulong>();
+        var live = FCTrackerConnector.ReadHousingLive(new ulong[] { 1, 2, 3, 4, 5, 6, 7 },
+            cid => liveChars.GetValueOrDefault(cid),
+            id => { fcAsked.Add(id); return liveFcs.GetValueOrDefault(id); }, liveWithoutFc);
+        Check(string.Join(",", live.Keys.OrderBy(k => k)) == "1,5,6" && string.Join(",", liveWithoutFc.OrderBy(k => k)) == "2,3"
+              && live[5].HouseWard == 7 && live[5].HousePlot == 28 && live[6].FcName == "Ember Haven"
+              && live[5].HouseLastVisited == new DateTime(2026, 10, 1) && !live[1].HasHouse,
+            $"FCTracker IPC: in an FC {string.Join(",", live.Keys)}, in none {string.Join(",", liveWithoutFc)}, same address as the file");
+        Check(string.Join(",", fcAsked.OrderBy(k => k)) == "9000001,9000002,9000077", "FCTracker IPC: each Free Company is asked for once: " + string.Join(",", fcAsked));
+        var failedWithoutFc = new HashSet<ulong>();
+        var threw = false;
+        try
+        {
+            FCTrackerConnector.ReadHousingLive(new ulong[] { 2, 5 }, cid => cid == 5 ? throw new InvalidOperationException("not ready") : liveChars.GetValueOrDefault(cid),
+                id => liveFcs.GetValueOrDefault(id), failedWithoutFc);
+        }
+        catch (InvalidOperationException) { threw = true; }
+        Check(threw && failedWithoutFc.Count == 0, "FCTracker IPC: a failed call leaves nothing half-filled (the file is read instead)");
+
+        var liveFacts = new CheckReport.Facts { FcTrackerRunning = true, FcTrackerLive = true, FcTrackerPath = "x.json" };
+        Check(CheckReport.FcTrackerLine(liveFacts) == "FCTracker: running, details read directly from it"
+              && CheckReport.FcTrackerLine(new CheckReport.Facts { FcTrackerRunning = true, FcTrackerFound = true, FcTrackerPath = "x.json" }).StartsWith("FCTracker: running, a version without IPC"),
+            "Check what I can see says whether FCTracker answered directly or its file was read");
+
         // Fingerprints: same data in another order is the same; any change is different.
         var items = new List<FleetWriter.InventoryItem>
         {
