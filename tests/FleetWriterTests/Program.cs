@@ -47,7 +47,7 @@ internal static class Program
             house_plot int, house_last_visited timestamptz, updated_at timestamptz NOT NULL DEFAULT now(),
             fc_master text, fc_home_world_id int, fc_founding_date timestamptz, fc_eligibility_override timestamptz);";
 
-    // A file in the repository (the sql/ scripts), found by walking up from the test program.
+    // A file in the repository (the old-database/ scripts), found by walking up from the test program.
     private static string RepoFile(string relative)
     {
         for (var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
@@ -131,8 +131,8 @@ internal static class Program
               (18014498578000001, 'Old Aki', 'Maduin', 'Main', 8, 4, 1, 1, 1, NULL,    3, now() - interval '30 days'),
               (18014498578000001, 'Old Aki', 'Maduin', 'Main', 8, 4, 2, 2, 2, NULL,    3, now() - interval '29 days'),
               (18014498578000001, 'Aki',     'Maduin', 'Main', 10, 4, 3, 3, 3, 9000001, 4, now() - interval '10 days')");
-        await RunScript(conn, "sql/001_metric_history.sql");
-        await RunScript(conn, "sql/004_character_current.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/001_metric_history.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/004_character_current.sql");
         var current = await Rows(conn, "SELECT cid, name, retainer_count, num_sub_slots, fc_id, first_seen_at < now() - interval '29 days', last_synced_at > now() - interval '1 hour' FROM companion_character_current ORDER BY cid");
         Check(Show(current) == "18014498578000001,Aki,10,4,9000001,True,True / 18014498578000002,Bex,0,0,null,False,True",
             "004 fills the current table from each character's newest snapshot, first seen from the oldest: " + Show(current));
@@ -143,7 +143,7 @@ internal static class Program
             "004 copies retainer, submarine and sub slot changes into the chart history: " + Show(counts004));
         const string countsSql = "SELECT (SELECT count(*) FROM companion_character_current), (SELECT count(*) FROM companion_character_changes), (SELECT count(*) FROM companion_metric_history), (SELECT count(*) FROM companion_metric_latest)";
         var firstRun = Show(await Rows(conn, countsSql));
-        await RunScript(conn, "sql/004_character_current.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/004_character_current.sql");
         var secondRun = Show(await Rows(conn, countsSql));
         Check(firstRun == secondRun && firstRun == "2,2,8,6", $"running 004 again adds nothing (current, changes, history, latest): {firstRun} then {secondRun}");
 
@@ -282,8 +282,8 @@ internal static class Program
         // sql/006 adds the slot column; existing default-named rows get their slot from the name.
         await Exec(conn, @"CREATE TABLE sub_craft_toggle (cid numeric NOT NULL, sub_name text NOT NULL,
             craft_enabled boolean NOT NULL DEFAULT false, updated_at timestamp NOT NULL DEFAULT now(), PRIMARY KEY (cid, sub_name))");
-        await RunScript(conn, "sql/006_submarine_slot.sql");
-        await RunScript(conn, "sql/006_submarine_slot.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/006_submarine_slot.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/006_submarine_slot.sql");
         subRows = await Rows(conn, "SELECT sub_name, slot FROM companion_submarine_snapshot");
         Check(Show(subRows) == "Submersible-1,1", "006 adds the slot column and fills it from the default name (running it twice is fine): " + Show(subRows));
 
@@ -495,14 +495,14 @@ internal static class Program
 
         // sql/005 removes the old history table, but only once nothing has written it for 10 minutes.
         string? refused = null;
-        try { await RunScript(conn, "sql/005_remove_character_snapshot.sql"); }
+        try { await RunScript(conn, "tests/FleetWriterTests/old-database/005_remove_character_snapshot.sql"); }
         catch (PostgresException ex) { refused = ex.MessageText; }
         var stillThere = Show(await Rows(conn, "SELECT to_regclass('companion_character_snapshot') IS NOT NULL"));
         Check(refused != null && refused.Contains("older than 0.4.0") && stillThere == "True",
             "005 refuses while the old table was written in the last 10 minutes, and changes nothing: " + refused);
         await Exec(conn, "UPDATE companion_character_snapshot SET snapshot_at = now() - interval '1 hour'");
-        await RunScript(conn, "sql/005_remove_character_snapshot.sql");
-        await RunScript(conn, "sql/005_remove_character_snapshot.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/005_remove_character_snapshot.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/005_remove_character_snapshot.sql");
         var gone = Show(await Rows(conn, "SELECT to_regclass('companion_character_snapshot') IS NULL, (SELECT count(*) FROM companion_character_current)"));
         Check(gone == "True,3", "005 removes the old table (running it again is harmless); the current rows stay: " + gone);
         // "Check what I can see": when things were stored (read only), and the report's wording.
@@ -573,8 +573,8 @@ internal static class Program
         // sql/007: when each retainer's items were last seen. Without the column nothing fails.
         await Exec(conn, $"INSERT INTO companion_retainer_lookup (retainer_id, owner_cid, name) VALUES (77001, {owner}, 'Empty Ret') ON CONFLICT DO NOTHING");
         Check(!await FleetWriter.MarkRetainersSeenAsync(conn, new ulong[] { 77001 }), "before sql/007, marking retainers seen reports the column is missing");
-        await RunScript(conn, "sql/007_retainer_items_seen.sql");
-        await RunScript(conn, "sql/007_retainer_items_seen.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/007_retainer_items_seen.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/007_retainer_items_seen.sql");
         Check(await FleetWriter.MarkRetainersSeenAsync(conn, new ulong[] { 77001 })
               && Show(await Rows(conn, "SELECT items_seen_at > now() - interval '1 minute' FROM companion_retainer_lookup WHERE retainer_id = 77001")) == "True"
               && Show(await Rows(conn, "SELECT count(*) FROM companion_retainer_lookup WHERE items_seen_at IS NOT NULL")) == "1",
@@ -596,8 +596,8 @@ internal static class Program
         Check(!await DetailsWriter.WritePcStatusAsync(conn, pc) && await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 1 }) == null
               && !await DetailsWriter.WriteVenturesAsync(conn, new[] { new DetailsWriter.VentureRow { OwnerCid = 1, RetainerName = "R", At = 1, ItemId = 1 } }),
             "before sql/008, the new writes report their tables are missing and change nothing");
-        await RunScript(conn, "sql/008_pcs_loot_ventures_listings.sql");
-        await RunScript(conn, "sql/008_pcs_loot_ventures_listings.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/008_pcs_loot_ventures_listings.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/008_pcs_loot_ventures_listings.sql");
 
         Check(await DetailsWriter.WritePcStatusAsync(conn, pc), "after sql/008 (run twice), a PC's status is written");
         pc.CharactersSynced = 2;
@@ -631,8 +631,8 @@ internal static class Program
 
         // sql/009: the order a voyage ran its sectors in. Voyages stored before it count as not read yet,
         // so the next sync fills in their order; a stored order is not changed.
-        await RunScript(conn, "sql/009_voyage_sector_order.sql");
-        await RunScript(conn, "sql/009_voyage_sector_order.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/009_voyage_sector_order.sql");
+        await RunScript(conn, "tests/FleetWriterTests/old-database/009_voyage_sector_order.sql");
         var beforeLegs = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001 });
         loot[0].Leg = 2;
         loot[1].Leg = 1;

@@ -412,7 +412,7 @@ public sealed class Plugin : IDalamudPlugin
                     await WriteIfChanged($"inventory:{cid}", FleetWriter.Fingerprint(plan),
                         () => FleetWriter.WriteInventoryAsync(conn, cid, plan), $"inventory for {who}");
 
-                    // When AllaganTools saw each retainer (sql/007), so the app can tell an empty retainer
+                    // When AllaganTools saw each retainer (database version 7), so the app can tell an empty retainer
                     // from one never opened at a bell.
                     var seenRetainers = plan.Read.Where(id => id != cid).ToList();
                     try
@@ -446,7 +446,7 @@ public sealed class Plugin : IDalamudPlugin
                     }
                 }
 
-                // The retainers' market listings (sql/008), for each retainer AllaganTools saw.
+                // The retainers' market listings (database version 8), for each retainer AllaganTools saw.
                 var seenSources = sources.Where(src => src.Id != cid && src.SeenItems != null).ToList();
                 if (seenSources.Count > 0 && detailsTablesReady)
                 {
@@ -535,7 +535,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         // Every character's current row, in one statement. The table comes from
-        // sql/004_character_current.sql; until that has been run, characters are not saved (one
+        // database version 4; until the database has it, characters are not saved (one
         // warning per plugin session).
         var synced = 0;
         try
@@ -558,7 +558,7 @@ public sealed class Plugin : IDalamudPlugin
             Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
 
-        // A database error here (other than sql/008 not being run) is logged, and the rest of the sync
+        // A database error here (other than the database not having version 8 yet) is logged, and the rest of the sync
         // (the history for Trends, the last sync time) still saves.
         if (detailsTablesReady)
         {
@@ -633,14 +633,14 @@ public sealed class Plugin : IDalamudPlugin
     // AllaganTools' container for the items a retainer has up for sale.
     private const uint RetainerMarketContainer = 12002;
 
-    // The sql/008 tables (PCs, voyage loot, venture rewards, market listings). Until it has been run, they
-    // are skipped after one log line; asked again every 30 minutes in case it has been run since.
+    // The database version 8 tables (PCs, voyage loot, venture rewards, market listings). Until the database has them, they
+    // are skipped after one log line; asked again every 30 minutes in case the app has added them since.
     private bool detailsTablesReady = true;
     private DateTime detailsTablesAskAgainAt = DateTime.MinValue;
 
     private bool loggedDetailsTablesMissing = false;
 
-    // After 30 minutes, the sql/008 tables are tried again.
+    // After 30 minutes, the database version 8 tables are tried again.
     private void AskAgainForDetailsTables()
     {
         if (!detailsTablesReady && DateTime.UtcNow >= detailsTablesAskAgainAt) detailsTablesReady = true;
@@ -683,7 +683,7 @@ public sealed class Plugin : IDalamudPlugin
     private int autoRetainerMissedSyncs = 0;
 
     // Nothing can be synced without AutoRetainer, but the app's PCs tab is told this PC's AutoRetainer is
-    // not running (sql/008). Only from the second sync in a row, so AutoRetainer still loading as the game
+    // not running (database version 8). Only from the second sync in a row, so AutoRetainer still loading as the game
     // starts is not reported.
     private async Task ReportAutoRetainerNotRunningAsync()
     {
@@ -701,7 +701,7 @@ public sealed class Plugin : IDalamudPlugin
     // read again.
     private readonly Dictionary<string, DateTime> ventureFilesRead = new();
 
-    // This PC's status, voyage loot from SubmarineTracker and venture rewards from AutoRetainer (sql/008).
+    // This PC's status, voyage loot from SubmarineTracker and venture rewards from AutoRetainer (database version 8).
     // fcTrackerFound: FCTracker is loaded in this game (or, when that cannot be told, its file was found);
     // subTrackerRunning: SubmarineTracker is loaded (null: cannot be told, its file decides).
     private async Task WriteDetailsAsync(NpgsqlConnection conn, List<CharacterRead> characters, int leftOut,

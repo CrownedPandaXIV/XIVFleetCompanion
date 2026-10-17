@@ -117,7 +117,7 @@ namespace XIVFleetCompanion
             public int? HireOrderIndex;
         }
 
-        // Every character's current row (sql/004_character_current.sql), in one statement. Changes of
+        // Every character's current row (database version 4), in one statement. Changes of
         // name, world, account label or Free Company are logged by a trigger on that table.
         public static async Task<int> WriteCurrentCharactersAsync(NpgsqlConnection conn, IReadOnlyList<CharacterSnapshot> rows)
         {
@@ -297,7 +297,7 @@ namespace XIVFleetCompanion
         // Replaces one character's stored submarines in one transaction. When a slot now holds a sub
         // with a different name and the old name is gone (the sub was renamed), the app's Craft?
         // setting (sub_craft_toggle, kept per name) moves to the new name. The slot column comes from
-        // sql/006; without it the subs are written as before, without slots.
+        // database version 6; without it the subs are written as before, without slots.
         public static async Task WriteSubmarinesAsync(NpgsqlConnection conn, ulong cid, IReadOnlyList<SubmarineRecord> subs)
         {
             await using var tx = await conn.BeginTransactionAsync();
@@ -521,8 +521,8 @@ namespace XIVFleetCompanion
             return (int)(await cmd.ExecuteScalarAsync() ?? 0);
         }
 
-        // Records that AllaganTools saw these retainers' items just now (sql/007), even when they hold
-        // nothing. Returns false when the column is not there yet (sql/007 not run); nothing else changes.
+        // Records that AllaganTools saw these retainers' items just now (database version 7), even when they hold
+        // nothing. Returns false when the column is not there yet (the database is older than version 7); nothing else changes.
         public static async Task<bool> MarkRetainersSeenAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> retainerIds)
         {
             if (retainerIds.Count == 0) return true;
