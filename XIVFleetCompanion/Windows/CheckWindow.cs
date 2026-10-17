@@ -100,6 +100,7 @@ public class CheckWindow : Window, IDisposable
             f.FcTrackerRunning = Plugin.IsPluginLoaded("FCTracker");
             if (!f.AutoRetainerReady) return f;
             liveHousing = f.FcTrackerRunning == false ? null : plugin.FCTracker?.ReadHousing(autoRetainer!.GetRegisteredCharacters());
+            if (liveHousing != null) f.FcTrackerIpcVersion = plugin.FCTracker?.IpcVersion();
 
             var cids = autoRetainer!.GetRegisteredCharacters();
             f.Registered = cids.Count;

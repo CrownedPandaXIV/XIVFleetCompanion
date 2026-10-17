@@ -148,6 +148,32 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>
+        /// <see cref="ReadHousingLive"/> with FCTracker's newer calls that hand over every character and every Free
+        /// Company at once (<paramref name="getAllChars"/>, <paramref name="getAllFcs"/>): two calls per sync instead
+        /// of one per character and Free Company. When either fails (an FCTracker without them), the one-at-a-time
+        /// calls are used. Exceptions from those are left to the caller, as in <see cref="ReadHousingLive"/>.
+        /// </summary>
+        public static Dictionary<ulong, HousingInfo> ReadHousingLiveAll(IEnumerable<ulong> cids,
+            Func<Dictionary<ulong, CharEntry>?> getAllChars, Func<Dictionary<ulong, FcEntry>?> getAllFcs,
+            Func<ulong, CharEntry?> getChar, Func<ulong, FcEntry?> getFc, HashSet<ulong>? withoutFc = null)
+        {
+            Dictionary<ulong, CharEntry>? chars = null;
+            Dictionary<ulong, FcEntry>? fcs = null;
+            try
+            {
+                chars = getAllChars();
+                fcs = getAllFcs();
+            }
+            catch
+            {
+                chars = null;
+            }
+            if (chars == null || fcs == null)
+                return ReadHousingLive(cids, getChar, getFc, withoutFc);
+            return ReadHousingLive(cids, cid => chars.GetValueOrDefault(cid), id => fcs.GetValueOrDefault(id), withoutFc);
+        }
+
+        /// <summary>
         /// The same lookup as <see cref="ReadHousingData"/>, asked of a running FCTracker (its IPC) instead of read
         /// from its file: <paramref name="getChar"/> and <paramref name="getFc"/> return its entry for a character or
         /// Free Company id, or null when it has none. Each Free Company is asked for once. Exceptions are left to the

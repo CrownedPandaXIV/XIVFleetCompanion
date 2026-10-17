@@ -416,10 +416,28 @@ internal static class Program
         catch (InvalidOperationException) { threw = true; }
         Check(threw && failedWithoutFc.Count == 0, "FCTracker IPC: a failed call leaves nothing half-filled (the file is read instead)");
 
+        // Newer FCTrackers hand over everything in two calls; the one-at-a-time calls are then not used.
+        var oneAtATime = 0;
+        var allWithoutFc = new HashSet<ulong>();
+        var all = FCTrackerConnector.ReadHousingLiveAll(new ulong[] { 1, 2, 3, 4, 5, 6, 7 }, () => liveChars, () => liveFcs,
+            cid => { oneAtATime++; return null; }, id => { oneAtATime++; return null; }, allWithoutFc);
+        Check(oneAtATime == 0 && string.Join(",", all.Keys.OrderBy(k => k)) == "1,5,6" && string.Join(",", allWithoutFc.OrderBy(k => k)) == "2,3"
+              && all[5].HouseWard == 7 && all[6].FcName == "Ember Haven",
+            $"FCTracker IPC, all at once: the same answers from two calls ({oneAtATime} single calls)");
+        // An FCTracker without them (the call throws, or answers nothing) is asked one at a time.
+        var fallback = FCTrackerConnector.ReadHousingLiveAll(new ulong[] { 1, 5 }, () => liveChars, () => throw new InvalidOperationException("no such call"),
+            cid => liveChars.GetValueOrDefault(cid), id => liveFcs.GetValueOrDefault(id));
+        var fallbackNull = FCTrackerConnector.ReadHousingLiveAll(new ulong[] { 1, 5 }, () => null, () => liveFcs,
+            cid => liveChars.GetValueOrDefault(cid), id => liveFcs.GetValueOrDefault(id));
+        Check(string.Join(",", fallback.Keys.OrderBy(k => k)) == "1,5" && string.Join(",", fallbackNull.Keys.OrderBy(k => k)) == "1,5",
+            "FCTracker IPC: without the all-at-once calls, it asks one at a time");
+
         var liveFacts = new CheckReport.Facts { FcTrackerRunning = true, FcTrackerLive = true, FcTrackerPath = "x.json" };
         Check(CheckReport.FcTrackerLine(liveFacts) == "FCTracker: running, details read directly from it"
               && CheckReport.FcTrackerLine(new CheckReport.Facts { FcTrackerRunning = true, FcTrackerFound = true, FcTrackerPath = "x.json" }).StartsWith("FCTracker: running, a version without IPC"),
             "Check what I can see says whether FCTracker answered directly or its file was read");
+        Check(CheckReport.FcTrackerLine(new CheckReport.Facts { FcTrackerRunning = true, FcTrackerLive = true, FcTrackerIpcVersion = 1 })
+              == "FCTracker: running, details read directly from it (IPC version 1)", "and FCTracker's IPC version, when it says");
 
         // Fingerprints: same data in another order is the same; any change is different.
         var items = new List<FleetWriter.InventoryItem>
