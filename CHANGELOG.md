@@ -3,6 +3,17 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.12.1 - 2026-10-17
+
+No database change. Works with any app version; app 0.26.0 or newer sets up and updates the database.
+
+- **No more SQL to run by hand.** When the database is missing a table or column, the plugin's log and its
+  "Check what I can see" window now say to open the app once (it makes the change itself), instead of naming a
+  SQL file to run.
+- **Friendlier instructions:** the README and the download page are rewritten for players first, with the
+  developer notes at the end. The download page (XIVFleetCompanion-Releases) now stays in step with this
+  repository by itself.
+
 ## 0.12.0 - 2026-10-09
 
 No database change. For app 0.23.2.

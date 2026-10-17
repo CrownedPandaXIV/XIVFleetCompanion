@@ -410,7 +410,7 @@ public sealed class Plugin : IDalamudPlugin
                         if (!warnedNoItemsSeenColumn && !await FleetWriter.MarkRetainersSeenAsync(conn, seenRetainers))
                         {
                             warnedNoItemsSeenColumn = true;
-                            Log.Information("Fleet Companion: run sql/007_retainer_items_seen.sql once so the app can tell empty retainers from unseen ones.");
+                            Log.Information("Fleet Companion: the database is missing a column the app adds. Open the XIV Fleet Companion app (0.26.0 or newer) once so it can update the database; until then, empty retainers can't be told from unseen ones.");
                         }
                     }
                     catch (PostgresException ex)
@@ -540,7 +540,7 @@ public sealed class Plugin : IDalamudPlugin
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
             if (!warnedNoCurrentTable)
-                Log.Warning("Fleet Companion: companion_character_current does not exist; run sql/004_character_current.sql once. Characters are not saved until then.");
+                Log.Warning("Fleet Companion: the database isn't set up yet. Open the XIV Fleet Companion app (0.26.0 or newer) and connect it to this database once; it sets everything up. Characters are not saved until then.");
             warnedNoCurrentTable = true;
         }
         catch (PostgresException ex)
@@ -639,7 +639,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DetailsTablesMissing()
     {
         if (!loggedDetailsTablesMissing)
-            Log.Information("Fleet Companion: run sql/008_pcs_loot_ventures_listings.sql once so the app can show PCs, loot per voyage, venture income and market listings.");
+            Log.Information("Fleet Companion: the database is missing tables the app adds. Open the XIV Fleet Companion app (0.26.0 or newer) once so it can update the database; until then, PCs, loot per voyage, venture income and market listings aren't saved.");
         loggedDetailsTablesMissing = true;
         detailsTablesReady = false;
         detailsTablesAskAgainAt = DateTime.UtcNow.AddMinutes(30);

@@ -71,7 +71,7 @@ public class CheckWindow : Window, IDisposable
             await using var conn = await PostgresWriter.OpenConnectionAsync(plugin.Configuration.UseRemoteConnection);
             if (conn == null) return;
             if (!await DetailsWriter.WritePcCheckAsync(conn, Environment.MachineName, plugin.Configuration.AccountLabel ?? "", Plugin.VersionText, result, toFix))
-                status += " (Run sql/008 so the app can show this too.)";
+                status += " (Open the app once so it can update the database and show this too.)";
         }
         catch (Exception ex)
         {

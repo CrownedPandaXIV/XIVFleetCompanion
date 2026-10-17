@@ -1,12 +1,11 @@
 # Writer tests
 
-Runs the plugin's database writing code (`XIVFleetCompanion/FleetWriter.cs`) against a scratch
-Postgres: each table is created in a throwaway schema (`fleetwriter_test`) with the same column
-types as the real database, written to, read back and compared. The schema is removed afterwards.
+These check the code that writes to the database (`XIVFleetCompanion/FleetWriter.cs`). Each test creates the tables it
+needs in a throwaway schema (`fleetwriter_test`), writes to them, reads the results back and compares. The schema is
+removed when they finish.
 
-These run automatically on GitHub for every pull request (the `writer-tests` job in
-`.github/workflows/pr-build.yml`). To run them yourself you need the .NET 8 SDK and a scratch
-Postgres (never the real one):
+They run on GitHub for every pull request. To run them yourself, you need the .NET 8 SDK and a **test** PostgreSQL
+(never your real one):
 
 ```
 FLEET_TEST_DB="Host=localhost;Username=postgres;Password=postgres;Database=postgres" dotnet run --project tests/FleetWriterTests
