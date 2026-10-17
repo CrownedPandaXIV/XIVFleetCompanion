@@ -108,12 +108,12 @@ public class MainWindow : Window, IDisposable
                 : "Last sync: never");
 
             ImGui.Spacing();
-            ImGui.Text("Source connectivity:");
+            ImGui.Text("Connections:");
 
             var mode = statusRemote ? "Remote" : "Local";
-            ImGui.BulletText(postgresConfigured ? $"Postgres ({mode}): Configured" : $"Postgres ({mode}): Not configured");
-            ImGui.BulletText(autoRetainerReady ? "AutoRetainer: OK" : "AutoRetainer: Not found / not running");
-            ImGui.BulletText(allaganToolsReady ? "AllaganTools: OK" : "AllaganTools: Not found / not running");
+            ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+            ImGui.BulletText(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
+            ImGui.BulletText(allaganToolsReady ? "AllaganTools: running" : "AllaganTools: not running");
 
             if (ImGui.Button("Read My Character Data"))
             {
