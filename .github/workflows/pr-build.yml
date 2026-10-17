@@ -31,6 +31,16 @@ jobs:
     - name: Build with dotnet
       run: dotnet build --configuration Release
 
+    # Checks the build makes a manifest Dalamud's plugin list can use (see publish-plugin.sh).
+    - name: Check the plugin list entry
+      shell: bash
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        out=XIVFleetCompanion/bin/x64/Release/XIVFleetCompanion
+        test -f "$out/latest.zip"
+        bash .github/scripts/repo-entry.sh "$out/XIVFleetCompanion.json" "$version" https://example.invalid/plugin.zip > repo.json
+        echo "::notice title=Plugin list entry::$(jq -c '.[0] | {InternalName, AssemblyVersion, DalamudApiLevel, Changelog: (.Changelog | length)}' repo.json)"
+
     - name: Store artifacts
       uses: actions/upload-artifact@v6
       with:
