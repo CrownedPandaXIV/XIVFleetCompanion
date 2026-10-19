@@ -3,6 +3,10 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 1.0.0 - 2026-10-19
+
+The first stable release. Nothing changed since 0.14.2; works with app 0.36.0 or newer, and with app 1.0.0.
+
 ## 0.14.2 - 2026-10-19
 
 No database change. Works with any app version.
