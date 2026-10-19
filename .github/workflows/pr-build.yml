@@ -1,0 +1,78 @@
+name: PR Build
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    runs-on: windows-2022
+
+    env:
+      Solution_Name: XIVFleetCompanion
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Download Dalamud
+      run: |
+        Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+        Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+    - name: Build with dotnet
+      run: dotnet build --configuration Release
+
+    # Checks the build makes a manifest Dalamud's plugin list can use (see publish-plugin.sh).
+    - name: Check the plugin list entry
+      shell: bash
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        out=XIVFleetCompanion/bin/x64/Release/XIVFleetCompanion
+        test -f "$out/latest.zip"
+        bash .github/scripts/repo-entry.sh "$out/XIVFleetCompanion.json" "$version" https://example.invalid/plugin.zip > repo.json
+        echo "::notice title=Plugin list entry::$(jq -c '.[0] | {InternalName, AssemblyVersion, DalamudApiLevel, Changelog: (.Changelog | length)}' repo.json)"
+
+    - name: Store artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: XIVFleetCompanion
+        path: .\XIVFleetCompanion\bin\x64\Release\XIVFleetCompanion\*
+        if-no-files-found: error
+        retention-days: 1
+
+
+  # The plugin's database writes (FleetWriter.cs), run against a scratch Postgres.
+  writer-tests:
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Run the writer tests
+      env:
+        FLEET_TEST_DB: Host=localhost;Username=postgres;Password=postgres;Database=postgres
+      run: dotnet run --project tests/FleetWriterTests

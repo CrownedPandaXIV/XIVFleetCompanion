@@ -1,0 +1,107 @@
+name: Release
+
+# When a change lands on master with a version that has no release yet, create the tag and
+# the GitHub release (description taken from CHANGELOG.md), then build the plugin and publish
+# it to the Dalamud plugin list in XIVFleetCompanion-Releases. Does nothing otherwise.
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Tag and release a new version
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        echo "Version: $version"
+        bash .github/scripts/tag-release.sh "$version" "$GITHUB_SHA"
+
+  # Builds the plugin, attaches it to the release and lists it in repo.json in the public
+  # XIVFleetCompanion-Releases repo, which Dalamud reads. Skipped when that list already has
+  # this version and its download is attached here, or when the RELEASES_TOKEN secret (write
+  # access to that repo) is missing.
+  plugin:
+    needs: tag-release
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Already published?
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        REPO_TOKEN: ${{ github.token }}
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+        listed=""
+        if [ -n "$GH_TOKEN" ]; then
+          listed=$(gh api repos/CrownedPandaXIV/XIVFleetCompanion-Releases/contents/repo.json \
+            -H 'Accept: application/vnd.github.raw' 2>/dev/null | jq -r '.[0].AssemblyVersion // empty' 2>/dev/null || true)
+        fi
+        # The download repo.json points at (a missing one is put back, for example in a new copy of this repo).
+        attached=false
+        if GH_TOKEN="$REPO_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${version}" --jq '.assets[].name' 2>/dev/null \
+          | grep -qx "XIVFleetCompanion-${version}.zip"; then
+          attached=true
+        fi
+        if [ -z "$GH_TOKEN" ]; then
+          echo "No RELEASES_TOKEN secret: plugin ${version} is not published."
+          echo "publish=false" >> "$GITHUB_OUTPUT"
+        elif [[ "$listed" == "${version}" || "$listed" == "${version}".* ]] && [ "$attached" = true ]; then
+          echo "Plugin ${version} is already published."
+          echo "publish=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install .NET
+      if: steps.check.outputs.publish == 'true'
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Download Dalamud
+      if: steps.check.outputs.publish == 'true'
+      run: |
+        Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+        Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+    - name: Build and publish the plugin
+      if: steps.check.outputs.publish == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      run: |
+        dotnet build --configuration Release
+        bash .github/scripts/publish-plugin.sh "${{ steps.check.outputs.version }}"
+
+  # Keeps the download page (the Releases repo's README) the same as .github/releases-readme.md.
+  releases-readme:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Update the download page
+      env:
+        RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      run: |
+        if [ -z "$RELEASES_TOKEN" ]; then echo "No RELEASES_TOKEN secret; skipped."; exit 0; fi
+        bash .github/scripts/sync-releases-readme.sh
