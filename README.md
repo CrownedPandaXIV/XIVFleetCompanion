@@ -96,6 +96,12 @@ XIV Fleet Companion couldn't work without these plugins. A big thank you to the 
 - **FC Tracker** by erdelf
 - **Submarine Tracker** by Infi
 
+## License
+
+The plugin is free software under the [GNU Affero General Public License v3](LICENSE.md), the same as the app. You can
+use it, share it and change it. If you share a changed version, share its code under the same license. It comes with
+no warranty.
+
 ## For developers
 
 ### Building
