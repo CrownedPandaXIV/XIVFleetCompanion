@@ -69,7 +69,7 @@ namespace XIVFleetCompanion
             catch (Exception ex)
             {
                 // Corrupted or inaccessible credential — caller treats this as "not configured".
-                Plugin.Log.Warning($"Fleet Companion: could not read saved Postgres credential — {ex.Message}");
+                Plugin.Log.Warning($"Fleet Companion: could not read the saved database credentials — {ex.Message}");
                 return null;
             }
         }

@@ -303,7 +303,7 @@ public sealed class Plugin : IDalamudPlugin
         });
 
         var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
-        Log.Information(liveHousing != null
+        Log.Debug(liveHousing != null
             ? $"Fleet Companion: FC Tracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."
             : $"Fleet Companion: FC Tracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
 
@@ -311,7 +311,9 @@ public sealed class Plugin : IDalamudPlugin
         // keep their last stored contents (see below).
         var allaganToolsReady = AllaganTools != null && AllaganTools.IsReady();
         if (!allaganToolsReady)
-            Log.Warning("Fleet Companion: Allagan Tools is not available; inventories and FC chests were not updated this sync.");
+            WarnOnce("allagantools", "Fleet Companion: Allagan Tools is not available; inventories and FC chests are not updated until it is.");
+        else
+            lock (warned) warned.Remove("allagantools");
 
         // One connection for the whole sync. A sync that cannot connect is reported by the
         // caller and simply tried again next time.

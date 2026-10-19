@@ -152,7 +152,7 @@ public class CheckWindow : Window, IDisposable
             await using var conn = await PostgresWriter.OpenConnectionAsync(configuration.UseRemoteConnection);
             if (conn == null)
             {
-                facts.DatabaseProblem = "no saved connection (Settings → Postgres).";
+                facts.DatabaseProblem = "no saved connection (Settings → Database Connection).";
             }
             else
             {
