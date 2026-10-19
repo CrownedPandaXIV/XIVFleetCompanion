@@ -87,6 +87,12 @@ To keep things light, it only sends what's changed (plus everything once an hour
 
 ---
 
+## Found a problem?
+
+Report it on the app's [GitHub page](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App/issues/new/choose), which is for the plugin too. Include the plugin's version (in the
+title of its window), and the **Copy results** of `/xivfleet check` if it's about what the plugin sees. The app's
+**Settings → Setup Help → Found a problem?** has the app's version and its log.
+
 ## Thanks
 
 XIV Fleet Companion couldn't work without these plugins. A big thank you to the people who make them:

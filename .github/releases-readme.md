@@ -45,6 +45,12 @@ Dalamud keeps the plugin up to date for you.
 
 Not sure everything's working? Type `/xivfleet check` in the game.
 
+## Found a problem?
+
+Report it on the app's [GitHub page](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App/issues/new/choose), for the app and the plugin alike. In the app, **Settings → Setup Help →
+Found a problem?** has the app's version to copy and its log. For the plugin, paste the **Copy results** of
+`/xivfleet check`.
+
 ## Thanks
 
 XIV Fleet Companion couldn't work without these plugins. A big thank you to the people who make them: kawaii,
