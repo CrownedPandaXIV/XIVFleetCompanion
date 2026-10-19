@@ -134,7 +134,7 @@ public class MainWindow : Window, IDisposable
 
             using (ImRaii.Disabled(connectionTestRunning))
             {
-                if (ImGui.Button("Test Postgres Connection"))
+                if (ImGui.Button("Test Database Connection"))
                 {
                     connectionTestRunning = true;
                     connectionTestResult = "Testing...";

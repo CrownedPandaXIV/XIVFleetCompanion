@@ -23,6 +23,6 @@
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="System.Data.SQLite" Version="2.0.3" />
     <!-- The SQLite engine itself; in the game, Dalamud has already loaded it. -->
-    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.11" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.14" />
   </ItemGroup>
 </Project>

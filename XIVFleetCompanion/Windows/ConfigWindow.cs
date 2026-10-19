@@ -220,7 +220,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text($"Postgres Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
+        ImGui.Text($"Database Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
 
         ImGui.InputText("Host", ref pgHost, 100);
         ImGui.InputText("Port", ref pgPort, 10);
@@ -230,7 +230,7 @@ public class ConfigWindow : Window, IDisposable
         if (pgHasSavedPassword)
             ImGui.TextDisabled("A password is saved. Leave the box empty to keep it.");
 
-        if (ImGui.Button("Save Postgres Credentials"))
+        if (ImGui.Button("Save Database Credentials"))
             pgSaveResult = SaveCredential();
 
         ImGui.SameLine();

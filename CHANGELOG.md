@@ -3,6 +3,17 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 0.14.2 - 2026-10-19
+
+No database change. Works with any app version.
+
+- **An easier-to-read description** in Dalamud's plugin list, saying what the plugin needs, what helps, and that it
+  works with the XIV Fleet Companion app. The author is now shown as CrownedPandaXIV.
+- **"Database" instead of "Postgres"** in the plugin's windows, as in the app and the guides: **Database Connection**,
+  **Save Database Credentials** and **Test Database Connection**.
+- **A quieter log:** "Allagan Tools is not available" is written once, not at every sync (and again if it goes away
+  after coming back), and the FC Tracker line at every sync is now only in the detailed log.
+
 ## 0.14.1 - 2026-10-19
 
 No database change. Works with any app version.

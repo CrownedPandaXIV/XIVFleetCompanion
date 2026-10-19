@@ -604,7 +604,7 @@ internal static class Program
             $"SubmarineTracker is reported running, installed but not running, or not found, and is never a thing to fix:\n{subRunning}\n{subStopped}\n{subMissing}");
 
         facts.AllaganToolsReady = false;
-        facts.DatabaseProblem = "no saved connection (Settings → Postgres).";
+        facts.DatabaseProblem = "no saved connection (Settings → Database Connection).";
         report = CheckReport.ToText(facts);
         Check(report.Contains("! Allagan Tools is not running") && report.Contains("Database: not checked, no saved connection")
               && !report.Contains("Last synced") && !report.Contains("Newret: not seen") && CheckReport.ToFixCount(facts) == 2,
