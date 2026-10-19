@@ -125,11 +125,11 @@ public class CheckWindow : Window, IDisposable
                     Subs = data.OfflineSubmarineData.Count,
                     FcId = data.FCID,
                 };
-                c.Bags = new CheckReport.Part { Id = data.CID, Name = "Bags", Items = ItemCount(data.CID) };
+                c.Bags = Counted(data.CID, "Character");
                 foreach (var retainer in data.RetainerData)
-                    c.Retainers.Add(new CheckReport.Part { Id = retainer.RetainerID, Name = retainer.Name, Items = ItemCount(retainer.RetainerID) });
+                    c.Retainers.Add(Counted(retainer.RetainerID, retainer.Name));
                 if (data.FCID != 0)
-                    c.Chest = new CheckReport.Part { Id = data.FCID, Name = "FC chest", Items = ChestCount(data.FCID) };
+                    c.Chest = Counted(data.FCID, "FC chest", i => i.SortedContainer >= 20000 && i.SortedContainer <= 20004);
                 f.Characters.Add(c);
             }
             return f;
@@ -176,22 +176,27 @@ public class CheckWindow : Window, IDisposable
         return facts;
     }
 
-    // How many items AllaganTools has for a character or retainer (empty slots left out), or null
-    // when it has never seen it (it then answers with nothing at all, not even empty slots).
-    private int? ItemCount(ulong id, Func<AllaganToolsConnector.ParsedItem, bool>? where = null)
+    // How many items AllaganTools has for a character, retainer or FC (empty slots left out; each stack counts
+    // once) and where they are (CheckReport.Kind), or Items null when it has never seen it (it then answers with
+    // nothing at all, not even empty slots). `where`: only some containers (the FC chest's tabs, 20000-20004).
+    private CheckReport.Part Counted(ulong id, string name, Func<AllaganToolsConnector.ParsedItem, bool>? where = null)
     {
+        var part = new CheckReport.Part { Id = id, Name = name };
         var raw = plugin.AllaganTools?.GetCharacterItems(id);
-        return raw == null || raw.Count == 0 ? null : raw.Count(i => i.Quantity > 0 && (where == null || where(i)));
+        if (raw == null || raw.Count == 0) return part;
+        var items = raw.Where(i => i.Quantity > 0 && (where == null || where(i))).ToList();
+        part.Items = items.Count;
+        foreach (var group in items.GroupBy(i => CheckReport.Kind(i.SortedContainer)))
+            part.Kinds[group.Key] = group.Count();
+        return part;
     }
-
-    // The FC chest's items only (AllaganTools' containers 20000-20004).
-    private int? ChestCount(ulong fcId) => ItemCount(fcId, i => i.SortedContainer >= 20000 && i.SortedContainer <= 20004);
 
     public override void Draw()
     {
-        ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the bags, " +
-                          "each retainer and the FC chest (from Allagan Tools), the house (from FC Tracker) and when each was last " +
-                          "stored. Only the result itself is saved, for the app's PCs panel.");
+        ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the character's " +
+                          "items, each retainer's and the FC chest's (from Allagan Tools; each filled slot counts once, with where they " +
+                          "are: bags, crystals, armoury...), the house (from FC Tracker) and when each was last stored. Only the result " +
+                          "itself is saved, for the app's PCs panel.");
         using (ImRaii.Disabled(running))
         {
             if (ImGui.Button(running ? "Checking..." : "Check again")) Run();

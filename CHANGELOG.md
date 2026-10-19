@@ -3,6 +3,16 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 1.0.1 - 2026-10-19
+
+No database change. Works with any app version.
+
+- **Check what I can see says where the items are.** The line that said "Bags: 153 items" counted every filled slot
+  Allagan Tools has for the character, not just the bags: crystals, saddlebags, the armoury chest, what they are
+  wearing and so on. It is now "Character: 153 items (bags 17, crystals 18, saddlebags 40, armoury 70, equipped 8)",
+  so each number can be matched to what the game shows. Retainers get the same, like "(bags 22, for sale 3)". A count
+  that is all in one place has no breakdown.
+
 ## 1.0.0 - 2026-10-19
 
 The first stable release. Nothing changed since 0.14.2; works with app 0.36.0 or newer, and with app 1.0.0.

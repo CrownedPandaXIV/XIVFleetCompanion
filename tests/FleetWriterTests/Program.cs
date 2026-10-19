@@ -549,22 +549,33 @@ internal static class Program
         facts.Characters.Add(new CheckReport.Character
         {
             Cid = 1, Name = "Aki Main", World = "Maduin", Subs = 4, FcId = 9000001, FcName = "Panda Co", SyncedAgo = TimeSpan.FromMinutes(5),
-            Bags = new() { Id = 1, Name = "Bags", Items = 143, StoredAgo = TimeSpan.FromMinutes(5) },
-            Retainers = { new() { Id = 2, Name = "Oldret", Items = 80, StoredAgo = TimeSpan.FromHours(1) }, new() { Id = 3, Name = "Newret" } },
+            Bags = new()
+            {
+                Id = 1, Name = "Character", Items = 143, StoredAgo = TimeSpan.FromMinutes(5),
+                Kinds = new() { ["armoury"] = 98, ["bags"] = 17, ["crystals"] = 18, ["equipped"] = 10 },
+            },
+            Retainers = { new() { Id = 2, Name = "Oldret", Items = 80, StoredAgo = TimeSpan.FromHours(1), Kinds = new() { ["bags"] = 77, ["for sale"] = 3 } }, new() { Id = 3, Name = "Newret" } },
             Chest = new() { Id = 9000001, Name = "FC chest" },
             Housing = new FCTrackerConnector.HousingInfo { FcId = 9000001, HasHouse = true, HouseCity = 2, HouseWard = 7, HousePlot = 28 },
         });
         facts.Characters.Add(new CheckReport.Character
         {
-            Cid = 4, Name = "Bex", World = "Maduin", Bags = new() { Id = 4, Name = "Bags", Items = 1, StoredAgo = TimeSpan.FromDays(3) }, SyncedAgo = TimeSpan.FromDays(3),
+            Cid = 4, Name = "Bex", World = "Maduin", Bags = new() { Id = 4, Name = "Character", Items = 1, Kinds = new() { ["bags"] = 1 }, StoredAgo = TimeSpan.FromDays(3) }, SyncedAgo = TimeSpan.FromDays(3),
         });
         var report = CheckReport.ToText(facts);
         Check(report.Contains("AutoRetainer: running, 40 characters (38 left out in settings)") && report.Contains("2 things to fix (marked !)."),
             "the report starts with the other plugins and how many things to fix:\n" + report);
-        Check(report.Contains("  Retainer Oldret: 80 items, stored 1 hour ago") && report.Contains("  Retainer Newret: not seen, nothing stored")
+        Check(report.Contains("  Retainer Oldret: 80 items (bags 77, for sale 3), stored 1 hour ago") && report.Contains("  Retainer Newret: not seen, nothing stored")
               && report.Contains("  ! Open Newret at a summoning bell on this PC.") && report.Contains("  ! Open the Free Company chest of Panda Co on this PC.")
-              && report.Contains("  House: Lavender Beds, Ward 7, Plot 28") && report.Contains("  Bags: 143 items, stored 5 minutes ago"),
-            "per character: each part, when it was stored, the house, and what to open");
+              && report.Contains("  House: Lavender Beds, Ward 7, Plot 28")
+              && report.Contains("  Character: 143 items (bags 17, crystals 18, armoury 98, equipped 10), stored 5 minutes ago")
+              && report.Contains("  Character: 1 item, stored 3 days ago"),
+            "per character: each part and where its items are (no breakdown when they're all in one place), when it was stored, the house, and what to open:\n" + report);
+        Check(CheckReport.Kind(0) == "bags" && CheckReport.Kind(3) == "bags" && CheckReport.Kind(2001) == "crystals" && CheckReport.Kind(4101) == "saddlebags"
+              && CheckReport.Kind(3205) == "armoury" && CheckReport.Kind(1000) == "equipped" && CheckReport.Kind(2000) == "currency"
+              && CheckReport.Kind(10003) == "bags" && CheckReport.Kind(12002) == "for sale" && CheckReport.Kind(12001) == "crystals"
+              && CheckReport.Kind(20002) == "chest" && CheckReport.Kind(2501) == "glamour" && CheckReport.Kind(25010) == "house" && CheckReport.Kind(9999) == "other",
+            "each AllaganTools container is named for the breakdown");
         Check(report.Contains("Bex @ Maduin\r\n  Last synced: 3 days ago".Replace("\r\n", Environment.NewLine)) && report.Contains("  Free Company: none")
               && CheckReport.ToFix(facts.Characters[1], facts).Count == 0, "a character with nothing to fix has no ! lines");
 

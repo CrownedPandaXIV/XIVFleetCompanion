@@ -14,16 +14,48 @@ namespace XIVFleetCompanion;
 /// </summary>
 public static class CheckReport
 {
-    // One thing AllaganTools has items for: the character's bags, a retainer or the FC chest.
-    // Items is null when AllaganTools has never seen it. StoredAgo is how long ago its items were
-    // last stored in the database (null: none stored, or the database was not checked).
+    // One thing AllaganTools has items for: the character (bags, crystals, saddlebags, armoury, gear...), a
+    // retainer or the FC chest. Items is null when AllaganTools has never seen it; Kinds says where those items
+    // are (see Kind). StoredAgo is how long ago its items were last stored in the database (null: none stored, or
+    // the database was not checked).
     public sealed class Part
     {
         public ulong Id;
         public string Name = "";
         public int? Items;
+        public Dictionary<string, int> Kinds = new();
         public TimeSpan? StoredAgo;
     }
+
+    // Where an item is, from AllaganTools' container number (the same numbers the app uses to name places, its
+    // characters/item-locations.js), for the breakdown after each count. Listed in the order it is shown.
+    public static readonly string[] KindOrder =
+    {
+        "bags", "crystals", "saddlebags", "armoury", "equipped", "glamour", "currency", "key items", "mail", "for sale",
+        "chest", "house", "other",
+    };
+
+    public static string Kind(uint container) => container switch
+    {
+        <= 3 => "bags",                                       // the 4 bag pages
+        >= 10000 and <= 10006 => "bags",                      // a retainer's bags
+        2001 or 12001 or 22001 => "crystals",                 // character, retainer, FC
+        4000 or 4001 or 4100 or 4101 => "saddlebags",         // and premium saddlebags
+        >= 3200 and <= 3500 => "armoury",                     // every armoury chest slot type
+        1000 or 1001 or 11000 => "equipped",                  // worn by the character or the retainer
+        2500 or 2501 => "glamour",                            // the armoire and the glamour dresser
+        2000 or 2502 or 12000 or 22000 => "currency",         // gil and other currencies
+        2004 => "key items",
+        2003 => "mail",
+        12002 => "for sale",                                  // a retainer's market board listings
+        >= 20000 and <= 20010 => "chest",                     // the FC chest's tabs
+        >= 25000 and < 28000 => "house",                      // furnishings and storerooms
+        _ => "other",
+    };
+
+    // "bags 17, crystals 18, armoury 70": the kinds a part's items are in, in KindOrder, leaving out none.
+    public static string Breakdown(Dictionary<string, int> kinds)
+        => string.Join(", ", KindOrder.Where(k => kinds.TryGetValue(k, out var n) && n > 0).Select(k => $"{k} {kinds[k]}"));
 
     public sealed class Character
     {
@@ -31,7 +63,7 @@ public static class CheckReport
         public string Name = "";
         public string World = "";
         public int Subs;
-        public Part Bags = new() { Name = "Bags" };
+        public Part Bags = new() { Name = "Character" };
         public List<Part> Retainers = new();
         // FcId 0: not in a Free Company (by AutoRetainer).
         public ulong FcId;
@@ -91,6 +123,14 @@ public static class CheckReport
     }
 
     private static string Plural(int n, string word) => $"{n} {word}{(n == 1 ? "" : "s")}";
+
+    // "153 items (bags 17, crystals 18, ...)", "1 item", or "not seen". Each item is one filled slot (a stack).
+    private static string Count(Part p)
+    {
+        if (p.Items is not int n) return "not seen";
+        var kinds = Breakdown(p.Kinds);
+        return Plural(n, "item") + (kinds.Length > 0 && p.Kinds.Count(k => k.Value > 0) > 1 ? $" ({kinds})" : "");
+    }
 
     private static string Stored(Part p, bool databaseChecked)
         => !databaseChecked ? "" : p.StoredAgo is TimeSpan ago ? $", stored {Ago(ago)}" : ", nothing stored";
@@ -185,8 +225,8 @@ public static class CheckReport
             sb.AppendLine($"  {Plural(c.Subs, "sub")}, {Plural(c.Retainers.Count, "retainer")}");
             if (f.AllaganToolsReady)
             {
-                foreach (var part in new[] { c.Bags }.Concat(c.Retainers.Select(r => new Part { Name = $"Retainer {r.Name}", Items = r.Items, StoredAgo = r.StoredAgo })))
-                    sb.AppendLine($"  {part.Name}: {(part.Items is int n ? Plural(n, "item") : "not seen")}{Stored(part, databaseChecked)}");
+                foreach (var part in new[] { c.Bags }.Concat(c.Retainers.Select(r => new Part { Name = $"Retainer {r.Name}", Items = r.Items, Kinds = r.Kinds, StoredAgo = r.StoredAgo })))
+                    sb.AppendLine($"  {part.Name}: {Count(part)}{Stored(part, databaseChecked)}");
                 if (c.Chest != null)
                     sb.AppendLine($"  FC chest{(string.IsNullOrEmpty(c.FcName) ? "" : $" ({c.FcName})")}: {(c.Chest.Items is int n ? Plural(n, "item") : "not seen")}{Stored(c.Chest, databaseChecked)}");
             }
