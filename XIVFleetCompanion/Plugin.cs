@@ -187,10 +187,11 @@ public sealed class Plugin : IDalamudPlugin
         lock (pendingLogins) pendingLogins[cid] = DateTime.UtcNow;
     }
 
-    // Records this setup's logins, then keeps only the characters that last logged in here or that no setup
-    // has recorded a login for yet; the rest are left to the setup they last logged in on. Before the database
-    // has the table (app 1.6.0), or if reading it fails, every character is kept, as before.
-    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(NpgsqlConnection conn, List<CharacterRead> characters)
+    // Records this setup's logins (only of characters it syncs) and gives up the characters unticked here, then keeps
+    // only the characters that last logged in here or that no setup has recorded a login for yet; the rest are left to
+    // the setup they last logged in on. Before the database has the table (app 1.6.0), or if reading it fails, every
+    // character is kept, as before.
+    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(NpgsqlConnection conn, List<CharacterRead> characters, List<ulong> leftOutCids)
     {
         var pcName = Environment.MachineName;
         var label = Configuration.AccountLabel ?? "";
@@ -209,15 +210,20 @@ public sealed class Plugin : IDalamudPlugin
                 Configuration.Save();
             }
 
+            // A character unticked here never claims to be this setup's, and one unticked since gives up its claim, so a
+            // setup that does sync it takes over (for example Account 1 on a laptop and a desktop, ticked on only one).
             List<KeyValuePair<ulong, DateTime>> logins;
             lock (pendingLogins) logins = pendingLogins.ToList();
-            if (await FleetWriter.RecordLoginsAsync(conn, pcName, label, logins))
+            if (await FleetWriter.RecordLoginsAsync(conn, pcName, label, CharacterChoice.LoginsToRecord(logins, Configuration.ShouldSync)))
             {
                 lock (pendingLogins)
                     foreach (var login in logins)
                         if (pendingLogins.TryGetValue(login.Key, out var at) && at == login.Value)
                             pendingLogins.Remove(login.Key);
             }
+
+            var released = await FleetWriter.ReleaseLoginsAsync(conn, pcName, label, leftOutCids);
+            if (released > 0) Log.Information($"Fleet Companion: {released} character(s) unticked here are no longer this setup's to sync.");
 
             var owners = await FleetWriter.ReadLoginOwnersAsync(conn, characters.Select(c => c.Snapshot.Cid).ToList());
             var elsewhere = characters.Where(c => FleetWriter.OwnedElsewhere(owners, c.Snapshot.Cid, pcName, label)).ToList();
@@ -270,18 +276,20 @@ public sealed class Plugin : IDalamudPlugin
     // Framework.RunOnFrameworkThread); the rest of the sync then works on the copy in the background.
     // Null when AutoRetainer is not ready. Registered is how many characters AutoRetainer lists;
     // Left out is how many of those are not chosen for syncing in settings (they are not read at all).
-    private (List<CharacterRead> Characters, int Registered, int LeftOut)? ReadAutoRetainer()
+    private (List<CharacterRead> Characters, int Registered, int LeftOut, List<ulong> LeftOutCids)? ReadAutoRetainer()
     {
         if (AutoRetainer == null || !AutoRetainer.Ready) return null;
 
         var cids = AutoRetainer.GetRegisteredCharacters();
         var characters = new List<CharacterRead>();
         var leftOut = 0;
+        var leftOutCids = new List<ulong>();
         foreach (var cid in cids)
         {
             if (!Configuration.ShouldSync(cid))
             {
                 leftOut++;
+                leftOutCids.Add(cid);
                 continue;
             }
 
@@ -348,7 +356,7 @@ public sealed class Plugin : IDalamudPlugin
 
             characters.Add(read);
         }
-        return (characters, cids.Count, leftOut);
+        return (characters, cids.Count, leftOut, leftOutCids);
     }
 
     private async Task RunSyncAsync()
@@ -360,7 +368,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
         autoRetainerMissedSyncs = 0;
-        var (characters, registeredCount, leftOutCount) = fromAutoRetainer.Value;
+        var (characters, registeredCount, leftOutCount, leftOutCids) = fromAutoRetainer.Value;
         // Whether FCTracker and SubmarineTracker are loaded in this game, for the app's PCs tab. A running
         // FCTracker with IPC is asked for its Free Company and house details directly; otherwise its file is read.
         var charactersWithoutFc = new HashSet<ulong>();
@@ -393,7 +401,7 @@ public sealed class Plugin : IDalamudPlugin
         SyncingAgain();
 
         // Characters that last logged in on another setup are that setup's to sync.
-        characters = await KeepOwnCharactersAsync(conn, characters);
+        characters = await KeepOwnCharactersAsync(conn, characters, leftOutCids);
 
         changes.BeginSync(DateTime.UtcNow);
         AskAgainForDetailsTables();

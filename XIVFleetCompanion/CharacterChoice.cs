@@ -26,6 +26,18 @@ public static class CharacterChoice
         }
     }
 
+    /// <summary>
+    /// The logins a setup records (see FleetWriter.RecordLoginsAsync): only of characters it syncs. A character
+    /// unticked here never claims to be this setup's, so it can't be taken from a setup that does sync it.
+    /// </summary>
+    public static List<KeyValuePair<ulong, System.DateTime>> LoginsToRecord(IEnumerable<KeyValuePair<ulong, System.DateTime>> logins, System.Func<ulong, bool> shouldSync)
+    {
+        var list = new List<KeyValuePair<ulong, System.DateTime>>();
+        foreach (var login in logins)
+            if (shouldSync(login.Key)) list.Add(login);
+        return list;
+    }
+
     /// <summary>Ticks exactly the given characters out of all of them (e.g. only those with subs).</summary>
     public static void SetExactly(IEnumerable<ulong> all, ISet<ulong> toSync, bool onlyChosen, ISet<ulong> chosen, ISet<ulong> skipped)
     {

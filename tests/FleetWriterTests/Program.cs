@@ -496,6 +496,16 @@ internal static class Program
         owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { berry, cal });
         Check(moved == 1 && owners![berry] == new FleetWriter.LoginOwner("PC1", "Account 3") && owners[cal].AccountLabel == "Account 2",
             "a renamed account label takes its setup's characters along");
+        var marin = 18014498578000104UL;
+        var seen = new[] { KeyValuePair.Create(marin, early.AddHours(5)), KeyValuePair.Create(cal, early.AddHours(5)) };
+        var recorded = CharacterChoice.LoginsToRecord(seen, cid => cid != marin);
+        Check(recorded.Count == 1 && recorded[0].Key == cal, "a login is only recorded for a character this setup syncs (one unticked here claims nothing)");
+        await FleetWriter.RecordLoginsAsync(conn, "LAPTOP", "Account 1", new[] { KeyValuePair.Create(marin, early) });
+        var releasedNone = await FleetWriter.ReleaseLoginsAsync(conn, "DESKTOP-1", "Account 1", new[] { marin });
+        var releasedOwn = await FleetWriter.ReleaseLoginsAsync(conn, "LAPTOP", "Account 1", new[] { marin });
+        owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { marin, cal });
+        Check(releasedNone == 0 && releasedOwn == 1 && !owners!.ContainsKey(marin) && owners.ContainsKey(cal),
+            "a setup gives up a character unticked there (only its own claim), so a setup that syncs it takes over");
 
         // Which characters are synced: every one except the unticked, or only the ticked.
         var chosen = new HashSet<ulong>();

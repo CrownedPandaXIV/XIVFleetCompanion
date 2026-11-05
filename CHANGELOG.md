@@ -13,8 +13,9 @@ as before.
   an old copy of that character left in its AutoRetainer can't overwrite the real one any more. Nobody has to tidy
   AutoRetainer for this. A character that hasn't logged in anywhere since the update keeps syncing as before, and
   there's no time limit: after a long break, each character still belongs to the setup it last logged in on.
-  Changing a setup's account label takes its characters along. The plugin's window says how many characters it is
-  leaving to another setup.
+  Changing a setup's account label takes its characters along. A character unticked in a setup's settings never counts
+  as that setup's, and unticking one gives up the claim, so unticking a character on one PC (say, a laptop) never stops
+  another PC that syncs it. The plugin's window says how many characters it is leaving to another setup.
 
 - **Test builds.** New versions of the plugin can now be tried before everyone else gets them: players who opt in to
   the plugin's testing builds in Dalamud get them, and everyone else stays on the normal version. Each normal release

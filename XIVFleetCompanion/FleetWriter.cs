@@ -234,6 +234,26 @@ namespace XIVFleetCompanion
             }
         }
 
+        // A setup gives up the characters it no longer syncs (unticked in its settings): its login rows for them go,
+        // so a setup that does sync them takes over. Returns how many; 0 when the database doesn't have the table yet.
+        public static async Task<int> ReleaseLoginsAsync(NpgsqlConnection conn, string pcName, string accountLabel, IReadOnlyCollection<ulong> cids)
+        {
+            if (cids.Count == 0) return 0;
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    "DELETE FROM companion_character_login WHERE pc_name = @pc AND account_label = @label AND cid = ANY(@cid::numeric[])", conn);
+                cmd.Parameters.AddWithValue("pc", pcName);
+                cmd.Parameters.AddWithValue("label", accountLabel);
+                cmd.Parameters.AddWithValue("cid", cids.Select(c => (decimal)c).ToArray());
+                return await cmd.ExecuteNonQueryAsync();
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                return 0;
+            }
+        }
+
         // True when the character last logged in on another setup, so this one leaves it alone.
         public static bool OwnedElsewhere(IReadOnlyDictionary<ulong, LoginOwner>? owners, ulong cid, string pcName, string accountLabel)
             => owners != null && owners.TryGetValue(cid, out var owner)
