@@ -3,6 +3,29 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 1.0.2 - 2026-11-05
+
+Goes with app 1.6.0, which adds the table this uses to the database by itself. With an older app, the plugin syncs
+as before.
+
+- **Only the setup a character last logged in on syncs it.** Each setup (PC and account label) notes in the database
+  when a character logs in on it. A setup then leaves alone any character that last logged in on another setup, so
+  an old copy of that character left in its AutoRetainer can't overwrite the real one any more. Nobody has to tidy
+  AutoRetainer for this. A character that hasn't logged in anywhere since the update keeps syncing as before, and
+  there's no time limit: after a long break, each character still belongs to the setup it last logged in on.
+  Changing a setup's account label takes its characters along. A character unticked in a setup's settings never counts
+  as that setup's, and unticking one gives up the claim, so unticking a character on one PC (say, a laptop) never stops
+  another PC that syncs it. The plugin's window says how many characters it is leaving to another setup.
+
+- **Test builds.** New versions of the plugin can now be tried before everyone else gets them: players who opt in to
+  the plugin's testing builds in Dalamud get them, and everyone else stays on the normal version. Each normal release
+  is numbered above the last test build, so testers get it too. The download page says how to opt in.
+- **The app's PCs tab says how many characters each setup leaves to another one** (with app 1.6.0).
+- **A reminder to set an account label.** While a setup's Account Label is blank, the plugin's window and its
+  settings say to give it one (for example, the account's name). Without one, the app can't tell your accounts
+  apart, setups on one PC share a row on its PCs tab, and it can't spot two setups syncing the same character.
+  App 1.6.0 points out characters and setups without a label too.
+
 ## 1.0.1 - 2026-10-19
 
 No database change. Works with any app version.

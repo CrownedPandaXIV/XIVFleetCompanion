@@ -53,6 +53,13 @@ Type `/xivfleet` and open the settings:
   kept in Windows Credential Manager and never shown again. Leave the box empty to keep the saved one.
 - **Characters:** sync everyone AutoRetainer knows (the default), or only the characters you tick. "Tick only those
   with subs" is handy for accounts where only a few characters matter.
+- **Account Label:** a name for this setup's account (for example, the account's name). With more than one account,
+  give each its own setup of AutoRetainer and this plugin, each with its own label.
+
+**More than one account:** each setup notes when a character logs in on it, and only the setup a character last
+logged in on syncs it. So if one setup's AutoRetainer still has an old copy of a character that's now on another
+account, it leaves that character alone instead of overwriting it. Characters that haven't logged in anywhere yet
+are synced by every setup that has them, as before. There's no time limit, so a long break changes nothing.
 
 The database itself is set up by the app the first time it connects, so there's nothing to run on it. If the plugin's
 log says the database is missing something, open the app once and it'll sort it out.
@@ -77,6 +84,7 @@ To keep things light, it only sends what's changed (plus everything once an hour
 ## What it records
 
 - **Each character:** name, world, account, gil, ceruleum, repair kits, retainers, subs and Free Company.
+- **Logins:** which setup (PC and account label) each character last logged in on, and when.
 - **Inventories:** bags, retainers and FC chests, from Allagan Tools.
 - **Subs and retainers:** levels, parts, routes and ventures, plus what each voyage and venture brought back.
 - **Market listings** your retainers have up for sale.
@@ -134,6 +142,11 @@ GitHub then tags the release, builds the plugin and publishes it to the plugin l
 [XIVFleetCompanion-Releases](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases), where Dalamud picks it up.
 It also keeps that page's text the same as `.github/releases-readme.md`. Both need the `RELEASES_TOKEN` secret: a
 token that can write to that repository.
+
+**A test build first:** push the branch to `testing` (`git push origin dev:testing --force`). GitHub builds it as
+`<version>.<run>` (1.0.2.7) and adds it to `repo.json` as the plugin's testing version, so only players who opted in to
+its testing builds in Dalamud get it (`.github/workflows/test-release.yml`). The next normal release of that version is
+numbered above the last test build, so they get that too. `tests/scripts/release-scripts.sh` checks the scripts.
 
 Version numbers follow [Semantic Versioning](https://semver.org):
 

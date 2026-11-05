@@ -89,8 +89,14 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
       run: |
-        dotnet build --configuration Release
-        bash .github/scripts/publish-plugin.sh "${{ steps.check.outputs.version }}"
+        version="${{ steps.check.outputs.version }}"
+        # Numbered above the last test build of this version, if any, so players on it get this too.
+        GH_TOKEN="$RELEASES_TOKEN" gh api repos/CrownedPandaXIV/XIVFleetCompanion-Releases/contents/repo.json \
+          -H 'Accept: application/vnd.github.raw' > listed.json 2>/dev/null || echo '[]' > listed.json
+        build=$(bash .github/scripts/stable-build-number.sh "$version" listed.json)
+        echo "Building ${build}"
+        dotnet build --configuration Release -p:Version="${build}"
+        bash .github/scripts/publish-plugin.sh "$version"
 
   # Keeps the download page (the Releases repo's README) the same as .github/releases-readme.md.
   releases-readme:

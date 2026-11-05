@@ -474,6 +474,39 @@ internal static class Program
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
 
+        // Where characters last logged in: only the setup a character last logged in on syncs it.
+        Check(await FleetWriter.ReadLoginOwnersAsync(conn, new ulong[] { 1 }) == null
+              && !await FleetWriter.RecordLoginsAsync(conn, "PC1", "Account 1", new[] { KeyValuePair.Create(1UL, DateTime.UtcNow) })
+              && await FleetWriter.RenameLoginSetupAsync(conn, "PC1", "a", "b") == 0,
+            "before the database has the login table, nothing fails and no owners are known");
+        await Exec(conn, @"CREATE TABLE companion_character_login (cid numeric PRIMARY KEY, pc_name text NOT NULL,
+            account_label text NOT NULL, logged_in_at timestamptz NOT NULL)");
+        const ulong berry = 18014498578000101, cal = 18014498578000102, dee = 18014498578000103;
+        var early = new DateTime(2026, 11, 1, 10, 0, 0, DateTimeKind.Utc);
+        await FleetWriter.RecordLoginsAsync(conn, "PC1", "Account R", new[] { KeyValuePair.Create(berry, early.AddHours(2)), KeyValuePair.Create(cal, early) });
+        await FleetWriter.RecordLoginsAsync(conn, "PC1", "Account 2", new[] { KeyValuePair.Create(berry, early.AddHours(1)), KeyValuePair.Create(cal, early.AddHours(3)) });
+        var owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { berry, cal, dee });
+        Check(owners != null && owners.Count == 2 && owners[berry] == new FleetWriter.LoginOwner("PC1", "Account R") && owners[cal] == new FleetWriter.LoginOwner("PC1", "Account 2"),
+            "the latest login wins, whichever setup records it first; a character with no login is not listed");
+        Check(!FleetWriter.OwnedElsewhere(owners, berry, "PC1", "Account R") && FleetWriter.OwnedElsewhere(owners, berry, "PC1", "Account 2")
+              && FleetWriter.OwnedElsewhere(owners, berry, "PC2", "Account R")
+              && !FleetWriter.OwnedElsewhere(owners, dee, "PC1", "Account 2") && !FleetWriter.OwnedElsewhere(null, berry, "PC1", "Account 2"),
+            "a setup leaves alone a character that last logged in on another setup (another label or PC); one with no login, or no table, is synced as before");
+        var moved = await FleetWriter.RenameLoginSetupAsync(conn, "PC1", "Account R", "Account 3");
+        owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { berry, cal });
+        Check(moved == 1 && owners![berry] == new FleetWriter.LoginOwner("PC1", "Account 3") && owners[cal].AccountLabel == "Account 2",
+            "a renamed account label takes its setup's characters along");
+        var marin = 18014498578000104UL;
+        var seen = new[] { KeyValuePair.Create(marin, early.AddHours(5)), KeyValuePair.Create(cal, early.AddHours(5)) };
+        var recorded = CharacterChoice.LoginsToRecord(seen, cid => cid != marin);
+        Check(recorded.Count == 1 && recorded[0].Key == cal, "a login is only recorded for a character this setup syncs (one unticked here claims nothing)");
+        await FleetWriter.RecordLoginsAsync(conn, "LAPTOP", "Account 1", new[] { KeyValuePair.Create(marin, early) });
+        var releasedNone = await FleetWriter.ReleaseLoginsAsync(conn, "DESKTOP-1", "Account 1", new[] { marin });
+        var releasedOwn = await FleetWriter.ReleaseLoginsAsync(conn, "LAPTOP", "Account 1", new[] { marin });
+        owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { marin, cal });
+        Check(releasedNone == 0 && releasedOwn == 1 && !owners!.ContainsKey(marin) && owners.ContainsKey(cal),
+            "a setup gives up a character unticked there (only its own claim), so a setup that syncs it takes over");
+
         // Which characters are synced: every one except the unticked, or only the ticked.
         var chosen = new HashSet<ulong>();
         var skipped = new HashSet<ulong>();
@@ -672,6 +705,11 @@ internal static class Program
         Check(await DetailsWriter.WritePcStatusAsync(conn, pc)
               && Show(await Rows(conn, "SELECT plugin_version, db_user = current_user FROM companion_pc_status")) == "0.14.0,True",
             "with database update 10, the status also says which login this plugin uses (without it, the rest is written as before)");
+        await DetailsWriter.WriteCharactersElsewhereAsync(conn, pc.PcName, pc.AccountLabel, 3);
+        await Exec(conn, "ALTER TABLE companion_pc_status ADD COLUMN characters_elsewhere int");
+        await DetailsWriter.WriteCharactersElsewhereAsync(conn, pc.PcName, pc.AccountLabel, 2);
+        Check(Show(await Rows(conn, "SELECT characters_elsewhere FROM companion_pc_status")) == "2",
+            "with database update 12, it says how many characters it left to another setup (without it, nothing fails)");
 
         // Moving the database to another PC (database update 10): the note the app leaves, and what the plugin does.
         Check(await DatabaseMove.ReadAsync(conn) == null && DatabaseMove.Decide(null) == DatabaseMove.Next.Sync,

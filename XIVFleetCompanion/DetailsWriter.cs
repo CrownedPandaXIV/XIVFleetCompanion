@@ -93,6 +93,25 @@ namespace XIVFleetCompanion
             }
         }
 
+        // How many characters this setup left to another setup this sync, because they last logged in there (database
+        // update 12, app 1.6.0, for the app's PCs tab). A database without that column yet is left as it is.
+        public static async Task WriteCharactersElsewhereAsync(NpgsqlConnection conn, string pcName, string accountLabel, int count)
+        {
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    "UPDATE companion_pc_status SET characters_elsewhere = @n WHERE pc_name = @pc AND account_label = @account", conn);
+                cmd.Parameters.AddWithValue("pc", pcName);
+                cmd.Parameters.AddWithValue("account", accountLabel);
+                cmd.Parameters.AddWithValue("n", count);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn || ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                // an app older than 1.6.0
+            }
+        }
+
         // AutoRetainer is not running on this PC, so nothing was synced: says so, keeping the last sync's time
         // and counts (they are what the app still shows).
         public const string AutoRetainerNotRunning = "AutoRetainer is not running: nothing can be synced.";

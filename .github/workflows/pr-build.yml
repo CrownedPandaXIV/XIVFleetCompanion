@@ -72,6 +72,9 @@ jobs:
       with:
         dotnet-version: 8.0.x
 
+    - name: Check the release scripts
+      run: bash tests/scripts/release-scripts.sh
+
     - name: Run the writer tests
       env:
         FLEET_TEST_DB: Host=localhost;Username=postgres;Password=postgres;Database=postgres

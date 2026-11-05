@@ -45,6 +45,20 @@ Dalamud keeps the plugin up to date for you.
 
 Not sure everything's working? Type `/xivfleet check` in the game.
 
+## Try new versions first
+
+Want new versions before everyone else? They can still have problems, so this is only for whoever wants to try things
+first.
+
+- **App:** in **Settings → General → Updates**, tick **Get test versions**. That PC then gets test versions (numbered
+  like `1.6.0-test.12`) and every normal update too. Untick it to go back; you keep the version you have until a normal
+  version is newer. The newest test version is also on the
+  [testing release](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases/releases/tag/testing), if you'd
+  rather install it by hand.
+- **Plugin:** type `/xlsettings`, open the **Experimental** tab and tick **Get plugin testing builds**, then **Save and
+  Close**. Type `/xlplugins`, open **Installed Plugins**, right-click **XIV Fleet Companion** and choose to receive its
+  testing versions. Dalamud then offers its test builds when there are any, and the normal version otherwise.
+
 ## Found a problem?
 
 Report it on the app's [GitHub page](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App/issues/new/choose), for the app and the plugin alike. In the app, **Settings → Setup Help →
