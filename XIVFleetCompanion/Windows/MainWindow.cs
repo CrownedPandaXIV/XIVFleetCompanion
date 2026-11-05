@@ -90,7 +90,7 @@ public class MainWindow : Window, IDisposable
         select = null;
     }
 
-    private void TabItem(Tab tab, string label, Action draw)
+    private void TabItem(Tab tab, string label, System.Action draw)
     {
         var flags = select == tab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
         if (!ImGui.BeginTabItem(label, flags)) return;
