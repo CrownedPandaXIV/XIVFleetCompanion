@@ -102,7 +102,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
+            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, roster, retainers, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
 
         try

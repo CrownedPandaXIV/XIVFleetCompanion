@@ -51,6 +51,21 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
     plugins) or High contrast; and **colour-blind friendly status colors** (blue, yellow and orange-red in place of
     green, amber and red). Only this window changes.
   - The **new submarine icon**, for the plugin's picture and its icon in Dalamud's plugin list.
+- **Stage 6: the rest of the tabs, part 1: Roster, Retainers and PCs.** Three more pages, sorted and filtered like
+  Subs, read every minute while shown (app 1.8.0's views, from its test.8):
+  - **Roster** (Fleet): every character with its Free Company, house, gil, ceruleum and repair kits (red below the
+    low-supply warnings), retainers and subs, when it last synced and which setup syncs it; "not synced" beside one
+    the plugin no longer syncs. The sidebar says how many aren't synced.
+  - **Retainers** (Fleet): every retainer with its owner, class and level, gil, average item level, venture and a
+    live countdown (Venture Complete in green, Idle in amber), and its gear target. The sidebar says how many ventures
+    are done.
+  - **PCs** (System): every setup of the plugin with its version (amber when older than another PC's), last sync,
+    characters, which plugins it found and what it couldn't see (hover); then each setup's last "Check what I can
+    see". The sidebar counts setups where AutoRetainer wasn't running.
+  - Class, venture and item names and item levels come from the game's own files, so they're right on patch day.
+  - These pages only show for now: reordering or removing characters, setting retainers' gear targets and removing a
+    PC stay in the app.
+  - `/xivfleet roster`, `/xivfleet retainers` and `/xivfleet pcs` open them.
 
 ## 1.0.3 - 2026-11-05
 

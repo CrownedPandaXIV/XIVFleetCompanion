@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace XIVFleetCompanion.Windows;
 
-public class MainWindow : Window, IDisposable
+public partial class MainWindow : Window, IDisposable
 {
     private readonly string submarineImagePath;
     private readonly Plugin plugin;
@@ -37,7 +37,7 @@ public class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Check, SpeedTest, Status, Settings }
+    public enum Tab { Summary, Subs, Supplies, Roster, Retainers, Pcs, Check, SpeedTest, Status, Settings }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -113,6 +113,9 @@ public class MainWindow : Window, IDisposable
             case Tab.Summary: DrawSummary(); break;
             case Tab.Subs: DrawSubs(); break;
             case Tab.Supplies: DrawSupplies(); break;
+            case Tab.Roster: DrawRoster(); break;
+            case Tab.Retainers: DrawRetainers(); break;
+            case Tab.Pcs: DrawPcs(); break;
             case Tab.Check: plugin.CheckPage.DrawPage(); break;
             case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
             case Tab.Status: DrawStatus(); break;
@@ -157,6 +160,9 @@ public class MainWindow : Window, IDisposable
         var low = alerts?.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count() ?? 0;
         var attention = back + (alerts?.Count ?? 0);
         var statusProblem = plugin.SyncProblem != null || (plugin.AutoRetainer != null && !SafeReady());
+        var notSynced = alerts?.Count(a => a.Kind == "not_synced") ?? 0;
+        var venturesDone = reader.Summary.Data?.VenturesDone ?? 0;
+        var setupsToCheck = alerts?.Count(a => a.Kind == "autoretainer") ?? 0;
 
         foreach (var group in Groups)
         {
@@ -179,12 +185,18 @@ public class MainWindow : Window, IDisposable
                         attention > 0 ? $"{attention} thing{(attention == 1 ? "" : "s")} need{(attention == 1 ? "s" : "")} attention" : "Nothing needs you");
                     Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
                     Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
+                    Entry(Tab.Roster, FontAwesomeIcon.Users, "Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
+                        notSynced > 0 ? $"{notSynced} character{(notSynced == 1 ? "" : "s")} no longer synced" : null);
+                    Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
+                        venturesDone > 0 ? $"{venturesDone} venture{(venturesDone == 1 ? "" : "s")} done" : null);
                     break;
                 case "Tools":
                     Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);
                     Entry(Tab.SpeedTest, FontAwesomeIcon.Stopwatch, "Speed test", folded, null, p.Dim, null);
                     break;
                 case "System":
+                    Entry(Tab.Pcs, FontAwesomeIcon.Desktop, "PCs", folded, setupsToCheck > 0 ? setupsToCheck.ToString() : null, p.Warn,
+                        setupsToCheck > 0 ? $"{setupsToCheck} setup{(setupsToCheck == 1 ? "" : "s")} without AutoRetainer running" : null);
                     Entry(Tab.Status, FontAwesomeIcon.Plug, "Status", folded, statusProblem ? "!" : null, p.Warn, statusProblem ? "Something needs a look" : null);
                     Entry(Tab.Settings, FontAwesomeIcon.Cog, "Settings", folded, null, p.Dim, null);
                     break;

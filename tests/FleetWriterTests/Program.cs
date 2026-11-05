@@ -183,9 +183,59 @@ internal static class Program
         Check(read.Count == 1 && read[0] == new AlertRow("danger", "house", "Cute Kittehs!", "not entered"), "info bar: what needs attention is read: " + string.Join(" | ", read));
         await Exec(conn, "DROP VIEW fleet_alerts_view");
 
+        // 2.x, the rest of the tabs: the Roster, Retainers and PCs.
+        await Exec(conn, @"
+            CREATE VIEW fleet_roster_view AS SELECT * FROM (VALUES
+              (1::numeric, 'Aki'::text, 'Maduin'::text, 'A'::text, 2::int, 4000000000::bigint, 50::int, 5::int, 10::int, 4::int, now(),
+               'Cute Kittehs!'::text, 52000::int, 'Mist W12 P30'::text, 'DESKTOP-1'::text, 'A'::text, now(), 4::int, NULL::int, true, true),
+              (2::numeric, 'Bex', 'Maduin', NULL, NULL, 0, NULL, NULL, 0, 0, now(), NULL, NULL, NULL, NULL, NULL, NULL, 0, 125, false, false))
+              AS t(cid, name, world, account_label, sort_index, gil, ceruleum, repair_kits, retainer_count, submarine_count, last_synced_at,
+                   fc_name, fc_points, house, login_pc, login_label, logged_in_at, subs_built, behind_minutes, low_ceruleum, low_repair_kits);
+            CREATE VIEW fleet_retainers_view AS SELECT * FROM (VALUES
+              (10::numeric, 1::numeric, 'Aki'::text, 'Maduin'::text, 'A'::text, 2::int, 'Seen'::text, 18::int, 100::int, 5000::bigint, true, 395::int, 1800000000::bigint, 0::int, 'ilvl'::text, 690::int, true, true),
+              (11::numeric, 99, NULL, NULL, NULL, NULL, 'Orphan', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, false, false))
+              AS t(retainer_id, owner_cid, owner_name, world, account_label, sort_index, retainer_name, job, level, gil, has_venture, venture_id, venture_ends_at,
+                   hire_order_index, target_mode, target_value, only_crafted, items_seen);
+            CREATE VIEW fleet_retainer_gear_view AS SELECT * FROM (VALUES (10::numeric, 40000::int), (10::numeric, 40001::int)) AS t(retainer_id, item_id);
+            CREATE VIEW fleet_pcs_view AS SELECT * FROM (VALUES
+              ('DESKTOP-1'::text, 'A'::text, '2.0.0.9'::text, now(), true, true, false, true, true, 12::int, 2::int, 3::int, E'Aki: no FC chest\nBex: no retainers'::text, 'All good'::text, 0::int, now()),
+              ('LAPTOP', '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', NULL, NULL, NULL))
+              AS t(pc_name, account_label, plugin_version, last_sync_at, autoretainer_ready, allagantools_ready, fctracker_found, submarinetracker_found,
+                   venture_stats_found, characters_synced, characters_left_out, characters_elsewhere, problems, check_text, check_to_fix, check_at);");
+        var roster = await FleetReader.ReadRoster(conn);
+        Check(roster.Count == 2 && roster[0].Character == "Aki" && roster[0].Gil == 4000000000 && roster[0].House == "Mist W12 P30" && roster[0].FcPoints == 52000
+              && roster[0].LowCeruleum && roster[0].BehindMinutes == null && roster[0].LoginPc == "DESKTOP-1"
+              && roster[1].Account == "" && roster[1].Ceruleum == null && roster[1].FcName == null && roster[1].BehindMinutes == 125 && !roster[1].LowRepairKits,
+            "rest of the tabs: the roster read, nulls kept as unknown: " + string.Join(" | ", roster));
+        var retainers = await FleetReader.ReadRetainers(conn);
+        var seen = retainers.Retainers[0];
+        Check(retainers.Retainers.Count == 2 && seen.Name == "Seen" && seen.Job == 18 && seen.VentureId == 395 && seen.VentureEndsAt == 1800000000
+              && seen.TargetMode == "ilvl" && seen.TargetValue == 690 && seen.OnlyCrafted && seen.ItemsSeen
+              && retainers.Retainers[1].Owner == "" && retainers.Retainers[1].Gil == null && !retainers.Retainers[1].HasVenture && retainers.Retainers[1].Level == null
+              && retainers.Gear.Count == 1 && retainers.Gear[10].SequenceEqual(new[] { 40000, 40001 }),
+            "rest of the tabs: the retainers and what they wear read: " + string.Join(" | ", retainers.Retainers));
+        var pcs = await FleetReader.ReadPcs(conn);
+        Check(pcs.Count == 2 && pcs[0].Pc == "LAPTOP" && pcs[0].Problems.Count == 0 && pcs[0].AutoRetainer == null
+              && pcs[1].Problems.SequenceEqual(new[] { "Aki: no FC chest", "Bex: no retainers" }) && pcs[1].FcTracker == false && pcs[1].Elsewhere == 3,
+            "rest of the tabs: the PCs read, what each couldn't see one per line: " + string.Join(" | ", pcs.Select(p => $"{p.Pc} {p.Problems.Count}")));
+        Check(FleetReader.VentureStatus(false, 0, 1000) == "Idle" && FleetReader.VentureStatus(true, 0, 1000) == "Idle"
+              && FleetReader.VentureStatus(true, 1000, 1000) == "Venture Complete" && FleetReader.VentureStatus(true, 1000 + 3600, 1000) == "1:00:00",
+            "rest of the tabs: a retainer's status reads as the app's Retainers tab (Idle, Venture Complete or the time left)");
+        var levels = new Dictionary<int, int?> { [1] = 690, [2] = 700, [3] = null };
+        Check(FleetReader.AverageItemLevel(new[] { 1, 2, 3 }, id => levels[id]) == 695 && FleetReader.AverageItemLevel(new[] { 3 }, id => levels[id]) == null
+              && FleetReader.AverageItemLevel(null, id => 1) == null,
+            "rest of the tabs: the average item level leaves out items the game doesn't know, as the app does");
+        Check(FleetReader.SyncedBy("DESKTOP-1", "A") == "A on DESKTOP-1" && FleetReader.SyncedBy("LAPTOP", "") == "(no label) on LAPTOP" && FleetReader.SyncedBy(null, null) == "—",
+            "rest of the tabs: Synced by reads as the app's Roster");
+        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another setup)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
+            "rest of the tabs: a setup's characters read as the app's PCs tab");
+        Check(FleetReader.CompareVersions("2.0.0.9", "2.0.0.10") < 0 && FleetReader.CompareVersions("2.0.0", "2.0.0.0") == 0 && FleetReader.CompareVersions(null, "0.1") < 0,
+            "rest of the tabs: plugin versions compare part by part");
+        await Exec(conn, "DROP VIEW fleet_roster_view, fleet_retainers_view, fleet_retainer_gear_view, fleet_pcs_view");
+
         var reader = new FleetReader(() => null);
         reader.ReadIfDue(everything: true);
-        Check(reader.Subs.Error != null && reader.Subs.Error.Contains("isn't set up") && !reader.Busy, "fleet views: no database set up says so, and reads nothing");
+        Check(reader.Subs.Error != null && reader.Subs.Error.Contains("isn't set up") && reader.Roster.Error == reader.Subs.Error && !reader.Busy, "fleet views: no database set up says so, and reads nothing");
         await Exec(conn, "DROP VIEW fleet_subs_view, fleet_supplies_view, fleet_summary_view");
     }
 
