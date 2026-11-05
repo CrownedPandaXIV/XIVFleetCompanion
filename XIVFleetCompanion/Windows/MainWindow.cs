@@ -364,7 +364,7 @@ public class MainWindow : Window, IDisposable
         if (subsSoonestFirst) rows = rows.OrderBy(x => x.ReturnTime <= 0 ? long.MaxValue : x.ReturnTime);
         var list = rows.ToList();
 
-        using var table = ImRaii.Table("##subs", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp);
+        using var table = ImRaii.Table("##subs", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable);
         if (!table) return;
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Character");
@@ -412,7 +412,7 @@ public class MainWindow : Window, IDisposable
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
         if (supplies == null) return;
 
-        using var table = ImRaii.Table("##supplies", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp);
+        using var table = ImRaii.Table("##supplies", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable);
         if (!table) return;
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Character");

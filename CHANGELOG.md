@@ -26,6 +26,8 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
     days) and how many to buy, as in the app.
   - **Status** is the old main window (connections, Check what I can see, the speed test); **Settings** the old
     settings window.
+  - Drag a column's edge in Subs or Supplies to make it wider; the columns still stretch with the window, and the game
+    remembers the widths.
   - The numbers come from the app's views in the database (app 1.8.0 or later), read in the background while the
     window is open: subs every 30 seconds, supplies and the summary every 5 minutes, or on **Refresh**.
 
