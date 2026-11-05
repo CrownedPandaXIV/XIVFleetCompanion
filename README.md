@@ -143,6 +143,11 @@ GitHub then tags the release, builds the plugin and publishes it to the plugin l
 It also keeps that page's text the same as `.github/releases-readme.md`. Both need the `RELEASES_TOKEN` secret: a
 token that can write to that repository.
 
+**A test build first:** push the branch to `testing` (`git push origin dev:testing --force`). GitHub builds it as
+`<version>.<run>` (1.0.2.7) and adds it to `repo.json` as the plugin's testing version, so only players who opted in to
+its testing builds in Dalamud get it (`.github/workflows/test-release.yml`). The next normal release of that version is
+numbered above the last test build, so they get that too. `tests/scripts/release-scripts.sh` checks the scripts.
+
 Version numbers follow [Semantic Versioning](https://semver.org):
 
 - **0.1.0 → 0.1.1** for fixes,

@@ -1,0 +1,47 @@
+name: Test release
+
+# A test build of the plugin, for trying before everyone gets it: pushing to the testing branch builds it as
+# <version>.<run number> (1.0.2.7 for 1.0.2) and offers it in repo.json as the plugin's testing version. Only
+# players who opted in to the plugin's testing builds in Dalamud get it; everyone else stays on the normal version.
+# The next normal release of that version (release.yml) is numbered above the last test build, so testers get it too.
+#
+# Needs the RELEASES_TOKEN secret, as release.yml does. Without it nothing is published (the step says so).
+on:
+  push:
+    branches: [ testing ]
+
+permissions:
+  contents: write
+
+jobs:
+  plugin:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Download Dalamud
+      run: |
+        Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+        Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+    - name: Build and publish the test build
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      run: |
+        if [ -z "$RELEASES_TOKEN" ]; then echo "No RELEASES_TOKEN secret: the test build is not published."; exit 0; fi
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        build="${version}.${GITHUB_RUN_NUMBER}"
+        echo "Test build: ${build}"
+        dotnet build --configuration Release -p:Version="${build}"
+        bash .github/scripts/publish-testing.sh "${build}"

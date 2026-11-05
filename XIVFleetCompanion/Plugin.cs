@@ -923,6 +923,7 @@ public sealed class Plugin : IDalamudPlugin
             CharactersLeftOut = leftOut,
             Problems = problems,
         };
-        if (!await DetailsWriter.WritePcStatusAsync(conn, status)) DetailsTablesMissing();
+        if (!await DetailsWriter.WritePcStatusAsync(conn, status)) { DetailsTablesMissing(); return; }
+        await DetailsWriter.WriteCharactersElsewhereAsync(conn, status.PcName, status.AccountLabel, SyncedElsewhere);
     }
 }

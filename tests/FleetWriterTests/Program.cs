@@ -695,6 +695,11 @@ internal static class Program
         Check(await DetailsWriter.WritePcStatusAsync(conn, pc)
               && Show(await Rows(conn, "SELECT plugin_version, db_user = current_user FROM companion_pc_status")) == "0.14.0,True",
             "with database update 10, the status also says which login this plugin uses (without it, the rest is written as before)");
+        await DetailsWriter.WriteCharactersElsewhereAsync(conn, pc.PcName, pc.AccountLabel, 3);
+        await Exec(conn, "ALTER TABLE companion_pc_status ADD COLUMN characters_elsewhere int");
+        await DetailsWriter.WriteCharactersElsewhereAsync(conn, pc.PcName, pc.AccountLabel, 2);
+        Check(Show(await Rows(conn, "SELECT characters_elsewhere FROM companion_pc_status")) == "2",
+            "with database update 12, it says how many characters it left to another setup (without it, nothing fails)");
 
         // Moving the database to another PC (database update 10): the note the app leaves, and what the plugin does.
         Check(await DatabaseMove.ReadAsync(conn) == null && DatabaseMove.Decide(null) == DatabaseMove.Next.Sync,

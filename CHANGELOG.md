@@ -16,6 +16,10 @@ as before.
   Changing a setup's account label takes its characters along. The plugin's window says how many characters it is
   leaving to another setup.
 
+- **Test builds.** New versions of the plugin can now be tried before everyone else gets them: players who opt in to
+  the plugin's testing builds in Dalamud get them, and everyone else stays on the normal version. Each normal release
+  is numbered above the last test build, so testers get it too. The download page says how to opt in.
+- **The app's PCs tab says how many characters each setup leaves to another one** (with app 1.6.0).
 - **A reminder to set an account label.** While a setup's Account Label is blank, the plugin's window and its
   settings say to give it one (for example, the account's name). Without one, the app can't tell your accounts
   apart, setups on one PC share a row on its PCs tab, and it can't spot two setups syncing the same character.
