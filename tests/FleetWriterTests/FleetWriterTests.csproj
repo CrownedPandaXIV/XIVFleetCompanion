@@ -18,6 +18,7 @@
     <Compile Include="..\..\XIVFleetCompanion\VentureStatsReader.cs" Link="VentureStatsReader.cs" />
     <Compile Include="..\..\XIVFleetCompanion\DatabaseMove.cs" Link="DatabaseMove.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SyncFailure.cs" Link="SyncFailure.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\SpeedTest.cs" Link="SpeedTest.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />

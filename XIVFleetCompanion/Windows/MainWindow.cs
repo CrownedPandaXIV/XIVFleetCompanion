@@ -91,6 +91,12 @@ public class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, Allagan Tools and FC Tracker have for it, without writing anything (also /xivfleet check).");
+        if (ImGui.Button("Speed test (2.0)"))
+        {
+            plugin.OpenSpeedTest();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Times reading from the database what the 2.0 in-game windows will need, without changing anything (also /xivfleet speedtest).");
 
         ImGui.Spacing();
 

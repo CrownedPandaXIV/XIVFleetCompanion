@@ -3,6 +3,16 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.0.0 - unreleased
+
+In progress: the fleet inside the game. Built in stages, each tried as a test build first.
+
+- **Stage 1: speed test.** Main window → **Speed test (2.0)** (or `/xivfleet speedtest`) times reading from the
+  database what the in-game Summary, Subs and Supplies windows will need: connecting, characters, subs, retainers,
+  ceruleum and repair kits in FC chests, their use over the last 14 days, and the PCs. Three rounds, with the first,
+  best and worst time of each, and the longest game frame meanwhile to show it doesn't stutter. It runs in the
+  background, only reads, and **Copy results** copies it all to share.
+
 ## 1.0.3 - 2026-11-05
 
 Goes with app 1.7.0, which removes the Discord alerts.

@@ -105,6 +105,7 @@ internal static class Program
         try
         {
             await RunChecks(conn);
+            await SpeedTestChecks(conn, new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = Schema }.ConnectionString);
         }
         finally
         {
@@ -114,6 +115,42 @@ internal static class Program
 
         Console.WriteLine(failures == 0 ? $"ALL {passes} CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
         return failures == 0 ? 0 : 1;
+    }
+
+    // 2.0 stage 1: the speed test reads what the in-game windows will need and times it. Every query runs (or, for a
+    // table this scratch schema lacks, says why), reads every row, and the result reads plainly.
+    private static async Task SpeedTestChecks(NpgsqlConnection conn, string connectionString)
+    {
+        await Exec(conn, "DROP TABLE IF EXISTS companion_pc_status");
+        var results = await SpeedTest.RunAsync(connectionString, rounds: 2);
+        Check(results.Select(r => r.Name).SequenceEqual(new[] { SpeedTest.ConnectName }.Concat(SpeedTest.Queries.Select(q => q.Name)).Append(SpeedTest.TotalName)),
+            "speed test: the connection, each query and the total, in order: " + string.Join(", ", results.Select(r => r.Name)));
+        foreach (var (name, sql) in SpeedTest.Queries)
+        {
+            var r = results.Single(x => x.Name == name);
+            if (name == "PCs")
+            {
+                Check(r.Error != null && r.Error.Contains("companion_pc_status"), $"speed test: a missing table is reported, not thrown: {r.Error}");
+                continue;
+            }
+            var expected = (await Rows(conn, sql)).Count;
+            Check(r.Error == null && r.Rows == expected && r.FirstMs > 0 && r.BestMs <= r.WorstMs,
+                $"speed test: {name} reads all {expected} rows and is timed ({r.Rows} rows, {r.FirstMs:0.0}/{r.BestMs:0.0}/{r.WorstMs:0.0} ms, {r.Error ?? "no error"})");
+        }
+        var characters = results.Single(x => x.Name == "Characters");
+        Check(characters.Rows > 0, $"speed test: there are characters to read ({characters.Rows})");
+        var text = SpeedTest.ToText(new[]
+        {
+            new SpeedResult(SpeedTest.ConnectName, 0, 41.26, 0.31, 41.26, null),
+            new SpeedResult("Subs", 1, 12.4, 3.25, 12.4, null),
+            new SpeedResult("PCs", 0, 0, 0, 0, "relation \"companion_pc_status\" does not exist"),
+        }, "v2.0.0.1, Remote database", 17.04, 16.9);
+        Check(text == "XIV Fleet Companion v2.0.0.1, Remote database: speed test (3 rounds; first / best / worst)\n" +
+                      "Connect: 41 ms / 0.3 ms / 41 ms\n" +
+                      "Subs (1 row): 12 ms / 3.3 ms / 12 ms\n" +
+                      "PCs: failed (relation \"companion_pc_status\" does not exist)\n" +
+                      "Longest game frame while testing: 17 ms (before: 17 ms)",
+            "speed test: the results read plainly: " + text.Replace("\n", " | "));
     }
 
     private static async Task RunChecks(NpgsqlConnection conn)

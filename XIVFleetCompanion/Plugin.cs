@@ -57,6 +57,7 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
     private CheckWindow CheckWindow { get; init; }
+    private SpeedTestWindow SpeedTestWindow { get; init; }
 
     public Plugin()
     {
@@ -85,14 +86,16 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckWindow = new CheckWindow(this);
+        SpeedTestWindow = new SpeedTestWindow(this);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
         WindowSystem.AddWindow(CheckWindow);
+        WindowSystem.AddWindow(SpeedTestWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character."
+            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character. /xivfleet speedtest times reading from the database for 2.0."
         });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
@@ -114,6 +117,7 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow.Dispose();
         MainWindow.Dispose();
         CheckWindow.Dispose();
+        SpeedTestWindow.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
 
@@ -128,11 +132,14 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (args.Trim().Equals("check", StringComparison.OrdinalIgnoreCase))
             OpenCheck();
+        else if (args.Trim().Equals("speedtest", StringComparison.OrdinalIgnoreCase))
+            OpenSpeedTest();
         else
             MainWindow.Toggle();
     }
 
     public void OpenCheck() => CheckWindow.OpenAndRun();
+    public void OpenSpeedTest() => SpeedTestWindow.OpenAndRun();
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
