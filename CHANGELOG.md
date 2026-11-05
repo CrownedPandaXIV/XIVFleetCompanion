@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 1.0.2 - unreleased
+
+No database change. Works with any app version.
+
+- **A reminder to set an account label.** While a setup's Account Label is blank, the plugin's window and its
+  settings say to give it one (for example, the account's name). Without one, the app can't tell your accounts
+  apart, setups on one PC share a row on its PCs tab, and it can't spot two setups syncing the same character.
+  App 1.6.0 points out characters and setups without a label too.
+
 ## 1.0.1 - 2026-10-19
 
 No database change. Works with any app version.

@@ -174,6 +174,11 @@ public class ConfigWindow : Window, IDisposable
             configuration.AccountLabel = accountLabel;
             configuration.Save();
         }
+        if (string.IsNullOrWhiteSpace(configuration.AccountLabel))
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.75f, 0.3f, 1f)))
+                ImGui.TextWrapped(Configuration.NoAccountLabelText);
+        }
 
         var syncInterval = configuration.SyncIntervalMinutes;
         if (ImGui.InputInt("Sync Interval (minutes)", ref syncInterval))

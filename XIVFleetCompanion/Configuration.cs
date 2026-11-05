@@ -18,6 +18,9 @@ public class Configuration : IPluginConfiguration
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";
     public string AccountLabel { get; set; } = "";
+    // Shown in the plugin's window and settings while AccountLabel is blank: the app tells accounts apart by it.
+    public const string NoAccountLabelText =
+        "Give this setup an Account Label (for example, the account's name) so the app can tell your accounts apart and spot two setups syncing the same character.";
 
     // Which characters are synced (see CharacterChoice): every one except SkippedCharacters, or with
     // SyncOnlyChosen only ChosenCharacters.

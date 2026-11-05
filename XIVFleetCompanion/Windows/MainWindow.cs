@@ -120,6 +120,12 @@ public class MainWindow : Window, IDisposable
                     ImGui.TextWrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
             }
 
+            if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel))
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.75f, 0.3f, 1f)))
+                    ImGui.TextWrapped(Configuration.NoAccountLabelText);
+            }
+
             ImGui.Spacing();
             ImGui.Text("Connections:");
 
