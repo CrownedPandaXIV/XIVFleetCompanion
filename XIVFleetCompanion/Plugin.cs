@@ -54,7 +54,6 @@ public sealed class Plugin : IDalamudPlugin
     public int SyncedElsewhere { get; private set; } = 0;
 
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
-    private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
     private CheckWindow CheckWindow { get; init; }
     private SpeedTestWindow SpeedTestWindow { get; init; }
@@ -83,19 +82,17 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
-        ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckWindow = new CheckWindow(this);
         SpeedTestWindow = new SpeedTestWindow(this);
 
-        WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
         WindowSystem.AddWindow(CheckWindow);
         WindowSystem.AddWindow(SpeedTestWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character. /xivfleet speedtest times reading from the database for 2.0."
+            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, status or settings to open that tab; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
@@ -114,7 +111,6 @@ public sealed class Plugin : IDalamudPlugin
         
         WindowSystem.RemoveAllWindows();
 
-        ConfigWindow.Dispose();
         MainWindow.Dispose();
         CheckWindow.Dispose();
         SpeedTestWindow.Dispose();
@@ -130,10 +126,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        if (args.Trim().Equals("check", StringComparison.OrdinalIgnoreCase))
+        var word = args.Trim();
+        if (word.Equals("check", StringComparison.OrdinalIgnoreCase))
             OpenCheck();
-        else if (args.Trim().Equals("speedtest", StringComparison.OrdinalIgnoreCase))
+        else if (word.Equals("speedtest", StringComparison.OrdinalIgnoreCase))
             OpenSpeedTest();
+        else if (Enum.TryParse<MainWindow.Tab>(word, ignoreCase: true, out var tab) && word.Length > 0 && !char.IsDigit(word[0]))
+            MainWindow.OpenAt(tab);
         else
             MainWindow.Toggle();
     }
@@ -141,7 +140,8 @@ public sealed class Plugin : IDalamudPlugin
     public void OpenCheck() => CheckWindow.OpenAndRun();
     public void OpenSpeedTest() => SpeedTestWindow.OpenAndRun();
 
-    public void ToggleConfigUi() => ConfigWindow.Toggle();
+    // Dalamud's settings button opens the main window at its Settings tab (2.0: one window for everything).
+    public void ToggleConfigUi() => MainWindow.OpenAt(MainWindow.Tab.Settings);
     public void ToggleMainUi() => MainWindow.Toggle();
 
     // AutoRetainer logs a character out once it has finished with it: sync that news soon instead of

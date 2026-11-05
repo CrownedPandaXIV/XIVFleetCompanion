@@ -15,6 +15,19 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - **Stage 2: the database views.** The speed test also times reading the ready-made views app 1.8.0 adds to the
   database (subs, supplies and the summary), which work things out in the database instead of in the plugin. With an
   older app they show as failed.
+- **Stage 3: one main window with tabs.** `/xivfleet` (or the plugin's button in Dalamud) opens one window with
+  **Summary**, **Subs**, **Supplies**, **Status** and **Settings** tabs; `/xivfleet subs` (or summary, supplies,
+  status, settings) opens it at that tab, and Dalamud's settings button opens the Settings tab. Look only for now.
+  - **Summary:** subs back and waiting, out (and when the next is back) and in port; ventures done and retainers
+    without one; characters below the low-supply warnings and the first to run out.
+  - **Subs:** every built sub with its character, rank, build and a live countdown, grouped by character or soonest
+    back first, with a filter.
+  - **Supplies:** each character's ceruleum and repair kits, use per day, days left (amber under a week, red under three
+    days) and how many to buy, as in the app.
+  - **Status** is the old main window (connections, Check what I can see, the speed test); **Settings** the old
+    settings window.
+  - The numbers come from the app's views in the database (app 1.8.0 or later), read in the background while the
+    window is open: subs every 30 seconds, supplies and the summary every 5 minutes, or on **Refresh**.
 
 ## 1.0.3 - 2026-11-05
 

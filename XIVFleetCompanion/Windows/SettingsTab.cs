@@ -10,7 +10,11 @@ using Dalamud.Interface.Windowing;
 
 namespace XIVFleetCompanion.Windows;
 
-public class ConfigWindow : Window, IDisposable
+/// <summary>
+/// The Settings tab of the main window (until 2.0 its own window, which Dalamud's settings button now opens the main
+/// window at).
+/// </summary>
+public class SettingsTab : IDisposable
 {
     private readonly Configuration configuration;
     private readonly Plugin plugin;
@@ -41,21 +45,16 @@ public class ConfigWindow : Window, IDisposable
     private string pgSaveResult = "";
     private DateTime clearArmedUntil = DateTime.MinValue;
 
-    // "###" keeps the window's ImGui ID fixed while the title shows the version.
-    public ConfigWindow(Plugin plugin) : base($"XIV Fleet Companion Settings v{Plugin.VersionText}###XIVFleetCompanionSettings")
+    public SettingsTab(Plugin plugin)
     {
-        Flags = ImGuiWindowFlags.NoCollapse;
-
-        Size = new Vector2(320, 340);
-        SizeCondition = ImGuiCond.FirstUseEver;
-
         configuration = plugin.Configuration;
         this.plugin = plugin;
     }
 
     public void Dispose() { }
 
-    public override void OnOpen()
+    /// <summary>When the tab is shown: the saved connection is read again and the character list re-read.</summary>
+    public void OnShown()
     {
         LoadSavedCredential();
         knownCharacters = null;
@@ -158,7 +157,7 @@ public class ConfigWindow : Window, IDisposable
         clearArmedUntil = DateTime.MinValue;
     }
 
-    public override void Draw()
+    public void Draw()
     {
         // Can't ref a property, so use a local copy
         var enabled = configuration.Enabled;

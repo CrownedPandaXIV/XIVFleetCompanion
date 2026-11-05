@@ -106,6 +106,7 @@ internal static class Program
         {
             await RunChecks(conn);
             await SpeedTestChecks(conn, new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = Schema }.ConnectionString);
+            await FleetReaderChecks(conn);
         }
         finally
         {
@@ -115,6 +116,55 @@ internal static class Program
 
         Console.WriteLine(failures == 0 ? $"ALL {passes} CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
         return failures == 0 ? 0 : 1;
+    }
+
+    // 2.0 stage 3: the main window's tabs read the app's fleet views (db/views.sql in the app). Stand-ins with the same
+    // columns and types are made here; the views' own numbers are checked in the app's tests.
+    private static async Task FleetReaderChecks(NpgsqlConnection conn)
+    {
+        var missing = false;
+        try { await FleetReader.ReadSubs(conn); }
+        catch (PostgresException ex) { missing = ex.SqlState == "42P01"; }
+        Check(missing, "fleet views: without them the read fails with 'does not exist' (42P01), which the window explains");
+
+        await Exec(conn, @"
+            CREATE VIEW fleet_subs_view AS SELECT * FROM (VALUES
+              (1::numeric, 'Aki'::text, 'Maduin'::text, 'Main'::text, 1::numeric, 2::int, 'Back'::text, 2::int, 90::int, 'S+-U+-C-U'::text, 1700000000::bigint, 'returned'::text, 50::bigint, 200::bigint, now()::timestamp),
+              (1::numeric, 'Aki', 'Maduin', 'Main', 1::numeric, 2::int, 'Port', 1::int, 10::int, 'S-S-S-S', 0::bigint, 'in_port', NULL::bigint, NULL::bigint, now()::timestamp))
+              AS t(cid, character_name, world, account_label, fc_id, sort_index, sub_name, slot, rank, build, return_time, status, current_exp, next_level_exp, updated_at);
+            CREATE VIEW fleet_supplies_view AS SELECT * FROM (VALUES
+              (1::numeric, 'Aki'::text, 'Maduin'::text, NULL::text, 1::numeric, NULL::int, now(), 300::int, 100.5::float8, 2.98::float8, 1107::int,
+               40::int, NULL::float8, NULL::float8, 0::int, 14::int, 14::int))
+              AS t(cid, name, world, account_label, fc_id, sort_index, last_synced_at, ceruleum, ceruleum_per_day, ceruleum_days_left, ceruleum_restock,
+                   repair_kits, repair_kits_per_day, repair_kits_days_left, repair_kits_restock, window_days, target_days);
+            CREATE VIEW fleet_summary_view AS SELECT 4::int AS subs, 1::int AS subs_returned, 1::int AS subs_in_port, 2::int AS subs_out,
+              1800000000::bigint AS next_return_time, 160::int AS retainers, 3::int AS ventures_done, 2::int AS retainers_idle,
+              1::int AS low_ceruleum, 0::int AS low_repair_kits, 2.98::float8 AS soonest_runs_out_days;");
+        var subs = await FleetReader.ReadSubs(conn);
+        Check(subs.Count == 2 && subs[0].SubName == "Port" && subs[0].Slot == 1 && subs[0].NextLevelExp == 0
+              && subs[1] == new SubRow("Aki", "Maduin", "Main", 2, "Back", 2, 90, "S+-U+-C-U", 1700000000, 50, 200),
+            "fleet views: subs read in slot order, with nulls as 0: " + string.Join(" | ", subs));
+        var supplies = await FleetReader.ReadSupplies(conn);
+        var s = supplies.Single();
+        Check(s.Character == "Aki" && s.Account == "" && s.SortIndex == int.MaxValue && s.Ceruleum == 300 && s.CeruleumPerDay == 100.5
+              && s.CeruleumDaysLeft == 2.98 && s.CeruleumRestock == 1107 && s.RepairKitsPerDay == null && s.RepairKitsDaysLeft == null
+              && s.WindowDays == 14 && s.LastSynced.HasValue,
+            "fleet views: supplies read, not enough history kept as null: " + s);
+        var summary = await FleetReader.ReadSummary(conn);
+        Check(summary == new SummaryRow(160, 3, 2, 1, 0, 2.98), "fleet views: the summary read: " + summary);
+
+        Check(FleetReader.SubStatus(0, 1000) == "In port" && FleetReader.SubStatus(999, 1000) == "Back" && FleetReader.SubStatus(1000, 1000) == "Back"
+              && FleetReader.SubStatus(1000 + 59, 1000) == "0:59" && FleetReader.SubStatus(1000 + 3 * 3600 + 5 * 60 + 9, 1000) == "3:05:09"
+              && FleetReader.SubStatus(1000 + 2 * 86400 + 4 * 3600, 1000) == "2d 4:00:00",
+            "fleet views: sub status reads In port, Back, or the time until it's back");
+        var now = new DateTime(2026, 11, 5, 12, 0, 0);
+        Check(FleetReader.Ago(now.AddSeconds(-12), now) == "12s ago" && FleetReader.Ago(now.AddMinutes(-4), now) == "4m ago" && FleetReader.Ago(now.AddHours(-2), now) == "2h ago",
+            "fleet views: how long ago it was read");
+
+        var reader = new FleetReader(() => null);
+        reader.ReadIfDue(everything: true);
+        Check(reader.Subs.Error != null && reader.Subs.Error.Contains("isn't set up") && !reader.Busy, "fleet views: no database set up says so, and reads nothing");
+        await Exec(conn, "DROP VIEW fleet_subs_view, fleet_supplies_view, fleet_summary_view");
     }
 
     // 2.0 stage 1: the speed test reads what the in-game windows will need and times it. Every query runs (or, for a
