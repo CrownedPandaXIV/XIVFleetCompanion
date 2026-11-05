@@ -155,6 +155,90 @@ namespace XIVFleetCompanion
             return await cmd.ExecuteNonQueryAsync();
         }
 
+        // Where each character last logged in (database update 12, app 1.6.0). A setup of the plugin is its PC and
+        // account label, as on the app's PCs tab. Only the setup a character last logged in on syncs it, so an old copy
+        // of that character left in another setup's AutoRetainer can't overwrite it. A character no setup has
+        // recorded a login for yet is synced by every setup that has it, as before.
+        public sealed record LoginOwner(string PcName, string AccountLabel);
+
+        // Records logins seen on this setup (cid -> when, in UTC). A row only changes when the login is newer than the
+        // one stored, so the setup that saw the latest login wins. False when the database doesn't have the table yet.
+        public static async Task<bool> RecordLoginsAsync(NpgsqlConnection conn, string pcName, string accountLabel,
+            IReadOnlyCollection<KeyValuePair<ulong, DateTime>> logins)
+        {
+            if (logins.Count == 0) return true;
+            const string sql = @"
+                INSERT INTO companion_character_login (cid, pc_name, account_label, logged_in_at)
+                SELECT t.cid, @pc, @label, t.at
+                FROM unnest(@cid::numeric[], @at::timestamptz[]) AS t(cid, at)
+                ON CONFLICT (cid) DO UPDATE SET
+                    pc_name = EXCLUDED.pc_name,
+                    account_label = EXCLUDED.account_label,
+                    logged_in_at = EXCLUDED.logged_in_at
+                WHERE companion_character_login.logged_in_at < EXCLUDED.logged_in_at";
+            try
+            {
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("pc", pcName);
+                cmd.Parameters.AddWithValue("label", accountLabel);
+                cmd.Parameters.AddWithValue("cid", logins.Select(l => (decimal)l.Key).ToArray());
+                cmd.Parameters.AddWithValue("at", logins.Select(l => DateTime.SpecifyKind(l.Value, DateTimeKind.Utc)).ToArray());
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                return false;
+            }
+        }
+
+        // After this setup's account label is changed, its characters' logins move to the new label, so they keep
+        // syncing. Returns how many moved; 0 when the database doesn't have the table yet.
+        public static async Task<int> RenameLoginSetupAsync(NpgsqlConnection conn, string pcName, string oldLabel, string newLabel)
+        {
+            if (oldLabel == newLabel) return 0;
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    "UPDATE companion_character_login SET account_label = @new WHERE pc_name = @pc AND account_label = @old", conn);
+                cmd.Parameters.AddWithValue("pc", pcName);
+                cmd.Parameters.AddWithValue("old", oldLabel);
+                cmd.Parameters.AddWithValue("new", newLabel);
+                return await cmd.ExecuteNonQueryAsync();
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                return 0;
+            }
+        }
+
+        // The setup each of these characters last logged in on (characters with no login recorded are left out).
+        // Null when the database doesn't have the table yet.
+        public static async Task<Dictionary<ulong, LoginOwner>?> ReadLoginOwnersAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids)
+        {
+            var owners = new Dictionary<ulong, LoginOwner>();
+            if (cids.Count == 0) return owners;
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    "SELECT cid, pc_name, account_label FROM companion_character_login WHERE cid = ANY(@cid::numeric[])", conn);
+                cmd.Parameters.AddWithValue("cid", cids.Select(c => (decimal)c).ToArray());
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    owners[(ulong)reader.GetDecimal(0)] = new LoginOwner(reader.GetString(1), reader.GetString(2));
+                return owners;
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                return null;
+            }
+        }
+
+        // True when the character last logged in on another setup, so this one leaves it alone.
+        public static bool OwnedElsewhere(IReadOnlyDictionary<ulong, LoginOwner>? owners, ulong cid, string pcName, string accountLabel)
+            => owners != null && owners.TryGetValue(cid, out var owner)
+               && !(owner.PcName == pcName && owner.AccountLabel == accountLabel);
+
         // Where one character's items come from: its own bags (Id is the character's cid) or one of its
         // retainers. SeenItems is null when AllaganTools has never seen that source (it answers with
         // nothing at all, not even empty slots, for a retainer that was never opened at a bell), so its

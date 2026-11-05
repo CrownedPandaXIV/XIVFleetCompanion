@@ -474,6 +474,29 @@ internal static class Program
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
 
+        // Where characters last logged in: only the setup a character last logged in on syncs it.
+        Check(await FleetWriter.ReadLoginOwnersAsync(conn, new ulong[] { 1 }) == null
+              && !await FleetWriter.RecordLoginsAsync(conn, "PC1", "Account 1", new[] { KeyValuePair.Create(1UL, DateTime.UtcNow) })
+              && await FleetWriter.RenameLoginSetupAsync(conn, "PC1", "a", "b") == 0,
+            "before the database has the login table, nothing fails and no owners are known");
+        await Exec(conn, @"CREATE TABLE companion_character_login (cid numeric PRIMARY KEY, pc_name text NOT NULL,
+            account_label text NOT NULL, logged_in_at timestamptz NOT NULL)");
+        const ulong berry = 18014498578000101, cal = 18014498578000102, dee = 18014498578000103;
+        var early = new DateTime(2026, 11, 1, 10, 0, 0, DateTimeKind.Utc);
+        await FleetWriter.RecordLoginsAsync(conn, "PC1", "Account R", new[] { KeyValuePair.Create(berry, early.AddHours(2)), KeyValuePair.Create(cal, early) });
+        await FleetWriter.RecordLoginsAsync(conn, "PC1", "Account 2", new[] { KeyValuePair.Create(berry, early.AddHours(1)), KeyValuePair.Create(cal, early.AddHours(3)) });
+        var owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { berry, cal, dee });
+        Check(owners != null && owners.Count == 2 && owners[berry] == new FleetWriter.LoginOwner("PC1", "Account R") && owners[cal] == new FleetWriter.LoginOwner("PC1", "Account 2"),
+            "the latest login wins, whichever setup records it first; a character with no login is not listed");
+        Check(!FleetWriter.OwnedElsewhere(owners, berry, "PC1", "Account R") && FleetWriter.OwnedElsewhere(owners, berry, "PC1", "Account 2")
+              && FleetWriter.OwnedElsewhere(owners, berry, "PC2", "Account R")
+              && !FleetWriter.OwnedElsewhere(owners, dee, "PC1", "Account 2") && !FleetWriter.OwnedElsewhere(null, berry, "PC1", "Account 2"),
+            "a setup leaves alone a character that last logged in on another setup (another label or PC); one with no login, or no table, is synced as before");
+        var moved = await FleetWriter.RenameLoginSetupAsync(conn, "PC1", "Account R", "Account 3");
+        owners = await FleetWriter.ReadLoginOwnersAsync(conn, new[] { berry, cal });
+        Check(moved == 1 && owners![berry] == new FleetWriter.LoginOwner("PC1", "Account 3") && owners[cal].AccountLabel == "Account 2",
+            "a renamed account label takes its setup's characters along");
+
         // Which characters are synced: every one except the unticked, or only the ticked.
         var chosen = new HashSet<ulong>();
         var skipped = new HashSet<ulong>();

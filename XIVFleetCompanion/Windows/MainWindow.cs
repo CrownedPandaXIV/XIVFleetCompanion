@@ -112,6 +112,11 @@ public class MainWindow : Window, IDisposable
                 ? $"Last sync: {plugin.Configuration.LastSyncTimestamp.Value:g}"
                 : "Last sync: never");
 
+            // Characters this setup's AutoRetainer knows that last logged in on another setup (another account).
+            var elsewhere = plugin.SyncedElsewhere;
+            if (elsewhere > 0)
+                ImGui.TextWrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last logged in on another setup, so that setup syncs {(elsewhere == 1 ? "it" : "them")} instead.");
+
             // Why syncing isn't getting through right now (the database PC is off, a wrong password...).
             var problem = plugin.SyncProblem;
             if (problem != null)

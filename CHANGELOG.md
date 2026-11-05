@@ -5,7 +5,16 @@ All notable changes to the plugin are recorded here. Versions follow
 
 ## 1.0.2 - unreleased
 
-No database change. Works with any app version.
+Goes with app 1.6.0, which adds the table this uses to the database by itself. With an older app, the plugin syncs
+as before.
+
+- **Only the setup a character last logged in on syncs it.** Each setup (PC and account label) notes in the database
+  when a character logs in on it. A setup then leaves alone any character that last logged in on another setup, so
+  an old copy of that character left in its AutoRetainer can't overwrite the real one any more. Nobody has to tidy
+  AutoRetainer for this. A character that hasn't logged in anywhere since the update keeps syncing as before, and
+  there's no time limit: after a long break, each character still belongs to the setup it last logged in on.
+  Changing a setup's account label takes its characters along. The plugin's window says how many characters it is
+  leaving to another setup.
 
 - **A reminder to set an account label.** While a setup's Account Label is blank, the plugin's window and its
   settings say to give it one (for example, the account's name). Without one, the app can't tell your accounts

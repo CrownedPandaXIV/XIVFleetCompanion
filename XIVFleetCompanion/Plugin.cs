@@ -44,6 +44,15 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ChangeTracker changes = new(TimeSpan.FromHours(1), DateTime.UtcNow);
     private bool warnedNoCurrentTable = false;
 
+    // Characters seen logging in on this setup (cid -> when, UTC), not yet recorded in the database; and the
+    // character logged in now (0: none). See FleetWriter.RecordLoginsAsync.
+    private readonly Dictionary<ulong, DateTime> pendingLogins = new();
+    private ulong loggedInCid = 0;
+    private string lastElsewhereNames = "";
+
+    // How many characters the last sync left to another setup, because they last logged in there.
+    public int SyncedElsewhere { get; private set; } = 0;
+
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
@@ -138,6 +147,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        NoteLogin();
         if (!Configuration.Enabled) return;
 
         var now = DateTime.UtcNow;
@@ -163,6 +173,66 @@ public sealed class Plugin : IDalamudPlugin
                     syncInProgress = false;
                 }
             });
+        }
+    }
+
+    // Notes each character that logs in on this setup (also the one already logged in when the plugin starts),
+    // recorded in the database at the next sync.
+    private void NoteLogin()
+    {
+        var cid = ClientState.IsLoggedIn ? PlayerState.ContentId : 0;
+        if (cid == loggedInCid) return;
+        loggedInCid = cid;
+        if (cid == 0) return;
+        lock (pendingLogins) pendingLogins[cid] = DateTime.UtcNow;
+    }
+
+    // Records this setup's logins, then keeps only the characters that last logged in here or that no setup
+    // has recorded a login for yet; the rest are left to the setup they last logged in on. Before the database
+    // has the table (app 1.6.0), or if reading it fails, every character is kept, as before.
+    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(NpgsqlConnection conn, List<CharacterRead> characters)
+    {
+        var pcName = Environment.MachineName;
+        var label = Configuration.AccountLabel ?? "";
+        try
+        {
+            // The account label was changed: this setup's logins move to the new one, so its characters keep syncing.
+            var recordedAs = Configuration.LoginsRecordedAs;
+            if (recordedAs != label)
+            {
+                if (recordedAs != null)
+                {
+                    var moved = await FleetWriter.RenameLoginSetupAsync(conn, pcName, recordedAs, label);
+                    if (moved > 0) Log.Information($"Fleet Companion: the account label changed, so {moved} character(s) that last logged in here keep syncing from here.");
+                }
+                Configuration.LoginsRecordedAs = label;
+                Configuration.Save();
+            }
+
+            List<KeyValuePair<ulong, DateTime>> logins;
+            lock (pendingLogins) logins = pendingLogins.ToList();
+            if (await FleetWriter.RecordLoginsAsync(conn, pcName, label, logins))
+            {
+                lock (pendingLogins)
+                    foreach (var login in logins)
+                        if (pendingLogins.TryGetValue(login.Key, out var at) && at == login.Value)
+                            pendingLogins.Remove(login.Key);
+            }
+
+            var owners = await FleetWriter.ReadLoginOwnersAsync(conn, characters.Select(c => c.Snapshot.Cid).ToList());
+            var elsewhere = characters.Where(c => FleetWriter.OwnedElsewhere(owners, c.Snapshot.Cid, pcName, label)).ToList();
+            SyncedElsewhere = elsewhere.Count;
+            var names = string.Join(", ", elsewhere.Select(c => $"{c.Snapshot.Name}@{c.Snapshot.World}").OrderBy(n => n, StringComparer.Ordinal));
+            if (names != lastElsewhereNames && elsewhere.Count > 0)
+                Log.Information($"Fleet Companion: left to another setup, because they last logged in there: {names}.");
+            lastElsewhereNames = names;
+            return elsewhere.Count == 0 ? characters : characters.Except(elsewhere).ToList();
+        }
+        catch (PostgresException ex)
+        {
+            Log.Warning($"Fleet Companion: could not check where characters last logged in, so all of them are synced — {ex.Message}");
+            SyncedElsewhere = 0;
+            return characters;
         }
     }
 
@@ -321,6 +391,9 @@ public sealed class Plugin : IDalamudPlugin
         if (openConnection == null) return;
         NpgsqlConnection conn = openConnection;
         SyncingAgain();
+
+        // Characters that last logged in on another setup are that setup's to sync.
+        characters = await KeepOwnCharactersAsync(conn, characters);
 
         changes.BeginSync(DateTime.UtcNow);
         AskAgainForDetailsTables();
@@ -593,7 +666,8 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var leftOutText = leftOutCount > 0 ? $" ({leftOutCount} left out in settings)" : "";
-        Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
+        if (SyncedElsewhere > 0) leftOutText += $" ({SyncedElsewhere} synced by another setup)";
+        Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount - SyncedElsewhere} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
     }
 
     // The items AllaganTools has for one character, retainer or FC (empty slots left out), or null when
