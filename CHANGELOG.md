@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 1.0.3 - unreleased
+
+Goes with app 1.7.0, which removes the Discord alerts.
+
+- The settings no longer mention the Discord alerts (the tooltip of "Also sync right after a character logs out"), and
+  neither does the download page.
+
 ## 1.0.2 - 2026-11-05
 
 Goes with app 1.6.0, which adds the table this uses to the database by itself. With an older app, the plugin syncs

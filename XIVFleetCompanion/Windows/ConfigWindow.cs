@@ -197,7 +197,7 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app and the Discord alerts see its subs a few seconds later instead of at the next interval.");
+            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app sees its subs a few seconds later instead of at the next interval.");
 
         ImGui.Spacing();
         DrawCharacters();
