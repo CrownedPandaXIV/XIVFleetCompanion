@@ -20,14 +20,15 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   status, settings) opens it at that tab, and Dalamud's settings button opens the Settings tab. Look only for now.
   - **Summary:** subs back and waiting, out (and when the next is back) and in port; ventures done and retainers
     without one; characters below the low-supply warnings and the first to run out.
-  - **Subs:** every built sub with its character, rank, build and a live countdown, grouped by character or soonest
-    back first, with a filter.
+  - **Subs:** every built sub with its character, rank, build and a live countdown, grouped by character, with a
+    filter.
   - **Supplies:** each character's ceruleum and repair kits, use per day, days left (amber under a week, red under three
     days) and how many to buy, as in the app.
   - **Status** is the old main window (connections, Check what I can see, the speed test); **Settings** the old
     settings window.
-  - Drag a column's edge in Subs or Supplies to make it wider; the columns still stretch with the window, and the game
-    remembers the widths.
+  - Click a column's header in Subs or Supplies to sort by it, again to reverse it (Status: soonest back first; rows
+    with nothing to sort by, like a sub in port or a character without enough history, go last). Drag a column's edge
+    to make it wider; the columns still stretch with the window, and the game remembers the widths.
   - The numbers come from the app's views in the database (app 1.8.0 or later), read in the background while the
     window is open: subs every 30 seconds, supplies and the summary every 5 minutes, or on **Refresh**.
 

@@ -42,7 +42,6 @@ public class MainWindow : Window, IDisposable
     private Tab shown = Tab.Summary;
     private Tab? select; // a tab to switch to on the next frame (from a command or Dalamud's settings button)
     private string subsFilter = "";
-    private bool subsSoonestFirst;
 
     // "###" keeps the window's ImGui ID fixed while the title shows the version.
     public MainWindow(Plugin plugin, string submarineImagePath)
@@ -341,30 +340,47 @@ public class MainWindow : Window, IDisposable
         ReadLine(reader.Summary, FleetReader.SuppliesEvery);
     }
 
+    // The column a table is sorted by and which way (clicking a header sorts by it, again reverses it); the first
+    // column, A to Z, until one is clicked. Call after the columns are set up.
+    private static (int Column, bool Ascending) SortedBy()
+    {
+        var specs = ImGui.TableGetSortSpecs();
+        if (specs.SpecsCount < 1) return (0, true);
+        return (specs.Specs.ColumnIndex, specs.Specs.SortDirection != ImGuiSortDirection.Descending);
+    }
+
+    // Sorted by `key`, with the rows that have no value (`missing`) last either way.
+    private static List<T> Sorted<T>(IEnumerable<T> rows, bool ascending, Func<T, IComparable> key, Func<T, bool>? missing = null)
+    {
+        var byMissing = rows.OrderBy(x => missing != null && missing(x));
+        return (ascending ? byMissing.ThenBy(key) : byMissing.ThenByDescending(key)).ToList();
+    }
+
+    private const ImGuiTableFlags TableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
+        | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable;
+
     private void DrawSubs()
     {
         reader.ReadIfDue();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         RefreshButton();
         ImGui.SameLine();
-        ImGui.Checkbox("Soonest back first", ref subsSoonestFirst);
-        ImGui.SameLine();
         ImGui.SetNextItemWidth(180);
         ImGui.InputText("Filter", ref subsFilter, 64);
+        ImGui.SameLine();
+        Colored(Dim, "Click a column to sort by it.");
         ReadLine(reader.Subs, FleetReader.SubsEvery);
 
         var subs = reader.Subs.Data;
         if (subs == null) return;
-        IEnumerable<SubRow> rows = subs;
+        // Each sub with its place in the app's order (account, then the Roster's character order, then slot).
+        var rows = subs.Select((sub, order) => (sub, order));
         if (!string.IsNullOrWhiteSpace(subsFilter))
-            rows = rows.Where(x => x.Character.Contains(subsFilter, StringComparison.OrdinalIgnoreCase)
-                                || x.SubName.Contains(subsFilter, StringComparison.OrdinalIgnoreCase)
-                                || x.Account.Contains(subsFilter, StringComparison.OrdinalIgnoreCase));
-        // Soonest first: back and waiting, then the soonest back, in port last.
-        if (subsSoonestFirst) rows = rows.OrderBy(x => x.ReturnTime <= 0 ? long.MaxValue : x.ReturnTime);
-        var list = rows.ToList();
+            rows = rows.Where(x => x.sub.Character.Contains(subsFilter, StringComparison.OrdinalIgnoreCase)
+                                || x.sub.SubName.Contains(subsFilter, StringComparison.OrdinalIgnoreCase)
+                                || x.sub.Account.Contains(subsFilter, StringComparison.OrdinalIgnoreCase));
 
-        using var table = ImRaii.Table("##subs", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable);
+        using var table = ImRaii.Table("##subs", 5, TableFlags);
         if (!table) return;
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Character");
@@ -373,14 +389,25 @@ public class MainWindow : Window, IDisposable
         ImGui.TableSetupColumn("Build");
         ImGui.TableSetupColumn("Status");
         ImGui.TableHeadersRow();
+        var (column, ascending) = SortedBy();
+        var list = column switch
+        {
+            1 => Sorted(rows, ascending, x => x.sub.SubName),
+            2 => Sorted(rows, ascending, x => x.sub.Rank),
+            3 => Sorted(rows, ascending, x => x.sub.Build),
+            // Status: back and waiting first, then the soonest back; in port last either way.
+            4 => Sorted(rows, ascending, x => x.sub.ReturnTime, x => x.sub.ReturnTime <= 0),
+            _ => Sorted(rows, ascending, x => x.order),
+        };
+
         string? lastCharacter = null;
-        foreach (var sub in list)
+        foreach (var (sub, _) in list)
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
             var who = $"{sub.Character} ({sub.World})";
-            // Grouped by character: its name once, on its first sub.
-            if (subsSoonestFirst || who != lastCharacter) ImGui.TextUnformatted(who);
+            // Sorted by character: its name once, on its first sub.
+            if (column != 0 || who != lastCharacter) ImGui.TextUnformatted(who);
             if (ImGui.IsItemHovered() && sub.Account.Length > 0) ImGui.SetTooltip($"Account: {sub.Account}");
             lastCharacter = who;
             ImGui.TableNextColumn();
@@ -407,12 +434,12 @@ public class MainWindow : Window, IDisposable
         if (supplies != null && supplies.Count > 0)
         {
             ImGui.SameLine();
-            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days (both set in the app's Supplies tab).");
+            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days (both set in the app's Supplies tab). Click a column to sort by it.");
         }
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
         if (supplies == null) return;
 
-        using var table = ImRaii.Table("##supplies", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable);
+        using var table = ImRaii.Table("##supplies", 8, TableFlags);
         if (!table) return;
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Character");
@@ -424,7 +451,22 @@ public class MainWindow : Window, IDisposable
         ImGui.TableSetupColumn("Days left##kits");
         ImGui.TableSetupColumn("To buy");
         ImGui.TableHeadersRow();
-        foreach (var c in supplies)
+        var (column, ascending) = SortedBy();
+        var rows = supplies.Select((c, order) => (c, order));
+        // Days left: "never" (none used) counts as the most; not enough history has none and goes last.
+        static double DaysKey(double? days) => days ?? double.MaxValue;
+        var list = column switch
+        {
+            1 => Sorted(rows, ascending, x => x.c.Ceruleum),
+            2 => Sorted(rows, ascending, x => x.c.CeruleumPerDay ?? 0, x => x.c.CeruleumPerDay == null),
+            3 => Sorted(rows, ascending, x => DaysKey(x.c.CeruleumDaysLeft), x => x.c.CeruleumPerDay == null),
+            4 => Sorted(rows, ascending, x => x.c.RepairKits),
+            5 => Sorted(rows, ascending, x => x.c.RepairKitsPerDay ?? 0, x => x.c.RepairKitsPerDay == null),
+            6 => Sorted(rows, ascending, x => DaysKey(x.c.RepairKitsDaysLeft), x => x.c.RepairKitsPerDay == null),
+            7 => Sorted(rows, ascending, x => (long)x.c.CeruleumRestock * 1_000_000 + x.c.RepairKitsRestock),
+            _ => Sorted(rows, ascending, x => x.order),
+        };
+        foreach (var (c, _) in list)
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
