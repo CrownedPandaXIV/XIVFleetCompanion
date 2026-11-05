@@ -4,8 +4,7 @@ Your whole FFXIV submarine and retainer fleet in one window, across every accoun
 
 - **The plugin** runs in the game on each PC that plays. It sends your characters, subs, retainers and inventories to
   a database.
-- **The app** (Windows) shows it all: what's back, what's running low, what to build next, what you earned. It can ping
-  you on Discord too.
+- **The app** (Windows) shows it all: what's back, what's running low, what to build next, what you earned.
 
 You'll also need **PostgreSQL** (the database) on one PC. If your PCs aren't on the same home network, you'll need
 **Tailscale** (free) so they can reach it.
