@@ -58,7 +58,7 @@ public class MainWindow : Window, IDisposable
         this.submarineImagePath = submarineImagePath;
         this.plugin = plugin;
         settings = new SettingsTab(plugin);
-        reader = new FleetReader(() => PostgresWriter.BuildConnectionString(plugin.Configuration.UseRemoteConnection).connectionString);
+        reader = plugin.Fleet;
     }
 
     public void Dispose() => settings.Dispose();
@@ -297,6 +297,27 @@ public class MainWindow : Window, IDisposable
         reader.ReadIfDue();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         RefreshButton();
+
+        // What needs you, worst first: subs back and waiting (counted live), then the database's alerts.
+        Heading("Needs attention");
+        var back = FleetReader.SubsBack(reader.Subs.Data, now);
+        var alerts = reader.Alerts.Data;
+        if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs tab)");
+        if (alerts != null)
+        {
+            foreach (var alert in alerts)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, alert.Level == "danger" ? Red : Amber))
+                    ImGui.TextWrapped($"{alert.Subject}: {alert.Detail}");
+            }
+            if (back == 0 && alerts.Count == 0) ImGui.TextUnformatted("Nothing needs you right now.");
+        }
+        else if (reader.Alerts.Error == null) ImGui.TextUnformatted("Reading...");
+        if (reader.Alerts.Error != null)
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                ImGui.TextWrapped(reader.Alerts.Error);
+        }
 
         Heading("Subs");
         var subs = reader.Subs.Data;

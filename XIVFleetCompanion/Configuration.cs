@@ -14,6 +14,8 @@ public class Configuration : IPluginConfiguration
     public int SyncIntervalMinutes { get; set; } = 5;
     // Also sync a few seconds after a character logs out (AutoRetainer finished with it).
     public bool SyncAfterLogout { get; set; } = true;
+    // 2.0: "Fleet" in the game's info bar (top right), with what needs attention; click opens the Summary.
+    public bool ShowInInfoBar { get; set; } = true;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading.Tasks;
 using Npgsql;
 
@@ -18,14 +19,18 @@ namespace XIVFleetCompanion
     /// <summary>The fleet at a glance, from fleet_summary_view (the subs' own counts are worked out live from SubRow).</summary>
     public sealed record SummaryRow(int Retainers, int VenturesDone, int RetainersIdle, int LowCeruleum, int LowRepairKits, double? SoonestRunsOutDays);
 
+    /// <summary>One thing that needs attention, from fleet_alerts_view: Level "danger" or "warn", Kind (house,
+    /// low_ceruleum, low_repair_kits, not_synced, autoretainer), who it's about and what.</summary>
+    public sealed record AlertRow(string Level, string Kind, string Subject, string Detail);
+
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
 
     /// <summary>
     /// 2.0: reads the ready-made fleet views (app 1.8.0 and later, db/views.sql) for the main window's tabs, in the
-    /// background and never while drawing. Subs every 30 seconds (cheap), supplies and the summary every 5 minutes
-    /// (they change slowly and take the database longer). Only while the window asks: nothing is read while it's
-    /// closed. No Dalamud here.
+    /// background and never while drawing. Subs and what needs attention every 30 seconds (cheap), supplies and the
+    /// summary every 5 minutes (they change slowly and take the database longer). Only while something asks (the main
+    /// window while it's open, the info bar line while it's shown). No Dalamud here.
     /// </summary>
     public sealed class FleetReader
     {
@@ -42,24 +47,29 @@ namespace XIVFleetCompanion
         public FleetRead<List<SubRow>> Subs { get; private set; } = new(null, null, null);
         public FleetRead<List<SupplyRow>> Supplies { get; private set; } = new(null, null, null);
         public FleetRead<SummaryRow> Summary { get; private set; } = new(null, null, null);
+        public FleetRead<List<AlertRow>> Alerts { get; private set; } = new(null, null, null);
         public bool Busy => busy;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
         public FleetReader(Func<string?> connectionString) => this.connectionString = connectionString;
 
-        /// <summary>Called by the window while it's open: starts a read in the background when one is due.</summary>
-        public void ReadIfDue(bool everything = false)
+        /// <summary>
+        /// Called while something shows the fleet: starts a read in the background when one is due. withSupplies:
+        /// false for the info bar line, which only needs the subs and what needs attention.
+        /// </summary>
+        public void ReadIfDue(bool everything = false, bool withSupplies = true)
         {
             if (busy) return;
             var now = DateTime.UtcNow;
             var subs = everything || now - subsAsked >= SubsEvery;
-            var supplies = everything || now - suppliesAsked >= SuppliesEvery;
+            var supplies = everything || (withSupplies && now - suppliesAsked >= SuppliesEvery);
             if (!subs && !supplies) return;
             var cs = connectionString();
             if (cs == null)
             {
                 const string notSetUp = "The database isn't set up yet (Settings tab).";
                 Subs = Subs with { Error = notSetUp };
+                Alerts = Alerts with { Error = notSetUp };
                 Supplies = Supplies with { Error = notSetUp };
                 Summary = Summary with { Error = notSetUp };
                 return;
@@ -73,7 +83,11 @@ namespace XIVFleetCompanion
                 {
                     await using var conn = new NpgsqlConnection(cs);
                     await conn.OpenAsync();
-                    if (subs) Subs = await Read(conn, ReadSubs, Subs);
+                    if (subs)
+                    {
+                        Subs = await Read(conn, ReadSubs, Subs);
+                        Alerts = await Read(conn, ReadAlerts, Alerts);
+                    }
                     if (supplies)
                     {
                         Supplies = await Read(conn, ReadSupplies, Supplies);
@@ -83,7 +97,7 @@ namespace XIVFleetCompanion
                 catch (Exception ex)
                 {
                     var text = $"Could not reach the database: {ex.Message}";
-                    if (subs) Subs = Subs with { Error = text };
+                    if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; }
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; }
                 }
                 finally
@@ -153,6 +167,37 @@ namespace XIVFleetCompanion
             return new SummaryRow(Int(r, "retainers"), Int(r, "ventures_done"), Int(r, "retainers_idle"),
                 Int(r, "low_ceruleum"), Int(r, "low_repair_kits"), Double(r, "soonest_runs_out_days"));
         }
+
+        public static async Task<List<AlertRow>> ReadAlerts(NpgsqlConnection conn)
+        {
+            var list = new List<AlertRow>();
+            await using var cmd = new NpgsqlCommand("SELECT level, kind, subject, detail FROM fleet_alerts_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                list.Add(new AlertRow(Text(r, "level"), Text(r, "kind"), Text(r, "subject"), Text(r, "detail")));
+            return list;
+        }
+
+        /// <summary>
+        /// The info bar line: "Fleet" when nothing needs you, else what does, for example "Fleet: 4 back · 1 low · 2 to
+        /// check" (subs back and waiting; characters low on supplies; anything else that needs attention).
+        /// </summary>
+        public static string InfoBarText(int subsBack, IReadOnlyCollection<AlertRow>? alerts)
+        {
+            var parts = new List<string>();
+            if (subsBack > 0) parts.Add($"{subsBack} back");
+            if (alerts != null)
+            {
+                var low = alerts.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count();
+                var other = alerts.Count(a => a.Kind is not ("low_ceruleum" or "low_repair_kits"));
+                if (low > 0) parts.Add($"{low} low");
+                if (other > 0) parts.Add($"{other} to check");
+            }
+            return parts.Count == 0 ? "Fleet" : "Fleet: " + string.Join(" · ", parts);
+        }
+
+        /// <summary>Subs back and waiting to be collected, right now.</summary>
+        public static int SubsBack(IEnumerable<SubRow>? subs, long nowUnix) => subs?.Count(x => x.ReturnTime > 0 && x.ReturnTime <= nowUnix) ?? 0;
 
         /// <summary>Where a sub is right now: "In port", "Back" (waiting to be collected) or the time until it's back.</summary>
         public static string SubStatus(long returnTime, long nowUnix)

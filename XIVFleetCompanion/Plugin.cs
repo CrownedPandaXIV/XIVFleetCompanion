@@ -1,5 +1,6 @@
 using AutoRetainerAPI;
 using Dalamud.Game.Command;
+using Dalamud.Game.Gui.Dtr;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -26,6 +27,15 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
+    [PluginService] internal static IDtrBar DtrBar { get; private set; } = null!;
+
+    /// <summary>2.0: the fleet from the database's views, shared by the main window and the info bar line.</summary>
+    public FleetReader Fleet { get; }
+    // "Fleet" in the game's info bar (top right): what needs attention; click opens the Summary.
+    private IDtrBarEntry? infoBar;
+    private DateTime infoBarCheckedAt = DateTime.MinValue;
+    private string infoBarText = "";
+    private string infoBarTooltip = "";
 
     private const string CommandName = "/xivfleet";
 
@@ -82,6 +92,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
+        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckWindow = new CheckWindow(this);
         SpeedTestWindow = new SpeedTestWindow(this);
@@ -94,6 +105,18 @@ public sealed class Plugin : IDalamudPlugin
         {
             HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, status or settings to open that tab; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
+
+        try
+        {
+            infoBar = DtrBar.Get("XIV Fleet Companion");
+            infoBar.Text = "Fleet";
+            infoBar.OnClick = _ => MainWindow.OpenAt(MainWindow.Tab.Summary);
+            infoBar.Shown = Configuration.ShowInInfoBar;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning($"Fleet Companion: could not add to the info bar — {ex.Message}");
+        }
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         // The settings and main window buttons in the plugin installer.
@@ -119,6 +142,7 @@ public sealed class Plugin : IDalamudPlugin
 
         Framework.Update -= OnFrameworkUpdate;
         ClientState.Logout -= OnLogout;
+        infoBar?.Remove();
 
         AutoRetainer?.Dispose();
         ECommonsMain.Dispose();
@@ -152,9 +176,42 @@ public sealed class Plugin : IDalamudPlugin
             schedule.RequestSoon(DateTime.UtcNow);
     }
 
+    // Once a second: the info bar line's text and tooltip, from what was last read; reads again in the background
+    // when due (subs and what needs attention every 30 seconds), only while the line is shown.
+    private void UpdateInfoBar()
+    {
+        if (infoBar == null) return;
+        var now = DateTime.UtcNow;
+        if (now - infoBarCheckedAt < TimeSpan.FromSeconds(1)) return;
+        infoBarCheckedAt = now;
+        infoBar.Shown = Configuration.ShowInInfoBar;
+        if (!infoBar.Shown) return;
+        Fleet.ReadIfDue(withSupplies: false);
+
+        var back = FleetReader.SubsBack(Fleet.Subs.Data, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var alerts = Fleet.Alerts.Data;
+        var text = FleetReader.InfoBarText(back, alerts);
+        var lines = new List<string>();
+        if (back > 0) lines.Add($"{back} sub{(back == 1 ? " is" : "s are")} back and waiting");
+        if (alerts != null)
+        {
+            foreach (var alert in alerts.Take(8)) lines.Add($"{alert.Subject}: {alert.Detail}");
+            if (alerts.Count > 8) lines.Add($"...and {alerts.Count - 8} more");
+        }
+        var error = Fleet.Alerts.Error ?? Fleet.Subs.Error;
+        if (error != null) lines.Add(error);
+        if (lines.Count == 0) lines.Add(Fleet.Subs.Data == null ? "Reading the fleet..." : "Nothing needs you right now.");
+        lines.Add("Click to open the Summary.");
+        var tooltip = string.Join("\n", lines);
+        // Only when changed, not every second.
+        if (text != infoBarText) { infoBar.Text = text; infoBarText = text; }
+        if (tooltip != infoBarTooltip) { infoBar.Tooltip = tooltip; infoBarTooltip = tooltip; }
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         NoteLogin();
+        UpdateInfoBar();
         if (!Configuration.Enabled) return;
 
         var now = DateTime.UtcNow;

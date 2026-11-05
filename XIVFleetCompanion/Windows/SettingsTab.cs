@@ -198,6 +198,15 @@ public class SettingsTab : IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app sees its subs a few seconds later instead of at the next interval.");
 
+        var showInInfoBar = configuration.ShowInInfoBar;
+        if (ImGui.Checkbox("Show Fleet in the game's info bar", ref showInInfoBar))
+        {
+            configuration.ShowInInfoBar = showInInfoBar;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("\"Fleet\" by the clock at the top right: it says what needs you (subs back, supplies running low, houses...); hover for the list, click to open the Summary. Dalamud's own Server Info Bar settings can hide it too.");
+
         ImGui.Spacing();
         DrawCharacters();
 

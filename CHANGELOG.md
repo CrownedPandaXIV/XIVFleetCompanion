@@ -31,6 +31,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
     to make it wider; the columns still stretch with the window, and the game remembers the widths.
   - The numbers come from the app's views in the database (app 1.8.0 or later), read in the background while the
     window is open: subs every 30 seconds, supplies and the summary every 5 minutes, or on **Refresh**.
+- **Stage 4: what needs attention, and Fleet in the info bar.**
+  - The Summary starts with **Needs attention**: subs back and waiting, then Free Company houses not entered for a
+    while (red from 30 days), characters low on ceruleum or repair kits, characters no longer synced, and setups where
+    AutoRetainer wasn't running. The same rules as the app's Summary. No pop-ups and nothing in chat.
+  - **"Fleet" in the game's info bar** (top right, by the clock), always there so the window is one click away;
+    "Fleet: 4 back · 1 low · 2 to check" when something needs you. Hover for the list, click to open the Summary. On by
+    default; Settings → "Show Fleet in the game's info bar" turns it off. While it's shown it reads the subs and what
+    needs attention every 30 seconds (a few milliseconds each), never the heavier supplies.
 
 ## 1.0.3 - 2026-11-05
 

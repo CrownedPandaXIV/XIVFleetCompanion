@@ -161,6 +161,28 @@ internal static class Program
         Check(FleetReader.Ago(now.AddSeconds(-12), now) == "12s ago" && FleetReader.Ago(now.AddMinutes(-4), now) == "4m ago" && FleetReader.Ago(now.AddHours(-2), now) == "2h ago",
             "fleet views: how long ago it was read");
 
+        // Stage 4: the info bar line and what needs attention.
+        var alerts = new List<AlertRow>
+        {
+            new("danger", "house", "Cute Kittehs!", "house not entered for 33 days; demolished after 12 more"),
+            new("warn", "low_ceruleum", "Aki (Maduin)", "50 ceruleum (warning below 100)"),
+            new("warn", "low_repair_kits", "Aki (Maduin)", "5 repair kits (warning below 10)"),
+            new("warn", "low_ceruleum", "Bex (Maduin)", "10 ceruleum (warning below 100)"),
+            new("warn", "autoretainer", "DESKTOP-1 (A)", "AutoRetainer was not running at its last sync"),
+        };
+        Check(FleetReader.InfoBarText(0, new List<AlertRow>()) == "Fleet" && FleetReader.InfoBarText(0, null) == "Fleet"
+              && FleetReader.InfoBarText(4, null) == "Fleet: 4 back"
+              && FleetReader.InfoBarText(4, alerts) == "Fleet: 4 back · 2 low · 2 to check"
+              && FleetReader.InfoBarText(0, alerts.Take(2).ToList()) == "Fleet: 1 low · 1 to check",
+            "info bar: Fleet alone when nothing needs you, else subs back, characters low (each once) and the rest: " + FleetReader.InfoBarText(4, alerts));
+        Check(FleetReader.SubsBack(subs, 1700000001) == 1 && FleetReader.SubsBack(subs, 1699999999) == 0 && FleetReader.SubsBack(null, 1) == 0,
+            "info bar: subs back counts only subs whose return time has passed (not those in port)");
+        await Exec(conn, @"CREATE VIEW fleet_alerts_view AS SELECT * FROM (VALUES ('danger'::text, 'house'::text, 'Cute Kittehs!'::text, 'not entered'::text, 33))
+            AS t(level, kind, subject, detail, weight)");
+        var read = await FleetReader.ReadAlerts(conn);
+        Check(read.Count == 1 && read[0] == new AlertRow("danger", "house", "Cute Kittehs!", "not entered"), "info bar: what needs attention is read: " + string.Join(" | ", read));
+        await Exec(conn, "DROP VIEW fleet_alerts_view");
+
         var reader = new FleetReader(() => null);
         reader.ReadIfDue(everything: true);
         Check(reader.Subs.Error != null && reader.Subs.Error.Contains("isn't set up") && !reader.Busy, "fleet views: no database set up says so, and reads nothing");
