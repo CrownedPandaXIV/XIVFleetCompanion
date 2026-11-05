@@ -23,7 +23,8 @@ namespace XIVFleetCompanion
         public const string ConnectName = "Connect";
         public const string TotalName = "Everything (one round)";
 
-        /// <summary>What the windows will read, roughly as the app reads it now.</summary>
+        /// <summary>What the windows will read: first roughly as the app reads it now, then the ready-made views
+        /// (a database the app hasn't updated to 1.8.0 yet reports those as failed).</summary>
         public static readonly IReadOnlyList<(string Name, string Sql)> Queries = new[]
         {
             ("Characters", @"SELECT cid, name, world, account_label, gil, ceruleum, repair_kits, fc_id, last_synced_at
@@ -40,6 +41,10 @@ namespace XIVFleetCompanion
                 WHERE metric IN ('item_qty:10155', 'item_qty:10373') AND recorded_at > now() - interval '14 days'"),
             ("PCs", @"SELECT pc_name, account_label, plugin_version, last_sync_at, characters_synced
                 FROM companion_pc_status"),
+            // Stage 2: the ready-made views (app 1.8.0, database update 14), which work things out in the database.
+            ("Subs (view)", "SELECT * FROM fleet_subs_view"),
+            ("Supplies (view)", "SELECT * FROM fleet_supplies_view"),
+            ("Summary (view)", "SELECT * FROM fleet_summary_view"),
         };
 
         /// <summary>

@@ -128,9 +128,10 @@ internal static class Program
         foreach (var (name, sql) in SpeedTest.Queries)
         {
             var r = results.Single(x => x.Name == name);
-            if (name == "PCs")
+            // The views come with the app's database update 14; this scratch schema has none, so they're reported missing.
+            if (name == "PCs" || name.EndsWith("(view)"))
             {
-                Check(r.Error != null && r.Error.Contains("companion_pc_status"), $"speed test: a missing table is reported, not thrown: {r.Error}");
+                Check(r.Error != null && r.Error.Contains("does not exist"), $"speed test: a missing table or view is reported, not thrown ({name}): {r.Error}");
                 continue;
             }
             var expected = (await Rows(conn, sql)).Count;

@@ -12,6 +12,9 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   ceruleum and repair kits in FC chests, their use over the last 14 days, and the PCs. Three rounds, with the first,
   best and worst time of each, and the longest game frame meanwhile to show it doesn't stutter. It runs in the
   background, only reads, and **Copy results** copies it all to share.
+- **Stage 2: the database views.** The speed test also times reading the ready-made views app 1.8.0 adds to the
+  database (subs, supplies and the summary), which work things out in the database instead of in the plugin. With an
+  older app they show as failed.
 
 ## 1.0.3 - 2026-11-05
 
