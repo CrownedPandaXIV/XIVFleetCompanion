@@ -43,7 +43,7 @@ public class SpeedTestWindow : Window, IDisposable
         Run();
     }
 
-    private void Run()
+    public void Run()
     {
         if (running) return;
         var remote = plugin.Configuration.UseRemoteConnection;
@@ -92,7 +92,10 @@ public class SpeedTestWindow : Window, IDisposable
             longestWhileRunning = seconds;
     }
 
-    public override void Draw()
+    // 2.x: drawn as a page of the main window (Tools); also still a window of its own.
+    public override void Draw() => DrawPage();
+
+    public void DrawPage()
     {
         NoteFrame();
         ImGui.TextWrapped("For XIV Fleet Companion 2.0: times reading from the database what the in-game Summary, Subs and " +

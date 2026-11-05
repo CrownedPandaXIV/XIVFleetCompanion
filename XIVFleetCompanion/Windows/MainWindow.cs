@@ -1,4 +1,6 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
+using Dalamud.Interface.Components;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
@@ -34,14 +36,14 @@ public class MainWindow : Window, IDisposable
     private bool? fcTrackerRunning;
     private bool? subTrackerRunning;
 
-    /// <summary>The main window's tabs (2.0: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Status, Settings }
+    /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
+    public enum Tab { Summary, Subs, Supplies, Check, SpeedTest, Status, Settings }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
     private Tab shown = Tab.Summary;
-    private Tab? select; // a tab to switch to on the next frame (from a command or Dalamud's settings button)
     private string subsFilter = "";
+    private int themeColors; // how many colors the look pushed this frame (PreDraw), popped in PostDraw
 
     // "###" keeps the window's ImGui ID fixed while the title shows the version.
     public MainWindow(Plugin plugin, string submarineImagePath)
@@ -49,10 +51,10 @@ public class MainWindow : Window, IDisposable
     {
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(420, 370),
+            MinimumSize = new Vector2(520, 380),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
         };
-        Size = new Vector2(720, 520);
+        Size = new Vector2(860, 560);
         SizeCondition = ImGuiCond.FirstUseEver;
 
         this.submarineImagePath = submarineImagePath;
@@ -63,12 +65,18 @@ public class MainWindow : Window, IDisposable
 
     public void Dispose() => settings.Dispose();
 
-    /// <summary>Opens the window at a tab.</summary>
+    /// <summary>Opens the window at a page.</summary>
     public void OpenAt(Tab tab)
     {
         IsOpen = true;
-        select = tab;
+        Show(tab);
         BringToFront();
+    }
+
+    private void Show(Tab tab)
+    {
+        if (tab == Tab.Settings && shown != Tab.Settings) settings.OnShown();
+        shown = tab;
     }
 
     public override void OnOpen()
@@ -77,33 +85,179 @@ public class MainWindow : Window, IDisposable
         reader.ReadIfDue(everything: true);
     }
 
-    public override void Draw()
+    // The look (Settings → Look) applies to this window only.
+    public override void PreDraw() => themeColors = Theme.Push(plugin.Configuration.Theme);
+    public override void PostDraw()
     {
-        using var tabs = ImRaii.TabBar("##fleettabs");
-        if (!tabs) return;
-        TabItem(Tab.Summary, "Summary", DrawSummary);
-        TabItem(Tab.Subs, "Subs", DrawSubs);
-        TabItem(Tab.Supplies, "Supplies", DrawSupplies);
-        TabItem(Tab.Status, "Status", DrawStatus);
-        TabItem(Tab.Settings, "Settings", settings.Draw);
-        select = null;
+        Theme.Pop(themeColors);
+        themeColors = 0;
     }
 
-    private void TabItem(Tab tab, string label, System.Action draw)
+    private StatusColors Palette => Theme.Status(plugin.Configuration.Theme, plugin.Configuration.ColourBlindStatus);
+
+    public override void Draw()
     {
-        var flags = select == tab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
-        if (!ImGui.BeginTabItem(label, flags)) return;
-        try
+        var folded = plugin.Configuration.SidebarFolded;
+        var width = (folded ? 46f : 210f) * ImGuiHelpers.GlobalScale;
+        var sidebarBg = Theme.SidebarBg(plugin.Configuration.Theme);
+        using (ImRaii.PushColor(ImGuiCol.ChildBg, sidebarBg ?? Vector4.Zero, sidebarBg.HasValue))
+        using (var side = ImRaii.Child("##sidebar", new Vector2(width, 0), true))
         {
-            if (shown != tab && tab == Tab.Settings) settings.OnShown();
-            shown = tab;
-            using var child = ImRaii.Child($"##tab{tab}", Vector2.Zero, false);
-            if (child.Success) draw();
+            if (side.Success) DrawSidebar(folded);
         }
-        finally
+        ImGui.SameLine();
+        using var page = ImRaii.Child("##page", Vector2.Zero, false);
+        if (!page.Success) return;
+        switch (shown)
         {
-            ImGui.EndTabItem();
+            case Tab.Summary: DrawSummary(); break;
+            case Tab.Subs: DrawSubs(); break;
+            case Tab.Supplies: DrawSupplies(); break;
+            case Tab.Check: plugin.CheckPage.DrawPage(); break;
+            case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
+            case Tab.Status: DrawStatus(); break;
+            case Tab.Settings: settings.Draw(); break;
         }
+    }
+
+    // --- The sidebar: the submarine, the pages in groups with what needs attention beside them, and this PC's sync. ---
+
+    private static readonly string[] Groups = { "Fleet", "Tools", "System" };
+
+    private void DrawSidebar(bool folded)
+    {
+        var p = Palette;
+        var config = plugin.Configuration;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        reader.ReadIfDue();
+
+        // Fold or unfold, top right.
+        var foldIcon = folded ? FontAwesomeIcon.AngleDoubleRight : FontAwesomeIcon.AngleDoubleLeft;
+        if (!folded) ImGui.SetCursorPosX(ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight() + ImGui.GetCursorPosX());
+        if (ImGuiComponents.IconButton("##fold", foldIcon))
+        {
+            config.SidebarFolded = !folded;
+            config.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(folded ? "Show the sidebar" : "Fold the sidebar down to its icons");
+
+        // The submarine.
+        var image = Plugin.TextureProvider.GetFromFile(submarineImagePath).GetWrapOrDefault();
+        if (image != null)
+        {
+            var side = (folded ? 30f : 110f) * ImGuiHelpers.GlobalScale;
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0, (ImGui.GetContentRegionAvail().X - side) / 2));
+            ImGui.Image(image.Handle, new Vector2(side, side));
+        }
+        ImGui.Spacing();
+
+        // What each page's line says beside it.
+        var back = FleetReader.SubsBack(reader.Subs.Data, now);
+        var alerts = reader.Alerts.Data;
+        var low = alerts?.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count() ?? 0;
+        var attention = back + (alerts?.Count ?? 0);
+        var statusProblem = plugin.SyncProblem != null || (plugin.AutoRetainer != null && !SafeReady());
+
+        foreach (var group in Groups)
+        {
+            var open = true;
+            if (!folded)
+            {
+                ImGui.Spacing();
+                using (ImRaii.PushColor(ImGuiCol.Text, p.Dim))
+                    open = ImGui.TreeNodeEx($"{group.ToUpperInvariant()}##group{group}", ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.NoTreePushOnOpen | ImGuiTreeNodeFlags.SpanAvailWidth);
+            }
+            else
+            {
+                ImGui.Separator();
+            }
+            if (!open) continue;
+            switch (group)
+            {
+                case "Fleet":
+                    Entry(Tab.Summary, FontAwesomeIcon.ClipboardList, "Summary", folded, attention > 0 ? attention.ToString() : null, attention > 0 ? p.Warn : p.Dim,
+                        attention > 0 ? $"{attention} thing{(attention == 1 ? "" : "s")} need{(attention == 1 ? "s" : "")} attention" : "Nothing needs you");
+                    Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
+                    Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
+                    break;
+                case "Tools":
+                    Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);
+                    Entry(Tab.SpeedTest, FontAwesomeIcon.Stopwatch, "Speed test", folded, null, p.Dim, null);
+                    break;
+                case "System":
+                    Entry(Tab.Status, FontAwesomeIcon.Plug, "Status", folded, statusProblem ? "!" : null, p.Warn, statusProblem ? "Something needs a look" : null);
+                    Entry(Tab.Settings, FontAwesomeIcon.Cog, "Settings", folded, null, p.Dim, null);
+                    break;
+            }
+        }
+
+        // This PC's sync, at the foot.
+        var line = plugin.SyncProblem != null ? "Not syncing" :
+            config.LastSyncTimestamp.HasValue ? $"Synced {FleetReader.Ago(config.LastSyncTimestamp.Value, DateTime.Now)}" : "Not synced yet";
+        var lineColor = plugin.SyncProblem != null ? p.Warn : p.Dim;
+        var height = ImGui.GetTextLineHeightWithSpacing();
+        var y = ImGui.GetWindowHeight() - height - ImGui.GetStyle().WindowPadding.Y;
+        if (y > ImGui.GetCursorPosY()) ImGui.SetCursorPosY(y);
+        if (folded)
+        {
+            using (ImRaii.PushFont(UiBuilder.IconFont))
+            using (ImRaii.PushColor(ImGuiCol.Text, plugin.SyncProblem != null ? p.Warn : config.Enabled ? p.Good : p.Dim))
+                ImGui.TextUnformatted(FontAwesomeIcon.Sync.ToIconString());
+        }
+        else
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, lineColor))
+                ImGui.TextUnformatted(config.Enabled ? line : "Syncing is off");
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(plugin.SyncProblem != null ? $"Not syncing ({plugin.SyncProblemAt:t}): {plugin.SyncProblem}" :
+                config.Enabled ? $"This PC syncs every {config.SyncIntervalMinutes} minute(s). {line}." : "Turn syncing on in Settings.");
+    }
+
+    private bool SafeReady()
+    {
+        try { return plugin.AutoRetainer!.Ready; }
+        catch { return false; }
+    }
+
+    // One page in the sidebar: its icon and name, and what needs attention beside it (badge). Folded: the icon only,
+    // with the name and the badge when hovered.
+    private void Entry(Tab tab, FontAwesomeIcon icon, string label, bool folded, string? badge, Vector4 badgeColor, string? hover)
+    {
+        var start = ImGui.GetCursorPos();
+        var rowHeight = ImGui.GetTextLineHeight() * 1.5f;
+        if (ImGui.Selectable($"##page{tab}", shown == tab, ImGuiSelectableFlags.None, new Vector2(0, rowHeight))) Show(tab);
+        var hovered = ImGui.IsItemHovered();
+        var after = ImGui.GetCursorPos();
+        var pad = (rowHeight - ImGui.GetTextLineHeight()) / 2;
+        ImGui.SetCursorPos(new Vector2(start.X + 6 * ImGuiHelpers.GlobalScale, start.Y + pad));
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (ImRaii.PushColor(ImGuiCol.Text, badgeColor, folded && badge != null))
+            ImGui.TextUnformatted(icon.ToIconString());
+        if (!folded)
+        {
+            ImGui.SameLine(start.X + 30 * ImGuiHelpers.GlobalScale);
+            ImGui.TextUnformatted(label);
+            if (badge != null)
+            {
+                ImGui.SameLine();
+                using (ImRaii.PushColor(ImGuiCol.Text, badgeColor))
+                    ImGui.TextUnformatted($"· {badge}");
+            }
+        }
+        ImGui.SetCursorPos(after);
+        if (hovered && (folded || hover != null))
+            ImGui.SetTooltip(folded ? (hover != null ? $"{label}: {hover}" : label) : hover!);
+    }
+
+    // The credits, on the Status page.
+    private void DrawCredits()
+    {
+        ImGui.Spacing();
+        ImGui.Separator();
+        using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
+            ImGui.TextWrapped($"XIV Fleet Companion v{Plugin.VersionText} by CrownedPandaXIV. Thanks to kawaii, NightmareXIV and the Puni.sh team (AutoRetainer), " +
+                              "Critical_Impact (Allagan Tools), erdelf (FC Tracker) and Infi (Submarine Tracker) for their plugins.");
     }
 
     private void RefreshStatus()
@@ -181,13 +335,13 @@ public class MainWindow : Window, IDisposable
             var problem = plugin.SyncProblem;
             if (problem != null)
             {
-                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.75f, 0.3f, 1f)))
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
                     ImGui.TextWrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
             }
 
             if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel))
             {
-                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.75f, 0.3f, 1f)))
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
                     ImGui.TextWrapped(Configuration.NoAccountLabelText);
             }
 
@@ -222,35 +376,16 @@ public class MainWindow : Window, IDisposable
             ImGui.TextWrapped(connectionTestResult);
         }
 
-        using (var child = ImRaii.Child("Banner", Vector2.Zero, true))
-        {
-            if (child.Success)
-            {
-                ImGui.Text("XIV Fleet Companion");
-                var submarineImage = Plugin.TextureProvider.GetFromFile(submarineImagePath).GetWrapOrDefault();
-                if (submarineImage != null)
-                {
-                    using (ImRaii.PushIndent(55f))
-                    {
-                        ImGui.Image(submarineImage.Handle, submarineImage.Size);
-                    }
-                }
-                else
-                {
-                    ImGui.Text("Image not found.");
-                }
-
-                ImGuiHelpers.ScaledDummy(20.0f);
-            }
-        }
+        DrawCredits();
     }
 
     // --- 2.0: the fleet, from the database's ready-made views (FleetReader) ---
 
-    private static readonly Vector4 Amber = new(1f, 0.75f, 0.3f, 1f);
-    private static readonly Vector4 Red = new(1f, 0.45f, 0.45f, 1f);
-    private static readonly Vector4 Green = new(0.55f, 0.85f, 0.55f, 1f);
-    private static readonly Vector4 Dim = new(0.6f, 0.6f, 0.6f, 1f);
+    // The status colors of the chosen look (Theme.cs).
+    private Vector4 Amber => Palette.Warn;
+    private Vector4 Red => Palette.Danger;
+    private Vector4 Green => Palette.Good;
+    private Vector4 Dim => Palette.Dim;
 
     private static void Colored(Vector4 color, string text)
     {
@@ -288,7 +423,7 @@ public class MainWindow : Window, IDisposable
     private static string Days(double? days, double? perDay) =>
         perDay == null ? "—" : days == null ? "never" : days.Value < 10 ? days.Value.ToString("0.0") : days.Value.ToString("0");
 
-    private static Vector4? DaysColor(double? days) => days == null ? null : days < 3 ? Red : days < 7 ? Amber : null;
+    private Vector4? DaysColor(double? days) => days == null ? null : days < 3 ? Red : days < 7 ? Amber : null;
 
     private static string PerDay(double? perDay) => perDay == null ? "—" : perDay.Value < 10 ? perDay.Value.ToString("0.0") : perDay.Value.ToString("0");
 
@@ -503,7 +638,7 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    private static void SupplyCells(int have, double? perDay, double? daysLeft)
+    private void SupplyCells(int have, double? perDay, double? daysLeft)
     {
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(have.ToString("N0"));

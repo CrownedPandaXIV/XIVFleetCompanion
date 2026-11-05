@@ -16,6 +16,11 @@ public class Configuration : IPluginConfiguration
     public bool SyncAfterLogout { get; set; } = true;
     // 2.0: "Fleet" in the game's info bar (top right), with what needs attention; click opens the Summary.
     public bool ShowInInfoBar { get; set; } = true;
+    // 2.x: the look of the plugin's window (Theme.cs) and colour-blind friendly status colors.
+    public ThemeChoice Theme { get; set; } = ThemeChoice.Fleet;
+    public bool ColourBlindStatus { get; set; } = false;
+    // The main window's sidebar folded down to its icons.
+    public bool SidebarFolded { get; set; } = false;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";

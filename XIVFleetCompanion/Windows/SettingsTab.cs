@@ -207,6 +207,33 @@ public class SettingsTab : IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("\"Fleet\" by the clock at the top right: it says what needs you (subs back, supplies running low, houses...); hover for the list, click to open the Summary. Dalamud's own Server Info Bar settings can hide it too.");
 
+        // The look of this window (Theme.cs): only it changes, never the game or other plugins.
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Look:");
+        foreach (var (choice, name, about) in new[]
+        {
+            (ThemeChoice.Fleet, "XIV Fleet Companion", "The app's colors: dark blue-grey with blue and amber."),
+            (ThemeChoice.Dalamud, "Dalamud", "Like your other plugins (Dalamud's own style)."),
+            (ThemeChoice.HighContrast, "High contrast", "Black and white with strong borders."),
+        })
+        {
+            ImGui.SameLine();
+            if (ImGui.RadioButton(name, configuration.Theme == choice))
+            {
+                configuration.Theme = choice;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(about);
+        }
+        var colourBlind = configuration.ColourBlindStatus;
+        if (ImGui.Checkbox("Colour-blind friendly status colors", ref colourBlind))
+        {
+            configuration.ColourBlindStatus = colourBlind;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Blue for fine, yellow for a look, orange-red for urgent, in place of green, amber and red: told apart with every common kind of colour blindness.");
+
         ImGui.Spacing();
         DrawCharacters();
 

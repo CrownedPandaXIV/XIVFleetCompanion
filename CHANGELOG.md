@@ -39,6 +39,18 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
     "Fleet: 4 back · 1 low · 2 to check" when something needs you. Hover for the list, click to open the Summary. On by
     default; Settings → "Show Fleet in the game's info bar" turns it off. While it's shown it reads the subs and what
     needs attention every 30 seconds (a few milliseconds each), never the heavier supplies.
+- **Stage 5: the sidebar, the looks and the new icon.**
+  - The tabs make way for a **sidebar**: the submarine at the top, then the pages in three groups that fold
+    (Fleet: Summary, Subs, Supplies; Tools: Check what I can see, Speed test; System: Status, Settings), each with an
+    icon and, beside it, what needs attention (Subs · 4 back, Supplies · 1 low, Summary · how many things). The
+    button at the top folds it down to its icons (hover one for its name and count). At its foot, when this PC last
+    synced, or why it isn't syncing.
+  - Check what I can see and the speed test are pages of the window now, not windows of their own; the credits are
+    on the Status page.
+  - **Looks** (Settings → Look): XIV Fleet Companion (the app's colors, the new default), Dalamud (like other
+    plugins) or High contrast; and **colour-blind friendly status colors** (blue, yellow and orange-red in place of
+    green, amber and red). Only this window changes.
+  - The **new submarine icon**, for the plugin's picture and its icon in Dalamud's plugin list.
 
 ## 1.0.3 - 2026-11-05
 

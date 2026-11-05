@@ -65,8 +65,9 @@ public sealed class Plugin : IDalamudPlugin
 
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
     private MainWindow MainWindow { get; init; }
-    private CheckWindow CheckWindow { get; init; }
-    private SpeedTestWindow SpeedTestWindow { get; init; }
+    // Tools pages of the main window (2.x: no longer windows of their own).
+    public CheckWindow CheckPage { get; init; }
+    public SpeedTestWindow SpeedTestPage { get; init; }
 
     public Plugin()
     {
@@ -94,16 +95,14 @@ public sealed class Plugin : IDalamudPlugin
 
         Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString);
         MainWindow = new MainWindow(this, submarineImagePath);
-        CheckWindow = new CheckWindow(this);
-        SpeedTestWindow = new SpeedTestWindow(this);
+        CheckPage = new CheckWindow(this);
+        SpeedTestPage = new SpeedTestWindow(this);
 
         WindowSystem.AddWindow(MainWindow);
-        WindowSystem.AddWindow(CheckWindow);
-        WindowSystem.AddWindow(SpeedTestWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, status or settings to open that tab; check shows what the plugin can see for each character; speedtest times reading from the database."
+            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
 
         try
@@ -135,8 +134,8 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
 
         MainWindow.Dispose();
-        CheckWindow.Dispose();
-        SpeedTestWindow.Dispose();
+        CheckPage.Dispose();
+        SpeedTestPage.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
 
@@ -161,8 +160,17 @@ public sealed class Plugin : IDalamudPlugin
             MainWindow.Toggle();
     }
 
-    public void OpenCheck() => CheckWindow.OpenAndRun();
-    public void OpenSpeedTest() => SpeedTestWindow.OpenAndRun();
+    public void OpenCheck()
+    {
+        MainWindow.OpenAt(MainWindow.Tab.Check);
+        CheckPage.Run();
+    }
+
+    public void OpenSpeedTest()
+    {
+        MainWindow.OpenAt(MainWindow.Tab.SpeedTest);
+        SpeedTestPage.Run();
+    }
 
     // Dalamud's settings button opens the main window at its Settings tab (2.0: one window for everything).
     public void ToggleConfigUi() => MainWindow.OpenAt(MainWindow.Tab.Settings);
