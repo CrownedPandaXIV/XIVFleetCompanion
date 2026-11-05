@@ -3,7 +3,7 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
-## 1.0.3 - unreleased
+## 1.0.3 - 2026-11-05
 
 Goes with app 1.7.0, which removes the Discord alerts.
 
