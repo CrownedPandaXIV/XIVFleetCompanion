@@ -324,7 +324,6 @@ public class MainWindow : Window, IDisposable
         if (subs == null && reader.Subs.Error == null) ImGui.TextUnformatted("Reading...");
         if (subs != null)
         {
-            var back = subs.Count(x => x.ReturnTime > 0 && x.ReturnTime <= now);
             var outNow = subs.Where(x => x.ReturnTime > now).ToList();
             var inPort = subs.Count(x => x.ReturnTime <= 0);
             if (back > 0) Colored(Green, $"{back} back and waiting to be collected");
