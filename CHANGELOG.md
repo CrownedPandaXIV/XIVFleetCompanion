@@ -87,6 +87,12 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - **Fleet in the info bar keeps working after an update.** Right after the plugin updated, clicking "Fleet" could do
   nothing until the plugin was turned off and on: the old copy's entry was still on screen. The plugin now asks again
   every few seconds until "Fleet" is its own, and takes it back if it ever isn't (noted in /xllog).
+- **Free Companies and Inventory read with real Free Company ids.** These ids are too big for the number the plugin
+  read them into, so the Free Companies list failed and took every other read down with it ("Could not reach the
+  database" everywhere until the next read, and again on every Refresh). They're read in full now, and a read that
+  fails for any reason other than the connection now fails alone, saying why, keeping what it read before.
+- **Where is it?'s columns line up.** Every item's table now has the same column widths (from the widest text shown),
+  instead of each sizing to its own rows.
 
 ## 1.0.3 - 2026-11-05
 

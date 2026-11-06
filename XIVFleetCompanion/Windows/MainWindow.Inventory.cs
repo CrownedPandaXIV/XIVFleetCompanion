@@ -210,16 +210,19 @@ public partial class MainWindow
 
         using var child = ImRaii.Child("##whereResults", System.Numerics.Vector2.Zero, false);
         if (!child.Success) return;
-        foreach (var item in FleetOrder.WhereIsIt(reader.Holdings.Data, id => ItemName(id, false)))
+        var items = FleetOrder.WhereIsIt(reader.Holdings.Data, id => ItemName(id, false)).ToList();
+        var widths = WhereWidths(reader.Holdings.Data, items);
+        foreach (var item in items)
         {
             if (!ImGui.CollapsingHeader($"{item.Name}: {item.Total:N0}##where{item.ItemId}", ImGuiTreeNodeFlags.DefaultOpen)) continue;
             var groups = whereByAccount ? FleetOrder.ByAccount(item.Places, p => p.Account) : new List<(string, List<ItemPlace>)> { ("", item.Places) };
-            using var table = ImRaii.Table($"##whereTable{item.ItemId}", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp);
+            using var table = ImRaii.Table($"##whereTable{item.ItemId}", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg);
             if (!table) continue;
-            ImGui.TableSetupColumn("Character / FC");
-            ImGui.TableSetupColumn("World");
-            ImGui.TableSetupColumn("Where");
-            ImGui.TableSetupColumn("Quantity");
+            // The same widths in every item's table (from the widest text in all of them), so the columns line up.
+            ImGui.TableSetupColumn("Character / FC", ImGuiTableColumnFlags.WidthFixed, widths[0]);
+            ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthFixed, widths[1]);
+            ImGui.TableSetupColumn("Where", ImGuiTableColumnFlags.WidthFixed, widths[2]);
+            ImGui.TableSetupColumn("Quantity", ImGuiTableColumnFlags.WidthStretch);
             ImGui.TableHeadersRow();
             foreach (var (label, places) in groups)
             {
@@ -234,7 +237,7 @@ public partial class MainWindow
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(p.Kind == "fc" ? $"{p.Who} (FC)" : p.Who);
+                    ImGui.TextUnformatted(WhoText(p));
                     ImGui.TableNextColumn();
                     ImGui.TextUnformatted(p.World);
                     ImGui.TableNextColumn();
@@ -244,5 +247,32 @@ public partial class MainWindow
                 }
             }
         }
+    }
+
+    private static string WhoText(ItemPlace p) => p.Kind == "fc" ? $"{p.Who} (FC)" : p.Who;
+
+    // Widths for Where is it?'s columns, worked out once per read (and again if the font size changes).
+    private object? whereWidthsFor;
+    private float whereWidthsFont;
+    private float[] whereWidths = new float[3];
+
+    private float[] WhereWidths(object data, List<ItemPlaces> items)
+    {
+        var font = ImGui.GetFontSize();
+        if (ReferenceEquals(whereWidthsFor, data) && whereWidthsFont == font) return whereWidths;
+        float Width(string text) => ImGui.CalcTextSize(text).X;
+        var w = new[] { Width("Character / FC"), Width("World"), Width("Where") };
+        foreach (var p in items.SelectMany(i => i.Places))
+        {
+            w[0] = Math.Max(w[0], Math.Max(Width(WhoText(p)), Width(p.Account.Length > 0 ? p.Account : "Ungrouped")));
+            w[1] = Math.Max(w[1], Width(p.World));
+            w[2] = Math.Max(w[2], Width(p.Where));
+        }
+        // A little room between the text and the next column.
+        var pad = ImGui.GetStyle().CellPadding.X * 2 + ImGui.GetStyle().ItemSpacing.X;
+        whereWidths = w.Select(x => x + pad).ToArray();
+        whereWidthsFor = data;
+        whereWidthsFont = font;
+        return whereWidths;
     }
 }
