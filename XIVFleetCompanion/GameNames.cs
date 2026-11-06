@@ -108,6 +108,46 @@ namespace XIVFleetCompanion
             return VendorPrices[itemId] = price;
         }
 
+        private static readonly Dictionary<int, (int Slot, int LevelEquip, int LevelItem, uint Category)?> GearInfos = new();
+        private static readonly Dictionary<(uint, string), bool?> Wearable = new();
+
+        /// <summary>A piece of gear as a retainer's gear target checks it (FleetReader.GearCheck), for the class
+        /// abbreviation wearing it; null when the game doesn't know the item.</summary>
+        public static FleetReader.GearPiece? Gear(int itemId, string abbreviation)
+        {
+            if (!GearInfos.TryGetValue(itemId, out var info))
+            {
+                info = null;
+                try
+                {
+                    var row = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault((uint)itemId);
+                    if (row.HasValue)
+                        info = ((int)row.Value.EquipSlotCategory.RowId, (int)row.Value.LevelEquip, (int)row.Value.LevelItem.RowId, row.Value.ClassJobCategory.RowId);
+                }
+                catch (Exception ex) { Plugin.Log.Debug($"Fleet Companion: item {itemId} — {ex.Message}"); }
+                GearInfos[itemId] = info;
+            }
+            if (info is not { } i) return null;
+            return new FleetReader.GearPiece(i.Slot, i.LevelEquip, i.LevelItem, CanWear(i.Category, abbreviation));
+        }
+
+        // Whether a class can wear an item of a ClassJobCategory: the sheet has a yes/no for each class, named by its
+        // abbreviation (GLA, PLD, ...), as the app's game data. Null when unknown.
+        private static bool? CanWear(uint category, string abbreviation)
+        {
+            if (abbreviation.Length == 0) return null;
+            if (Wearable.TryGetValue((category, abbreviation), out var known)) return known;
+            bool? can = null;
+            try
+            {
+                var row = Plugin.DataManager.GetExcelSheet<ClassJobCategory>().GetRowOrDefault(category);
+                var field = typeof(ClassJobCategory).GetProperty(abbreviation);
+                if (row.HasValue && field?.PropertyType == typeof(bool)) can = (bool)field.GetValue(row.Value)!;
+            }
+            catch (Exception ex) { Plugin.Log.Debug($"Fleet Companion: class category {category} — {ex.Message}"); }
+            return Wearable[(category, abbreviation)] = can;
+        }
+
         /// <summary>An item's level (ilvl); null when the game doesn't know the item.</summary>
         public static int? ItemLevel(int itemId)
         {

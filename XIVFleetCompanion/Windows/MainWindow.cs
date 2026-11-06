@@ -428,6 +428,19 @@ public partial class MainWindow : Window, IDisposable
         ImGui.Separator();
     }
 
+    // "Label: 1,234 gil" with the amount in gil's gold (plain in a look without one).
+    private void GilLine(string label, double gil, string after = "")
+    {
+        ImGui.TextUnformatted(label);
+        ImGui.SameLine(0, ImGui.CalcTextSize(" ").X);
+        Tinted(Palette.Gil, $"{Number((long)Math.Round(gil))} gil");
+        if (after.Length > 0)
+        {
+            ImGui.SameLine(0, 0);
+            ImGui.TextUnformatted(after);
+        }
+    }
+
     // When it was read, and why the last read failed (the last good numbers stay shown).
     private void ReadLine<T>(FleetRead<T> read, TimeSpan every) where T : class
     {
@@ -537,7 +550,7 @@ public partial class MainWindow : Window, IDisposable
         // As the app's Summary: the fleet-wide salvage total (the Salvage page has each character's).
         Heading("Salvage");
         var salvage = reader.Salvage.Data;
-        if (salvage != null) ImGui.TextUnformatted($"Fleet-Wide Salvage Total: {Number(salvage.Sum(x => x.Gil))} gil");
+        if (salvage != null) GilLine("Fleet-Wide Salvage Total:", salvage.Sum(x => x.Gil));
         else if (reader.Salvage.Error == null) ImGui.TextUnformatted("Reading...");
         ReadLine(reader.Salvage, FleetReader.SuppliesEvery);
     }
@@ -547,19 +560,28 @@ public partial class MainWindow : Window, IDisposable
 
     private FleetTable<SubRow> SubsTable => subsTable ??= new FleetTable<SubRow>("subs", plugin.Configuration, new List<FleetColumn<SubRow>>
     {
+        // The character once, on its first sub (while the table isn't sorted by a column).
         new("character", "Character", sub =>
         {
+            if (SubsTable.SameAsAbove) return;
             CharacterCell(sub.Character, sub.World);
             if (sub.Account.Length > 0) Hover($"Account: {sub.Account}");
         }, sub => sub.Character),
         new("account", "Account", sub => ImGui.TextUnformatted(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
         new("sub", "Sub", sub => ImGui.TextUnformatted(sub.SubName), sub => sub.SubName, Locked: true),
+        // The rank, with a thin bar for how far to the next.
         new("rank", "Rank", sub =>
         {
+            if (sub.NextLevelExp > 0)
+            {
+                TableCells.Bar((double)sub.CurrentExp / sub.NextLevelExp, 36 * ImGuiHelpers.GlobalScale);
+                Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
+                ImGui.SameLine();
+            }
             RightNumber(sub.Rank);
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => sub.Rank),
-        new("build", "Build", sub => ImGui.TextUnformatted(sub.Build), sub => sub.Build),
+        new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
         // Status: back and waiting first, then the soonest back; in port last either way.
         new("status", "Status", sub =>
         {
@@ -568,7 +590,23 @@ public partial class MainWindow : Window, IDisposable
             else if (status == "In port") Colored(Dim, status);
             else ImGui.TextUnformatted(status);
         }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
-    }, sub => sub.Account, "subs");
+    }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
+
+    // "W-S-U-C" with the dashes softer, so the four parts stand out.
+    private void BuildCell(string build)
+    {
+        var parts = build.Split('-');
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (i > 0)
+            {
+                ImGui.SameLine(0, 0);
+                Colored(Dim, "-");
+                ImGui.SameLine(0, 0);
+            }
+            ImGui.TextUnformatted(parts[i]);
+        }
+    }
 
     private void DrawSubs()
     {

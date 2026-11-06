@@ -555,6 +555,65 @@ namespace XIVFleetCompanion
             });
         }
 
+        /// <summary>A class's role for its colour: "tank", "healer" or "dps", and whether it's a base class (Gladiator,
+        /// Conjurer, ...) rather than the job it becomes; null role for gatherers, crafters or an unknown class. As the
+        /// app's (renderer/tables.jsx jobRole).</summary>
+        public static (string? Role, bool IsBase) JobRole(string abbreviation) => abbreviation switch
+        {
+            "PLD" or "WAR" or "DRK" or "GNB" => ("tank", false),
+            "GLA" or "MRD" => ("tank", true),
+            "WHM" or "SCH" or "AST" or "SGE" => ("healer", false),
+            "CNJ" => ("healer", true),
+            "MNK" or "DRG" or "NIN" or "SAM" or "RPR" or "VPR" or "BRD" or "MCH" or "DNC" or "BLM" or "SMN" or "RDM" or "PCT" or "BLU" => ("dps", false),
+            "PGL" or "LNC" or "ROG" or "ARC" or "THM" or "ACN" => ("dps", true),
+            _ => (null, false),
+        };
+
+        /// <summary>One item a retainer wears, from the game's files: its slot (EquipSlotCategory), its equip level and item
+        /// level, and whether the retainer's class can wear it (null: unknown).</summary>
+        public sealed record GearPiece(int SlotCategory, int? LevelEquip, int? LevelItem, bool? CanWear);
+
+        // The slots a retainer's gear target checks, by EquipSlotCategory, as the app's Retainers tab (ipc/retainers.js).
+        private static string SlotOf(int category) => category switch
+        {
+            1 or 13 or 14 => "Weapon", 2 => "Off-hand", 3 => "Head", 4 or 15 or 19 or 20 or 21 or 22 or 23 => "Chest",
+            5 => "Gloves", 7 or 18 => "Legs", 8 => "Feet", 9 => "Earrings", 10 => "Necklace", 11 => "Bracelet", 12 => "Ring",
+            _ => "Other",
+        };
+
+        /// <summary>The classes with something in the off-hand slot (a shield or a gathering tool); only theirs is
+        /// checked when empty.</summary>
+        public static bool HasOffHand(string abbreviation) => abbreviation is "GLA" or "PLD" or "MIN" or "BTN";
+
+        /// <summary>
+        /// Whether a retainer's gear meets its gear target, as the app's Retainers tab: "meets" when every piece is for its
+        /// class and at the target (equip level in level mode, item level in ilvl mode) and no slot is empty; "short"
+        /// otherwise; null with no target set. The off-hand only counts when empty for the classes that have one.
+        /// </summary>
+        public static string? GearCheck(string abbreviation, string? targetMode, int? targetValue, IReadOnlyList<GearPiece> pieces)
+        {
+            if (string.IsNullOrEmpty(targetMode) || targetValue == null) return null;
+            foreach (var p in pieces)
+            {
+                if (p.CanWear == false) return "short";
+                var value = targetMode == "level" ? p.LevelEquip : p.LevelItem;
+                if (value != null && value != targetValue) return "short";
+            }
+            var slots = pieces.Select(p => SlotOf(p.SlotCategory)).ToList();
+            var needed = new List<string> { "Weapon", "Head", "Chest", "Gloves", "Legs", "Feet", "Earrings", "Necklace", "Bracelet" };
+            if (HasOffHand(abbreviation)) needed.Add("Off-hand");
+            if (needed.Any(n => !slots.Contains(n)) || slots.Count(x => x == "Ring") < 2) return "short";
+            return "meets";
+        }
+
+        /// <summary>The clock time something finishes, for after its countdown: "5:12 PM" today, "Thu 5:12 PM" later.</summary>
+        public static string FinishClock(long endsAtUnix, DateTime now)
+        {
+            var at = DateTimeOffset.FromUnixTimeSeconds(endsAtUnix).LocalDateTime;
+            var clock = at.ToString("t", CultureInfo.CurrentCulture);
+            return at.Date == now.Date ? clock : $"{at.ToString("ddd", CultureInfo.CurrentCulture)} {clock}";
+        }
+
         /// <summary>A retainer's venture, as the Retainers tab: "Idle", "Venture Complete" (waiting to be collected) or the
         /// time until it's done.</summary>
         public static string VentureStatus(bool hasVenture, long endsAt, long nowUnix)

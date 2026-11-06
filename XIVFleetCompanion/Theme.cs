@@ -19,15 +19,24 @@ namespace XIVFleetCompanion
     /// The colors that carry meaning: fine or done, needs a look, urgent, and less important text; then the colors that
     /// only say what a thing is: gil (gold), a house's address (blue) and a Free Company's name (lavender). Those three
     /// are null (plain text) with colour blind status colors, so the only colors left there are the ones that mean
-    /// something. The app uses the same colors (renderer/index.html).
+    /// something. FC points are aqua. The app uses the same colors (renderer/index.html).
     /// </summary>
     public sealed record StatusColors(Vector4 Good, Vector4 Warn, Vector4 Danger, Vector4 Dim,
-        Vector4? Gil = null, Vector4? Address = null, Vector4? Fc = null);
+        Vector4? Gil = null, Vector4? Address = null, Vector4? Fc = null, Vector4? FcPoints = null, RoleColors? Roles = null);
+
+    /// <summary>
+    /// A class's colour by its role, as the game groups them: tanks blue, healers green, damage red, each base class
+    /// (Gladiator, Conjurer, ...) a lighter shade of its job's. Null with colour blind status colors (plain text).
+    /// </summary>
+    public sealed record RoleColors(Vector4 Tank, Vector4 TankBase, Vector4 Healer, Vector4 HealerBase, Vector4 Dps, Vector4 DpsBase);
 
     public static class Theme
     {
         private static Vector4 Hex(uint rgb, float alpha = 1f) =>
             new(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f, alpha);
+
+        // Role colours for the Fleet and Dalamud looks (the app's too).
+        private static readonly RoleColors Roles = new(Hex(0x5B8DEF), Hex(0xA3BFF5), Hex(0x5FB870), Hex(0xA6D9AF), Hex(0xE06464), Hex(0xEFA6A6));
 
         /// <summary>
         /// Status colors for a look. colourBlind: blue for fine, yellow for a look, vermilion for urgent (from the
@@ -40,9 +49,10 @@ namespace XIVFleetCompanion
             return theme switch
             {
                 // The warning is orange rather than gold, so it is never mistaken for gil.
-                ThemeChoice.HighContrast => new StatusColors(Hex(0x3DFF8A), Hex(0xFF9F1A), Hex(0xFF4D4D), dim, Hex(0xFFE066), Hex(0x7FD4FF), Hex(0xD0BCFF)),
-                ThemeChoice.Dalamud => new StatusColors(new Vector4(0.55f, 0.85f, 0.55f, 1f), Hex(0xE8A04C), new Vector4(1f, 0.45f, 0.45f, 1f), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0)),
-                _ => new StatusColors(Hex(0x6FBF82), Hex(0xE8A04C), Hex(0xE57373), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0)),
+                ThemeChoice.HighContrast => new StatusColors(Hex(0x3DFF8A), Hex(0xFF9F1A), Hex(0xFF4D4D), dim, Hex(0xFFE066), Hex(0x7FD4FF), Hex(0xD0BCFF), Hex(0x6FF0E2),
+                    new RoleColors(Hex(0x6FA8FF), Hex(0xB5D2FF), Hex(0x5CE68A), Hex(0xADF2C4), Hex(0xFF6B6B), Hex(0xFFB3B3))),
+                ThemeChoice.Dalamud => new StatusColors(new Vector4(0.55f, 0.85f, 0.55f, 1f), Hex(0xE8A04C), new Vector4(1f, 0.45f, 0.45f, 1f), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0), Hex(0x5FD3C8), Roles),
+                _ => new StatusColors(Hex(0x6FBF82), Hex(0xE8A04C), Hex(0xE57373), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0), Hex(0x5FD3C8), Roles),
             };
         }
 

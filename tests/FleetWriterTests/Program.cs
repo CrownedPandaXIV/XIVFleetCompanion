@@ -360,6 +360,28 @@ internal static class Program
         Check(FleetOrder.MatchesWords("Diadochos Bottoms of Healing", "diadochos  healing") && FleetOrder.MatchesWords("Diadochos Bottoms of Healing", "heal diad")
               && !FleetOrder.MatchesWords("Diadochos Bottoms of Casting", "diadochos healing") && FleetOrder.MatchesWords("Anything", "  ") && FleetOrder.MatchesWords(null, ""),
             "batch 3: searching word by word, in any order, ignoring case");
+        Check(FleetReader.JobRole("PLD") == ("tank", false) && FleetReader.JobRole("GLA") == ("tank", true) && FleetReader.JobRole("CNJ") == ("healer", true)
+              && FleetReader.JobRole("SGE") == ("healer", false) && FleetReader.JobRole("ACN") == ("dps", true) && FleetReader.JobRole("BTN").Role == null,
+            "retainers: a class's role for its colour, base classes marked, gatherers none");
+        var fullSet = new List<FleetReader.GearPiece>
+        {
+            new(13, 90, 610, true), new(3, 90, 610, true), new(4, 90, 610, true), new(5, 90, 610, true), new(7, 90, 610, true), new(8, 90, 610, true),
+            new(9, 90, 610, true), new(10, 90, 610, true), new(11, 90, 610, true), new(12, 90, 610, true), new(12, 90, 610, true),
+        };
+        Check(FleetReader.GearCheck("WHM", "level", 90, fullSet) == "meets" && FleetReader.GearCheck("WHM", "ilvl", 610, fullSet) == "meets"
+              && FleetReader.GearCheck("WHM", null, null, fullSet) == null
+              && FleetReader.GearCheck("WHM", "level", 100, fullSet) == "short"
+              && FleetReader.GearCheck("WHM", "level", 90, fullSet.Take(10).ToList()) == "short"
+              && FleetReader.GearCheck("PLD", "level", 90, fullSet) == "short"
+              && FleetReader.GearCheck("WHM", "level", 90, fullSet.Select((piece, index) => index == 2 ? piece with { CanWear = false } : piece).ToList()) == "short",
+            "retainers: gear meets its target when every slot is at it and for the class (a shield only for those with one), short otherwise, none without a target");
+        var noonToday = new DateTime(2026, 11, 5, 12, 0, 0, DateTimeKind.Local);
+        var laterToday = new DateTimeOffset(noonToday.AddHours(3)).ToUnixTimeSeconds();
+        var tomorrowAt = new DateTimeOffset(noonToday.AddDays(1)).ToUnixTimeSeconds();
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        Check(FleetReader.FinishClock(laterToday, noonToday) == noonToday.AddHours(3).ToString("t", culture)
+              && FleetReader.FinishClock(tomorrowAt, noonToday) == $"{noonToday.AddDays(1).ToString("ddd", culture)} {noonToday.AddDays(1).ToString("t", culture)}",
+            "retainers: when a venture is done, with the day when it's not today");
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);

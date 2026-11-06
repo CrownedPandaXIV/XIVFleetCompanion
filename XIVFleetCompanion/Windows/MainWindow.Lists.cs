@@ -20,7 +20,7 @@ public partial class MainWindow
     private string fcsFilter = "";
 
     private FleetTable<RosterRow>? rosterTable;
-    private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl)>? retainersTable;
+    private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>? retainersTable;
     private FleetTable<PcRow>? pcsTable;
     private FleetTable<FcRow>? fcsTable;
 
@@ -62,11 +62,11 @@ public partial class MainWindow
         else RightNumber(gil, Palette.Gil);
     }
 
-    // A supply against its warning: red under half of it, amber under it, green at or above it. Not coloured when it
-    // doesn't count (no subs built, or no longer synced), as the app's warnings.
+    // A supply against its warning: red under half of it, amber under it, green at or above it. Dim when it doesn't
+    // count (no subs built, or no longer synced), as the app's warnings leave those out.
     private Vector4? SupplyColor(int? have, double warning, bool counted)
     {
-        if (!counted || have == null) return null;
+        if (!counted || have == null) return Dim;
         if (warning <= 0) return Green;
         if (have.Value < warning / 2) return Red;
         if (have.Value < warning) return Amber;
@@ -100,7 +100,7 @@ public partial class MainWindow
             if (c.FcName == null) Colored(Dim, "—"); else Tinted(Palette.Fc, c.FcName);
             if (c.FcPoints.HasValue) Hover($"{c.FcPoints.Value:N0} FC points");
         }, c => c.FcName ?? "", c => c.FcName == null),
-        new("fcPoints", "FC Points", c => RightNumber(c.FcPoints), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
+        new("fcPoints", "FC Points", c => RightNumber(c.FcPoints, Palette.FcPoints), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
         new("house", "House", c => { if (c.House == null) Colored(Dim, "—"); else Tinted(Palette.Address, c.House); }, c => c.House ?? "", c => c.House == null),
         new("gil", "Gil", c => GilCell(c.Gil), c => c.Gil),
         new("ceruleum", "Ceruleum", c =>
@@ -161,22 +161,33 @@ public partial class MainWindow
 
     // ---- Retainers ----
 
-    private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl)> RetainersTable => retainersTable ??=
-        new FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl)>("retainers", plugin.Configuration, new List<FleetColumn<(RetainerRow R, string Job, string Venture, double? Ilvl)>>
+    private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)> RetainersTable => retainersTable ??=
+        new FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>("retainers", plugin.Configuration, new List<FleetColumn<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>>
     {
         new("retainer", "Retainer", x => ImGui.TextUnformatted(x.R.Name), x => x.R.Name, Locked: true),
+        // The owner once, on their first retainer (while the table isn't sorted by a column).
         new("owner", "Owner", x =>
         {
+            if (RetainersTable.SameAsAbove) return;
             CharacterCell(x.R.Owner, x.R.World);
             if (x.R.Account.Length > 0) Hover($"Account: {x.R.Account}");
         }, x => x.R.Owner),
         new("account", "Account", x => ImGui.TextUnformatted(x.R.Account.Length > 0 ? x.R.Account : "—"), x => x.R.Account, Hidden: true),
-        new("job", "Class/Level", x => ImGui.TextUnformatted(x.Job.Length > 0 ? $"{x.Job}/{(x.R.Level.HasValue ? x.R.Level.Value.ToString(CultureInfo.InvariantCulture) : "?")}" : "—"),
-            x => x.Job, x => x.Job.Length == 0),
+        // The class in its role's colour, the level softer.
+        new("job", "Class/Level", x =>
+        {
+            if (x.Job.Length == 0) { Colored(Dim, "—"); return; }
+            Tinted(RoleColor(x.Job), x.Job);
+            ImGui.SameLine(0, ImGui.CalcTextSize(" ").X);
+            Colored(Dim, x.R.Level.HasValue ? x.R.Level.Value.ToString(CultureInfo.InvariantCulture) : "?");
+        }, x => x.Job, x => x.Job.Length == 0),
         new("gil", "Gil", x => GilCell(x.R.Gil), x => x.R.Gil ?? 0, x => x.R.Gil == null),
         new("ilvl", "Avg ilvl", x =>
         {
-            if (x.Ilvl.HasValue) TableCells.Right(x.Ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture)); else Colored(Dim, "—");
+            // Green when the gear meets the retainer's gear target, amber when it falls short, plain with no target.
+            var meets = x.Check == "meets" ? Green : x.Check == "short" ? Amber : (Vector4?)null;
+            if (x.Ilvl.HasValue) TableCells.Right(x.Ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture), meets); else Colored(Dim, "—");
+            if (x.Check != null) Hover(x.Check == "meets" ? "Every slot meets the gear target." : "Short of the gear target: the app's Retainers tab shows which slots (hover Avg ilvl there).");
             if (!x.R.ItemsSeen) Hover("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
         }, x => x.Ilvl ?? 0, x => x.Ilvl == null),
         new("venture", "Venture", x => ImGui.TextUnformatted(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
@@ -186,7 +197,13 @@ public partial class MainWindow
             var status = FleetReader.VentureStatus(x.R.HasVenture, x.R.VentureEndsAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             if (status == "Venture Complete") Colored(Green, status);
             else if (status == "Idle") Colored(x.R.Job > 0 ? Amber : Dim, status);
-            else ImGui.TextUnformatted(status);
+            else
+            {
+                // The countdown, then when it's done, softer.
+                ImGui.TextUnformatted(status);
+                ImGui.SameLine();
+                Colored(Dim, FleetReader.FinishClock(x.R.VentureEndsAt, DateTime.Now));
+            }
         }, x => x.R.VentureEndsAt, x => !x.R.HasVenture || x.R.VentureEndsAt <= 0),
         new("target", "Gear target", x =>
         {
@@ -194,7 +211,22 @@ public partial class MainWindow
             else ImGui.TextUnformatted($"{(x.R.TargetMode == "level" ? "Level" : "ilvl")} {x.R.TargetValue}{(x.R.OnlyCrafted ? ", crafted only" : "")}");
             Hover("Gear targets and the slot-by-slot check are set and shown in the app's Retainers tab for now.");
         }, x => $"{x.R.TargetMode} {x.R.TargetValue:D4}", x => x.R.TargetMode == null),
-    }, x => x.R.Account, "retainers");
+    }, x => x.R.Account, "retainers", runKey: x => $"{x.R.Owner}@{x.R.World}");
+
+    // A class's colour by its role (tanks blue, healers green, damage red, a base class lighter); null for gatherers,
+    // crafters, or with colour blind status colours.
+    private Vector4? RoleColor(string abbreviation)
+    {
+        if (Palette.Roles is not { } roles) return null;
+        var (role, isBase) = FleetReader.JobRole(abbreviation);
+        return role switch
+        {
+            "tank" => isBase ? roles.TankBase : roles.Tank,
+            "healer" => isBase ? roles.HealerBase : roles.Healer,
+            "dps" => isBase ? roles.DpsBase : roles.Dps,
+            _ => null,
+        };
+    }
 
     private void DrawRetainers()
     {
@@ -214,8 +246,15 @@ public partial class MainWindow
         }
         // In the Roster's order (each owner's place in it), then hiring order, as the app.
         var rows = read.Retainers
-            .Select(r => (R: r, Job: GameNames.Job(r.Job), Venture: GameNames.Venture(r.VentureId),
-                Ilvl: read.Gear.TryGetValue(r.RetainerId, out var items) ? FleetReader.AverageItemLevel(items, GameNames.ItemLevel) : null))
+            .Select(r =>
+            {
+                var job = GameNames.Job(r.Job);
+                var items = read.Gear.TryGetValue(r.RetainerId, out var worn) ? worn : null;
+                var pieces = (items ?? new List<int>()).Select(i => GameNames.Gear(i, job)).OfType<FleetReader.GearPiece>().ToList();
+                return (R: r, Job: job, Venture: GameNames.Venture(r.VentureId),
+                    Ilvl: items != null ? FleetReader.AverageItemLevel(items, GameNames.ItemLevel) : null,
+                    Check: FleetReader.GearCheck(job, r.TargetMode, r.TargetValue, pieces));
+            })
             .Where(x => Matches(retainersFilter, x.R.Owner, x.R.Name, x.R.Account, x.Job, x.Venture))
             .ToList();
         RetainersTable.Draw(rows);
@@ -317,7 +356,7 @@ public partial class MainWindow
         new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
         new("world", "World", f => ImGui.TextUnformatted(GameNames.World(f.HomeWorld) is { Length: > 0 } w ? w : "—"), f => GameNames.World(f.HomeWorld)),
         new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
-        new("points", "FC Points", f => RightNumber(f.Points), f => f.Points ?? 0, f => f.Points == null),
+        new("points", "FC Points", f => RightNumber(f.Points, Palette.FcPoints), f => f.Points ?? 0, f => f.Points == null),
         new("members", "Members", f => RightNumber(f.Members), f => f.Members ?? 0, f => f.Members == null),
         new("house", "House", f =>
         {

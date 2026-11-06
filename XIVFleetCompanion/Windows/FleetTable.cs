@@ -38,6 +38,7 @@ public sealed class FleetTable<T>
     private readonly Func<T, string?>? account;
     private readonly string countNoun;
     private readonly Func<IReadOnlyList<T>, string?>? groupNote;
+    private readonly Func<T, string>? runKey;
     private bool resetSort;
     private bool sorted;
 
@@ -45,9 +46,12 @@ public sealed class FleetTable<T>
     /// <param name="account">A row's account label, for Group by account (null: the table doesn't group).</param>
     /// <param name="countNoun">What a row is ("characters"), for each account's band: "Account 2 · 40 characters".</param>
     /// <param name="groupNote">Anything else the band says about the account's rows (null: nothing).</param>
+    /// <param name="runKey">Which rows belong together (a character's subs): while the table isn't sorted by a column, a
+    /// row with the same key as the one above has <see cref="SameAsAbove"/> set, so a column can leave out what it repeats.</param>
     public FleetTable(string id, Configuration config, IReadOnlyList<FleetColumn<T>> columns, Func<T, string?>? account = null,
-        string countNoun = "", Func<IReadOnlyList<T>, string?>? groupNote = null)
+        string countNoun = "", Func<IReadOnlyList<T>, string?>? groupNote = null, Func<T, string>? runKey = null)
     {
+        this.runKey = runKey;
         this.id = id;
         this.config = config;
         this.columns = columns;
@@ -58,6 +62,9 @@ public sealed class FleetTable<T>
 
     /// <summary>Whether a column sorts the table (as of the last frame drawn).</summary>
     public bool Sorted => sorted;
+
+    /// <summary>While a row is drawn: whether it belongs with the row above (the same run key, the table not sorted).</summary>
+    public bool SameAsAbove { get; private set; }
 
     private bool GroupByAccount
     {
@@ -244,6 +251,7 @@ public sealed class FleetTable<T>
                     continue;
                 }
                 using var rowId = ImRaii.PushId(i);
+                SameAsAbove = runKey != null && !sorted && i > 0 && lines[i - 1].Heading == null && runKey(lines[i - 1].Row) == runKey(line.Row);
                 foreach (var c in shown)
                 {
                     ImGui.TableNextColumn();
@@ -253,6 +261,7 @@ public sealed class FleetTable<T>
             }
         }
         clipper.Destroy();
+        SameAsAbove = false;
     }
 }
 
@@ -270,6 +279,21 @@ public static class TableCells
             using (ImRaii.PushColor(ImGuiCol.Text, c)) ImGui.TextUnformatted(text);
         }
         else ImGui.TextUnformatted(text);
+    }
+
+    /// <summary>A thin bar, filled to fraction (0 to 1), centred on the line, in the look's accent on a frame-coloured
+    /// track; then the cell goes on beside it.</summary>
+    public static void Bar(double fraction, float width)
+    {
+        var height = ImGui.GetTextLineHeight();
+        var thickness = Math.Max(3f, height * 0.22f);
+        var start = ImGui.GetCursorScreenPos();
+        var top = start.Y + (height - thickness) / 2;
+        var draw = ImGui.GetWindowDrawList();
+        draw.AddRectFilled(new Vector2(start.X, top), new Vector2(start.X + width, top + thickness), ImGui.GetColorU32(ImGuiCol.FrameBgActive), thickness / 2);
+        var filled = (float)Math.Clamp(fraction, 0, 1) * width;
+        if (filled > 0) draw.AddRectFilled(new Vector2(start.X, top), new Vector2(start.X + filled, top + thickness), ImGui.GetColorU32(ImGuiCol.CheckMark), thickness / 2);
+        ImGui.Dummy(new Vector2(width, height));
     }
 
     /// <summary>Filled and empty dots, filled out of total (for example subs out of the sub slots unlocked).</summary>

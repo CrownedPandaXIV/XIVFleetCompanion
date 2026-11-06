@@ -66,7 +66,9 @@ public partial class MainWindow
         if (salvage == null) return;
         var rows = salvage.Where(s => Matches(salvageFilter, s.Character, s.World, s.Account)).ToList();
         // The fleet's total first, as the app's Summary tile (the characters shown, when a filter is typed).
-        Heading($"Fleet-Wide Salvage Total: {Number(rows.Sum(s => s.Gil))} gil{(rows.Count < salvage.Count ? " (the characters shown)" : "")}");
+        ImGui.Spacing();
+        GilLine("Fleet-Wide Salvage Total:", rows.Sum(s => s.Gil), rows.Count < salvage.Count ? " (the characters shown)" : "");
+        ImGui.Separator();
         ImGui.TextUnformatted($"{Number(rows.Sum(s => s.Standard))} standard, {Number(rows.Sum(s => s.Extravagant))} extravagant");
         Colored(Dim, "Salvage in bags, retainers and saddlebags, and in the FC chest (counted on one member), at the fixed salvage prices.");
         if (rows.Count == 0) { ImGui.TextUnformatted(salvage.Count == 0 ? "No salvage held." : "Nothing matches."); return; }
@@ -75,8 +77,7 @@ public partial class MainWindow
 
     private FleetTable<IncomeRow> IncomeTable => incomeTable ??= new FleetTable<IncomeRow>("income", plugin.Configuration, new List<FleetColumn<IncomeRow>>
     {
-        new("character", "Character", c => ImGui.TextUnformatted(c.Character), c => c.Character, Locked: true),
-        new("world", "World", c => Colored(Dim, c.World), c => c.World),
+        new("character", "Character", c => CharacterCell(c.Character, c.World), c => c.Character, Locked: true),
         new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("subs", "Subs", c => RightNumber(c.Subs), c => c.Subs),
         new("salvage", "Salvage / day", c =>
@@ -100,8 +101,7 @@ public partial class MainWindow
     private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration,
         new List<FleetColumn<FleetReader.VentureSummary>>
         {
-            new("character", "Character", v => ImGui.TextUnformatted(v.Character), v => v.Character, Locked: true),
-            new("world", "World", v => Colored(Dim, v.World.Length > 0 ? v.World : "—"), v => v.World),
+            new("character", "Character", v => CharacterCell(v.Character, v.World), v => v.Character, Locked: true),
             new("account", "Account", v => ImGui.TextUnformatted(v.Account.Length > 0 ? v.Account : "—"), v => v.Account, Hidden: true),
             new("retainers", "Retainers", v => RightNumber(v.Retainers), v => v.Retainers),
             new("rewards", "Rewards", v => RightNumber(v.Rewards), v => v.Rewards),
