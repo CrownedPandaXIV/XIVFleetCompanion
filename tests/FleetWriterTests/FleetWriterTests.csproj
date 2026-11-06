@@ -22,10 +22,14 @@
     <Compile Include="..\..\XIVFleetCompanion\FleetReader.cs" Link="FleetReader.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FleetOrder.cs" Link="FleetOrder.cs" />
     <Compile Include="..\..\XIVFleetCompanion\PartsPlanner.cs" Link="PartsPlanner.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Universalis.cs" Link="Universalis.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Market.cs" Link="Market.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- Made-up fleets and the app's Parts answers (the app's tests/db/parts-fixture.js), for PartsPlanner. -->
     <None Include="parts-fixture.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Canned Universalis listings and the app's live market answers (the app's tests/market-fixture.js). -->
+    <None Include="market-fixture.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />

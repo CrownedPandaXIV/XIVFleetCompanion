@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Pcs, Check, SpeedTest, Status, Settings }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -120,6 +120,7 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Inventory: DrawInventory(); break;
             case Tab.Salvage: DrawSalvage(); break;
             case Tab.Income: DrawIncome(); break;
+            case Tab.Market: DrawMarket(); break;
             case Tab.Pcs: DrawPcs(); break;
             case Tab.Check: plugin.CheckPage.DrawPage(); break;
             case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
@@ -204,6 +205,9 @@ public partial class MainWindow : Window, IDisposable
                     Entry(Tab.Inventory, FontAwesomeIcon.BoxOpen, "Inventory", folded, null, p.Dim, "What the fleet holds, and Where is it?");
                     Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
                     Entry(Tab.Income, FontAwesomeIcon.Coins, "Income", folded, null, p.Dim, "Real income from the subs, and venture rewards");
+                    var undercutNow = reader.Market.Data is { Live: { Error: null } } marketNow ? Compared(marketNow).Count(x => x.Undercut) : 0;
+                    Entry(Tab.Market, FontAwesomeIcon.Store, "Gil & Market", folded, undercutNow > 0 ? $"{undercutNow} undercut" : null, p.Warn,
+                        undercutNow > 0 ? $"{undercutNow} listing{(undercutNow == 1 ? " is" : "s are")} undercut on its world" : "Gil per account, and listings unsold for a while");
                     break;
                 case "Tools":
                     Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);
@@ -536,8 +540,20 @@ public partial class MainWindow : Window, IDisposable
             var perDay = FleetReader.SummarizeVentures(ventures.Rows, ventures.WindowDays, VendorPrice).Sum(v => v.PerDay);
             ImGui.TextUnformatted($"Venture income: {Gil(perDay)} gil a day");
             Colored(Dim, $"Last {ventures.WindowDays} days, at what a vendor pays (Income page)");
+            // With live prices, the same rewards at the cheapest listing on each character's world, data center and region.
+            if (VentureMarketPerDay(ventures) is { } market)
+                Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(s => $"{Gil(market.Values.Sum(v => v[s]))} ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})")) + " a day");
         }
         if (reader.Ventures.Error != null) Colored(Amber, reader.Ventures.Error);
+        // As the app's Listings Unsold for a While tile.
+        if (reader.Market.Data is { } marketRead)
+        {
+            var unsold = marketRead.Listings.Where(l => l.Stale).ToList();
+            var undercut = marketRead.Live is { Error: null } ? Compared(marketRead).Count(x => x.Undercut) : 0;
+            var text = $"Listings unsold for a while: {Number(unsold.Count)} (up for {marketRead.Settings.StaleDays}+ days, {Gil(unsold.Sum(l => l.Value))} gil{(undercut > 0 ? $" · {undercut} undercut" : "")}) (Gil & Market page)";
+            if (unsold.Count > 0 || undercut > 0) Colored(Amber, text); else ImGui.TextUnformatted(text);
+        }
+        else if (reader.Market.Error != null) Colored(Amber, reader.Market.Error);
 
         var summary = reader.Summary.Data;
         Heading("Supplies");

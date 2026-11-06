@@ -126,6 +126,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   each needs; the sidebar, the Summary's count and the info bar ("2 need parts") count them too. Worked out in the
   plugin from the app's views, the same way as the app (its tests write made-up fleets and the app's answers, which the
   plugin's tests check against). Sub Rules and Craft? are set in the app; Look ahead comes later in 2.x.
+- **Stage 7: market prices.** A **Gil & Market** page, as the app's tab: the fleet's gil (characters and retainers)
+  and gil per account, what's up for sale, and the listings unsold for a while (the app's days setting), oldest first.
+  With **Live Market Prices** on in the app's Settings, the plugin asks Universalis itself (only item numbers and
+  world, data center and region names are sent; answers kept 30 minutes): each listing's cheapest rival on its world,
+  data center and region, the **undercut listings** (someone sells cheaper on the same world; biggest gap first, and
+  a count beside the page in the sidebar), and venture rewards at market prices on the Income page and the Summary.
+  With it off, nothing is asked. The Summary shows the listings unsold for a while, as the app's tile. The app's tests
+  run its own Universalis code on canned listings, and the plugin's tests check it gets the same answers.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

@@ -106,7 +106,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, parts, roster, retainers, fcs, inventory, salvage, income, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
+            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, parts, roster, retainers, fcs, inventory, salvage, income, market, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
 
         AttachInfoBar();

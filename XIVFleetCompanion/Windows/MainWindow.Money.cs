@@ -19,6 +19,8 @@ public partial class MainWindow
     private FleetTable<SalvageRow>? salvageTable;
     private FleetTable<IncomeRow>? incomeTable;
     private FleetTable<FleetReader.VentureSummary>? venturesTable;
+    private FleetTable<FleetReader.VentureSummary>? venturesLiveTable;
+    private Dictionary<long, Dictionary<string, double>>? ventureMarket;
 
     private static string Gil(double value) => Math.Round(value).ToString("N0", CultureInfo.CurrentCulture);
 
@@ -98,8 +100,11 @@ public partial class MainWindow
         new("real", "Real net / day", c => { if (c.Enough) TableCells.Right(Gil(c.PerDay), c.PerDay > 0 ? Green : Red); }, c => c.Enough ? c.PerDay : 0, c => !c.Enough),
     }, c => c.Account, "characters");
 
-    private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration,
-        new List<FleetColumn<FleetReader.VentureSummary>>
+    private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration, VentureColumns(false), v => v.Account, "characters");
+    private FleetTable<FleetReader.VentureSummary> VenturesLiveTable => venturesLiveTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncomeLive", plugin.Configuration, VentureColumns(true), v => v.Account, "characters");
+
+    // With live prices, the rewards a day at the cheapest listing on the character's world, data center and region too.
+    private List<FleetColumn<FleetReader.VentureSummary>> VentureColumns(bool live) => new List<FleetColumn<FleetReader.VentureSummary>>
         {
             new("character", "Character", v => CharacterCell(v.Character, v.World), v => v.Character, Locked: true),
             new("account", "Account", v => ImGui.TextUnformatted(v.Account.Length > 0 ? v.Account : "—"), v => v.Account, Hidden: true),
@@ -107,7 +112,12 @@ public partial class MainWindow
             new("rewards", "Rewards", v => RightNumber(v.Rewards), v => v.Rewards),
             new("perDay", "Vendor value / day", v => TableCells.Right(Gil(v.PerDay), Green), v => v.PerDay),
             new("top", "Most valuable", v => ImGui.TextUnformatted(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
-        }, v => v.Account, "characters");
+        }.Concat(live ? Universalis.Scopes.Select(s => new FleetColumn<FleetReader.VentureSummary>($"market{s}", $"Market / day ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})",
+            v => { if (VentureMarketOf(v.Cid, s) is double g) TableCells.Right(Gil(g), Green); else Colored(Dim, "—"); },
+            v => VentureMarketOf(v.Cid, s) ?? 0)) : Enumerable.Empty<FleetColumn<FleetReader.VentureSummary>>()).ToList();
+
+    private double? VentureMarketOf(long cid, string scope) =>
+        ventureMarket != null && ventureMarket.TryGetValue(cid, out var byScope) && byScope.TryGetValue(scope, out var gil) ? gil : null;
 
     private void DrawIncome()
     {
@@ -151,9 +161,13 @@ public partial class MainWindow
         Heading($"Retainer ventures: {Gil(ventures.Sum(v => v.PerDay))} gil a day");
         Colored(Dim, $"Venture rewards AutoRetainer recorded over the last {income.WindowDays} days, at what a vendor pays (items are often worth more on the market board). " +
                      $"{Number(ventures.Sum(v => (long)v.Rewards))} rewards, {Gil(ventures.Sum(v => v.Gil))} gil.");
-        VenturesTable.DrawControls();
+        ventureMarket = VentureMarketPerDay(new VenturesRead(income.Ventures, income.WindowDays));
+        if (ventureMarket != null)
+            Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(s => $"{Gil(ventureMarket.Values.Sum(v => v[s]))} ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})")) + " a day, from Universalis.");
+        var table = ventureMarket != null ? VenturesLiveTable : VenturesTable;
+        table.DrawControls();
         var rows = ventures.Where(v => Matches(incomeFilter, v.Character, v.World, v.Account)).ToList();
         if (rows.Count == 0) { ImGui.TextUnformatted(ventures.Count == 0 ? "No venture rewards recorded in this time (AutoRetainer: \"Record statistics\")." : "Nothing matches."); return; }
-        VenturesTable.Draw(rows);
+        table.Draw(rows);
     }
 }

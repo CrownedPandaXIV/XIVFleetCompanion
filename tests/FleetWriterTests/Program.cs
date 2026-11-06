@@ -15,6 +15,97 @@ internal static class Program
     private static int failures;
     private static int passes;
 
+    // Market prices: the plugin's Universalis code, given the same canned listings as the app's (through a stand-in for the
+    // web), works out the same rivals, undercut listings and venture values (the app's tests/market-fixture.js).
+    private sealed class CannedUniversalis : System.Net.Http.HttpMessageHandler
+    {
+        private readonly System.Text.Json.JsonElement c;
+        public int Asked;
+        public CannedUniversalis(System.Text.Json.JsonElement fixtureCase) => c = fixtureCase;
+        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken token)
+        {
+            Asked++;
+            var path = request.RequestUri!.AbsolutePath;
+            System.Net.Http.HttpResponseMessage Reply(int status, string body) => new((System.Net.HttpStatusCode)status) { Content = new System.Net.Http.StringContent(body) };
+            if (path == "/api/v2/data-centers") return Task.FromResult(Reply(200, c.GetProperty("dataCenters").GetRawText()));
+            if (path == "/api/v2/worlds") return Task.FromResult(Reply(200, c.GetProperty("worlds").GetRawText()));
+            var m = System.Text.RegularExpressions.Regex.Match(path, @"^/api/v2/([^/]+)/([0-9,]+)$");
+            if (!m.Success) return Task.FromResult(Reply(404, "{}"));
+            var scope = Uri.UnescapeDataString(m.Groups[1].Value);
+            var ids = m.Groups[2].Value.Split(',').ToList();
+            var canned = c.GetProperty("canned");
+            var has = canned.TryGetProperty(scope, out var byItem);
+            var found = ids.Where(id => has && byItem.TryGetProperty(id, out _)).ToList();
+            if (found.Count == 0) return Task.FromResult(Reply(404, "{}"));
+            string Item(string id) => $"{{\"itemID\":{id},\"listings\":{byItem.GetProperty(id).GetRawText()}}}";
+            return Task.FromResult(Reply(200, ids.Count == 1 ? Item(ids[0]) : $"{{\"items\":{{{string.Join(",", found.Select(id => $"\"{id}\":{Item(id)}"))}}}}}"));
+        }
+    }
+
+    // The Gil & Market page read through the database (stand-ins for the views with their PostgreSQL types), Live Market
+    // Prices off: nothing is asked of Universalis.
+    private static async Task MarketReadFromTheDatabase(NpgsqlConnection conn)
+    {
+        await Exec(conn, @"DROP TABLE IF EXISTS fleet_market_settings_view, fleet_market_accounts_view, fleet_market_listings_view;
+            CREATE TABLE fleet_market_settings_view (stale_days int, live_prices boolean);
+            CREATE TABLE fleet_market_accounts_view (account_label text, characters bigint, retainers bigint, character_gil numeric, retainer_gil numeric, total numeric);
+            CREATE TABLE fleet_market_listings_view (retainer_id numeric, owner_cid numeric, slot int, item_id int, quantity int, hq boolean, unit_price bigint,
+              first_seen_at timestamptz, retainer_name text, owner_name text, world text, account_label text, sort_index int, value bigint, age_days numeric, stale boolean);
+            INSERT INTO fleet_market_settings_view VALUES (7, false);
+            INSERT INTO fleet_market_accounts_view VALUES ('A', 2, 3, 1000, 507, 1507), ('Ungrouped', 1, 0, 25, 0, 25);
+            INSERT INTO fleet_market_listings_view VALUES
+              (33777097243660300, 18014498578000001, 0, 5111, 3, true, 450, now() - interval '9 days', 'Ret A', 'Aki', 'Maduin', 'A', 2, 1350, 9.000001, true),
+              (33777097243660301, 18014498578000001, 4, 27800, 1, false, 125000, now() - interval '2 hours', 'Ret B', 'Aki', 'Maduin', 'A', 2, 125000, 0.0833, false),
+              (33777097243660302, 999, 1, 40001, 99, false, 1, now(), NULL, NULL, NULL, NULL, NULL, 99, 0, false)");
+        var counting = new CannedUniversalis(default);
+        var m = await FleetReader.ReadMarket(conn, new Universalis(new System.Net.Http.HttpClient(counting), "https://universalis.test"));
+        Check(m.Settings == new MarketSettings(7, false) && m.Accounts.Count == 2 && m.Accounts[0].Total == 1507 && m.Listings.Count == 3
+              && m.Listings.Count(l => l.Stale) == 1 && m.Listings[0].RetainerId == 33777097243660300 && m.Listings[0].Hq && Math.Abs(m.Listings[0].AgeDays - 9) < 0.001
+              && m.Listings[2].OwnerName == null && m.Live == null && counting.Asked == 0,
+            $"market: the Gil & Market page reads the database's views (gil per account, listings unsold for a while), and with Live Market Prices off asks Universalis nothing ({m.Listings.Count} listings, {counting.Asked} asked)");
+        await Exec(conn, "DROP TABLE fleet_market_settings_view, fleet_market_accounts_view, fleet_market_listings_view");
+    }
+
+    private static async Task MarketAgainstTheApp()
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "market-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        static string Price(MarketPrice? p) => p == null ? "none" : $"{p.Price.ToString(System.Globalization.CultureInfo.InvariantCulture)}@{p.World ?? "-"}";
+        static string PriceJson(System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? "none"
+            : $"{e.GetProperty("price").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}@{(e.GetProperty("world").ValueKind == System.Text.Json.JsonValueKind.Null ? "-" : e.GetProperty("world").GetString())}";
+        foreach (var c in doc.RootElement.GetProperty("cases").EnumerateArray())
+        {
+            var handler = new CannedUniversalis(c);
+            var universalis = new Universalis(new System.Net.Http.HttpClient(handler), "https://universalis.test");
+            var exclude = c.GetProperty("retainers").EnumerateArray().Select(r => Universalis.RetainerKey(r.GetProperty("name").GetString()!, r.GetProperty("world").GetString())).ToHashSet();
+            var listings = c.GetProperty("listings").EnumerateArray().Select(l => new ListingRow(long.Parse(l.GetProperty("retainer_id").GetString()!, System.Globalization.CultureInfo.InvariantCulture), 0,
+                l.GetProperty("slot").GetInt32(), l.GetProperty("item_id").GetInt32(), l.GetProperty("quantity").GetInt32(), l.GetProperty("hq").GetBoolean(), l.GetProperty("unit_price").GetInt64(),
+                null, l.GetProperty("retainer_name").GetString(), null, l.GetProperty("world").GetString(), null, null, 0, 0, false)).ToList();
+            var ventures = c.GetProperty("ventures").EnumerateArray().Select(v => (Cid: v.GetProperty("cid").GetString()!, World: v.GetProperty("world").GetString()!,
+                Items: v.GetProperty("items").EnumerateArray().Select(i => (i.GetProperty("item_id").GetInt32(), i.GetProperty("quantity").GetInt64(), i.GetProperty("hq_quantity").GetInt64())).ToList())).ToList();
+            var vendor = c.GetProperty("vendor").EnumerateObject().ToDictionary(p => int.Parse(p.Name, System.Globalization.CultureInfo.InvariantCulture), p => p.Value.GetDouble());
+            var market = await universalis.MarketFor(listings.Select(l => l.World).Concat(ventures.Select(v => v.World)),
+                listings.Select(l => l.ItemId).Concat(ventures.SelectMany(v => v.Items.Select(i => i.Item1))));
+            var expected = c.GetProperty("expected");
+            var names = expected.GetProperty("names").EnumerateArray().Select(n => $"{n.GetProperty("world").GetString()}:{n.GetProperty("names").GetProperty("dc").GetString() ?? "-"}:{n.GetProperty("names").GetProperty("region").GetString() ?? "-"}").ToList();
+            var mineNames = market.Select(kv => $"{kv.Key}:{kv.Value.Names.Dc ?? "-"}:{kv.Value.Names.Region ?? "-"}").ToList();
+            var compared = MarketMath.Compare(listings, market, exclude).Select(x => $"{x.Listing.RetainerId}|{x.Listing.Slot} {x.Undercut} {(x.UndercutBy?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-")} {Price(x.World)} {Price(x.Dc)} {Price(x.Region)}").ToList();
+            var app = expected.GetProperty("listings").EnumerateArray().Select(x => $"{x.GetProperty("retainer_id").GetString()}|{x.GetProperty("slot").GetInt32()} {x.GetProperty("undercut").GetBoolean()} "
+                + $"{(x.GetProperty("undercut_by").ValueKind == System.Text.Json.JsonValueKind.Null ? "-" : x.GetProperty("undercut_by").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture))} "
+                + $"{PriceJson(x.GetProperty("others").GetProperty("world"))} {PriceJson(x.GetProperty("others").GetProperty("dc"))} {PriceJson(x.GetProperty("others").GetProperty("region"))}").ToList();
+            var firstListing = Enumerable.Range(0, Math.Max(compared.Count, app.Count)).FirstOrDefault(k => k >= compared.Count || k >= app.Count || compared[k] != app[k], -1);
+            var ventureMine = ventures.Select(v => $"{v.Cid} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(MarketMath.VentureGil(v.Items, market.GetValueOrDefault(v.World), s, vendor, exclude), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
+            var ventureApp = expected.GetProperty("ventures").EnumerateArray().Select(v => $"{v.GetProperty("cid").GetString()} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(v.GetProperty("gil").GetProperty(s).GetDouble(), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
+            var asked = handler.Asked;
+            await universalis.MarketFor(listings.Select(l => l.World), listings.Select(l => l.ItemId));
+            Check(names.SequenceEqual(mineNames) && firstListing < 0 && ventureMine.SequenceEqual(ventureApp) && handler.Asked == asked,
+                $"market prices the same as the app's, {c.GetProperty("name").GetString()}: {compared.Count} listings ({compared.Count(x => x.Contains(" True "))} undercut), {ventureMine.Count} characters' ventures, asked again within 30 minutes: kept"
+                + (firstListing >= 0 ? $" | listing {firstListing + 1}: plugin [{(firstListing < compared.Count ? compared[firstListing] : "none")}], app [{(firstListing < app.Count ? app[firstListing] : "none")}]" : "")
+                + (ventureMine.SequenceEqual(ventureApp) ? "" : $" | ventures: plugin [{string.Join("; ", ventureMine)}], app [{string.Join("; ", ventureApp)}]")
+                + (names.SequenceEqual(mineNames) ? "" : $" | places: plugin [{string.Join(", ", mineNames)}], app [{string.Join(", ", names)}]"));
+        }
+    }
+
     // Batch 4: the Parts page read through the database, as in the game: the first made-up fleet's view rows put in
     // stand-ins for the fleet_parts_* views, with the PostgreSQL types the app's views give (ids numeric, booleans), and
     // the answers the app's.
@@ -479,6 +570,8 @@ internal static class Program
             "retainers: when a venture is done, with the day when it's not today");
         PartsAgainstTheApp();
         await PartsReadFromTheDatabase(conn);
+        await MarketAgainstTheApp();
+        await MarketReadFromTheDatabase(conn);
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);

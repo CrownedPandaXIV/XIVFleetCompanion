@@ -79,7 +79,7 @@ namespace XIVFleetCompanion
     /// <summary>One character's venture rewards of one item over the Income window, from fleet_venture_income_view, with its
     /// rewards and retainers in that time. SalvagePrice: salvage's fixed price; anything else is priced from the game's files.</summary>
     public sealed record VentureIncomeRow(long Cid, string Character, string World, string Account, int SortIndex, int ItemId, long Quantity,
-        int? SalvagePrice, int Rewards, int Retainers);
+        int? SalvagePrice, int Rewards, int Retainers, long HqQuantity = 0);
 
     /// <summary>The venture rewards over the Income window (days; 7 when none were recorded, the app's default).</summary>
     public sealed record VenturesRead(List<VentureIncomeRow> Rows, int WindowDays);
@@ -110,6 +110,9 @@ namespace XIVFleetCompanion
         /// <summary>Parts: every 5 minutes whenever the fleet is shown (the Summary, the sidebar and the info bar count
         /// the subs ready for new parts).</summary>
         public static readonly TimeSpan PartsEvery = TimeSpan.FromMinutes(5);
+        /// <summary>Gil and the market: every 5 minutes whenever the fleet is shown (the Summary counts the listings unsold
+        /// for a while). Live prices are kept for 30 minutes, so Universalis is asked at most that often for an item.</summary>
+        public static readonly TimeSpan MarketEvery = TimeSpan.FromMinutes(5);
         public const string MissingViewsText =
             "The database doesn't have the fleet views yet. Update the XIV Fleet Companion app to 1.8.0 or later and open it once; it adds them.";
 
@@ -120,6 +123,8 @@ namespace XIVFleetCompanion
         private DateTime listsAsked = DateTime.MinValue;
         private DateTime moneyAsked = DateTime.MinValue;
         private DateTime partsAsked = DateTime.MinValue;
+        private DateTime marketAsked = DateTime.MinValue;
+        private readonly Universalis universalis = new();
 
         public FleetRead<List<SubRow>> Subs { get; private set; } = new(null, null, null);
         public FleetRead<List<SupplyRow>> Supplies { get; private set; } = new(null, null, null);
@@ -135,6 +140,7 @@ namespace XIVFleetCompanion
         /// <summary>The venture rewards alone (quick), for the Summary's venture income: read with the supplies.</summary>
         public FleetRead<VenturesRead> Ventures { get; private set; } = new(null, null, null);
         public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
+        public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
         public bool Busy => busy;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
@@ -155,7 +161,8 @@ namespace XIVFleetCompanion
             var lists = everything || (withLists && now - listsAsked >= ListsEvery);
             var money = everything || (withMoney && now - moneyAsked >= MoneyEvery);
             var parts = everything || now - partsAsked >= PartsEvery;
-            if (!subs && !supplies && !lists && !money && !parts) return;
+            var market = everything || now - marketAsked >= MarketEvery;
+            if (!subs && !supplies && !lists && !money && !parts && !market) return;
             var cs = connectionString();
             if (cs == null)
             {
@@ -173,6 +180,7 @@ namespace XIVFleetCompanion
                 Income = Income with { Error = notSetUp };
                 Ventures = Ventures with { Error = notSetUp };
                 Parts = Parts with { Error = notSetUp };
+                Market = Market with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -181,6 +189,7 @@ namespace XIVFleetCompanion
             if (lists) listsAsked = now;
             if (money) moneyAsked = now;
             if (parts) partsAsked = now;
+            if (market) marketAsked = now;
             Task.Run(async () =>
             {
                 try
@@ -214,6 +223,7 @@ namespace XIVFleetCompanion
                         Income = await Read(conn, ReadIncome, Income);
                     }
                     if (parts) Parts = await Read(conn, ReadParts, Parts);
+                    if (market) Market = await Read(conn, c => ReadMarket(c, universalis), Market);
                 }
                 catch (Exception ex)
                 {
@@ -223,6 +233,7 @@ namespace XIVFleetCompanion
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
                     if (parts) Parts = Parts with { Error = text };
+                    if (market) Market = Market with { Error = text };
                 }
                 finally
                 {
@@ -426,6 +437,53 @@ namespace XIVFleetCompanion
             return list;
         }
 
+        /// <summary>
+        /// The Gil &amp; Market page (fleet_market_* views, app 1.8.0 and later): its settings, gil per account and every
+        /// listing; with Live Market Prices on, Universalis's listings for the listed items and the venture rewards on each
+        /// character's world, data center and region (the player's own retainers' listings left out). Universalis not
+        /// answering doesn't fail the read: it says why instead.
+        /// </summary>
+        public static async Task<MarketRead> ReadMarket(NpgsqlConnection conn, Universalis? universalis)
+        {
+            MarketSettings settings;
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_settings_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                settings = await r.ReadAsync() ? new MarketSettings(Int(r, "stale_days", 7), BoolOrNull(r, "live_prices") == true) : new MarketSettings(7, false);
+            var accounts = new List<MarketAccountRow>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_accounts_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    accounts.Add(new MarketAccountRow(Text(r, "account_label"), Int(r, "characters"), Int(r, "retainers"), Long(r, "character_gil"), Long(r, "retainer_gil"), Long(r, "total")));
+            var listings = new List<ListingRow>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_listings_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    listings.Add(new ListingRow(Long(r, "retainer_id"), Long(r, "owner_cid"), Int(r, "slot"), Int(r, "item_id"), Int(r, "quantity"), BoolOrNull(r, "hq") == true,
+                        Long(r, "unit_price"), Time(r, "first_seen_at"), TextOrNull(r, "retainer_name"), TextOrNull(r, "owner_name"), TextOrNull(r, "world"),
+                        TextOrNull(r, "account_label"), IntOrNull(r, "sort_index"), Long(r, "value"), Double(r, "age_days") ?? 0, BoolOrNull(r, "stale") == true));
+            LiveMarket? live = null;
+            if (settings.LivePrices && universalis != null)
+            {
+                var exclude = new HashSet<string>();
+                await using (var cmd = new NpgsqlCommand("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
+                await using (var r = await cmd.ExecuteReaderAsync())
+                    while (await r.ReadAsync())
+                        if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
+                var ventures = (await ReadVentures(conn)).Rows;
+                try
+                {
+                    var markets = await universalis.MarketFor(listings.Select(l => l.World).Concat(ventures.Select(v => (string?)v.World)),
+                        listings.Select(l => l.ItemId).Concat(ventures.Select(v => v.ItemId)));
+                    live = new LiveMarket(markets, exclude, null);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+                {
+                    live = new LiveMarket(new Dictionary<string, WorldMarket>(), exclude, ex.Message);
+                }
+            }
+            return new MarketRead(settings, accounts, listings, live);
+        }
+
         /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>
         public static async Task<PartsRead> ReadParts(NpgsqlConnection conn) => new(PartsPlanner.Plan(await ReadPartsInputs(conn)));
 
@@ -507,7 +565,8 @@ namespace XIVFleetCompanion
             while (await r.ReadAsync())
             {
                 ventures.Add(new VentureIncomeRow(Long(r, "owner_cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
-                    Int(r, "item_id"), Long(r, "quantity"), IntOrNull(r, "salvage_price"), Int(r, "rewards"), Int(r, "retainers")));
+                    Int(r, "item_id"), Long(r, "quantity"), IntOrNull(r, "salvage_price"), Int(r, "rewards"), Int(r, "retainers"),
+                    Has(r, "hq_quantity") ? Long(r, "hq_quantity") : 0));
                 windowDays = Int(r, "window_days", windowDays);
             }
             return new VenturesRead(ventures, windowDays);
