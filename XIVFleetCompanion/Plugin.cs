@@ -97,7 +97,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
-        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString);
+        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckPage = new CheckWindow(this);
         SpeedTestPage = new SpeedTestWindow(this);

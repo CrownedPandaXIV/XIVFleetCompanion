@@ -18,6 +18,33 @@ namespace XIVFleetCompanion
         private static readonly Dictionary<int, string> Worlds = new();
         private static readonly Dictionary<int, double> VendorPrices = new();
 
+        private static SubGameData? subGame;
+
+        /// <summary>The sectors, maps, ranks and parts the routes are worked out from (SubmarineExploration, SubmarineMap,
+        /// SubmarineRank, SubmarinePart), read once; null when they can't be read.</summary>
+        public static SubGameData? SubGame()
+        {
+            if (subGame != null) return subGame;
+            try
+            {
+                var sectors = new List<SubSector>();
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineExploration>())
+                    sectors.Add(new SubSector((int)r.RowId, r.Location.ExtractText(), (int)r.Map.RowId, r.X, r.Y, r.Z, r.ExpReward, r.SurveyDurationmin, r.StartingPoint));
+                var maps = new Dictionary<int, string>();
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineMap>()) maps[(int)r.RowId] = r.Name.ExtractText();
+                var ranks = new List<SubRank>();
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineRank>()) ranks.Add(new SubRank((int)r.RowId, r.SpeedBonus, r.RangeBonus, r.ExpToNext));
+                var parts = new List<SubPartStat>();
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range));
+                if (sectors.Count > 0 && ranks.Count > 0 && parts.Count > 0) subGame = new SubGameData(sectors, maps, ranks, parts);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.Warning(ex, "Could not read the sea map data from the game's files");
+            }
+            return subGame;
+        }
+
         /// <summary>A world's name for its number; "" when unknown.</summary>
         public static string World(int world)
         {

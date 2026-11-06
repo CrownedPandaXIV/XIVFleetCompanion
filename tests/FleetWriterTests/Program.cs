@@ -242,8 +242,178 @@ internal static class Program
         await Exec(conn, string.Join("; ", tables.Select(t => $"DROP TABLE {t.View}")));
     }
 
+    // Routes stage: the routes read through the database (stand-ins for the views with the PostgreSQL types they give:
+    // ids numeric, a sub's stops bytea, times timestamptz), worked out at the fixture's moment: the app's answers.
+    private static async Task RoutesReadFromTheDatabase(NpgsqlConnection conn)
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var game = GameFrom(doc.RootElement.GetProperty("game"));
+        var first = doc.RootElement.GetProperty("cases")[0];
+        var tables = new (string View, string Key, string Columns)[]
+        {
+            ("fleet_parts_characters_view", "characters", "cid numeric, name text, world text, account_label text, sort_index int, fc_id text, num_sub_slots int, has_house boolean"),
+            ("fleet_parts_subs_view", "subs", "cid numeric, sub_name text, slot int, rank int, part1 int, part2 int, part3 int, part4 int, craft_enabled boolean"),
+            ("fleet_parts_rules_view", "rules", "id int, rank int, cid_override numeric, sub_filter text, hull text, stern text, bow text, bridge text"),
+            ("fleet_parts_fight_club_view", "fightClub", "id int, route text, hours numeric, repair_times text, gil_sub_day numeric, rec_build_notes text, repair_kit_cost numeric"),
+            ("fleet_parts_spares_view", null!, "cid numeric, fc_id text, is_retainer boolean, retainer_id numeric, retainer_name text, sorted_container int, sorted_slot_index int, item_id int, quantity int"),
+            ("fleet_route_subs_view", "subs", "cid numeric, sub_name text, slot int, rank int, part1 int, part2 int, part3 int, part4 int, points bytea, return_time bigint, "
+                + "current_exp bigint, next_level_exp bigint, craft_enabled boolean, fc_id text"),
+            ("fleet_route_fight_club_view", "fightClub", "id int, route text, hours numeric, repair_times text, gil_sub_day numeric, rec_build_notes text, unmod_min_rank text, "
+                + "min_rank_build text, repair_kit_cost numeric"),
+            ("fleet_sub_history_view", "history", "cid numeric, metric text, recorded_at timestamptz, value numeric"),
+            ("fleet_voyage_sectors_view", "voyages", "fc_id text, sub_register bigint, sub_name text, returned_at timestamptz, sector int, leg int"),
+        };
+        foreach (var (view, key, columns) in tables)
+        {
+            await Exec(conn, $"DROP TABLE IF EXISTS {view}; CREATE TABLE {view} ({columns})");
+            if (key == null) continue;
+            var cols = columns.Split(", ").Select(c => (Name: c.Split(' ')[0], Type: c.Split(' ')[1])).ToList();
+            foreach (var row in first.GetProperty("inputs").GetProperty(key).EnumerateArray())
+            {
+                // As stored: a sub's stops as bytes, times from milliseconds.
+                string Value(int i) => cols[i].Type switch
+                {
+                    "bytea" => $"decode(@p{i}, 'hex')",
+                    "timestamptz" => $"to_timestamp(CAST(@p{i} AS float8) / 1000)",
+                    var type => $"CAST(@p{i} AS {type})",
+                };
+                await using var cmd = new NpgsqlCommand($"INSERT INTO {view} ({string.Join(", ", cols.Select(c => c.Name))}) VALUES ({string.Join(", ", cols.Select((_, i) => Value(i)))})", conn);
+                for (var i = 0; i < cols.Count; i++)
+                {
+                    var v = row.TryGetProperty(cols[i].Name, out var found) ? found : default;
+                    cmd.Parameters.AddWithValue($"p{i}", v.ValueKind switch
+                    {
+                        System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null => DBNull.Value,
+                        System.Text.Json.JsonValueKind.True => "true",
+                        System.Text.Json.JsonValueKind.False => "false",
+                        System.Text.Json.JsonValueKind.String => v.GetString()!,
+                        System.Text.Json.JsonValueKind.Array => Convert.ToHexString(v.EnumerateArray().Select(b => (byte)b.GetInt32()).ToArray()),
+                        _ => v.GetRawText(),
+                    });
+                }
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        var read = await FleetReader.ReadRoutes(conn, game, first.GetProperty("now").GetDouble());
+        var mine = read.Subs.OrderBy(s => s.Cid).ThenBy(s => s.SubName, StringComparer.Ordinal).Select(RouteLine).ToList();
+        var app = first.GetProperty("expected").EnumerateArray()
+            .OrderBy(e => long.Parse(e.GetProperty("cid").GetString()!, System.Globalization.CultureInfo.InvariantCulture))
+            .ThenBy(e => e.GetProperty("sub_name").GetString(), StringComparer.Ordinal).Select(AppRouteLine).ToList();
+        var bad = Enumerable.Range(0, Math.Max(mine.Count, app.Count)).FirstOrDefault(k => k >= mine.Count || k >= app.Count || mine[k] != app[k], -1);
+        Check(bad < 0 && mine.Count > 0 && read.Subs.Any(s => s.CurrentRoute.Length > 0) && read.Subs.Any(s => s.RankUp.Method == "voyages"),
+            $"routes: read through the database's views (a sub's stops as bytes, times as timestamps), the app's answers ({mine.Count} subs)"
+            + (bad < 0 ? "" : $"\n   plugin [{(bad < mine.Count ? mine[bad] : "none")}]\n   app    [{(bad < app.Count ? app[bad] : "none")}]"));
+        try
+        {
+            await FleetReader.ReadRoutes(conn, null, 0);
+            Check(false, "routes: without the game's sea map data, the read says so");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Check(ex.Message.Contains("sea map", StringComparison.Ordinal), $"routes: without the game's sea map data, the read says so ({ex.Message})");
+        }
+        await Exec(conn, string.Join("; ", tables.Select(t => $"DROP TABLE {t.View}")));
+    }
+
     // Batch 4: the Parts page's working out (PartsPlanner) against the app's own answers for the same made-up fleets
     // (written by the app's tests/db/parts-fixture.js from its fleet_parts_* views and computePartsNeeded).
+    // Routes stage: each sub's route, gil a day, speed and range, rank-up dates and next build, worked out here
+    // (SubRoutes) from the app's made-up fleets and game data, against the app's own answers (routes-fixture.json).
+    internal static SubGameData GameFrom(System.Text.Json.JsonElement g) => new(
+        g.GetProperty("sectors").EnumerateArray().Select(e => new SubSector(e.GetProperty("id").GetInt32(), e.GetProperty("location").GetString() ?? "",
+            e.GetProperty("map").GetInt32(), e.GetProperty("x").GetDouble(), e.GetProperty("y").GetDouble(), e.GetProperty("z").GetDouble(),
+            e.GetProperty("expReward").GetDouble(), e.GetProperty("surveyMinutes").GetDouble(), e.GetProperty("starting").GetBoolean())).ToList(),
+        g.GetProperty("maps").EnumerateArray().ToDictionary(e => e.GetProperty("id").GetInt32(), e => e.GetProperty("name").GetString() ?? ""),
+        g.GetProperty("ranks").EnumerateArray().Select(e => new SubRank(e.GetProperty("id").GetInt32(), e.GetProperty("speed").GetDouble(),
+            e.GetProperty("range").GetDouble(), e.GetProperty("expToNext").GetDouble())).ToList(),
+        g.GetProperty("parts").EnumerateArray().Select(e => new SubPartStat(e.GetProperty("class").GetInt32(), e.GetProperty("slot").GetInt32(),
+            e.GetProperty("speed").GetDouble(), e.GetProperty("range").GetDouble())).ToList());
+
+    internal static RoutesInputs RoutesInputsFrom(System.Text.Json.JsonElement i)
+    {
+        static string? S(System.Text.Json.JsonElement e, string k) => e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.Null ? null
+            : e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.String ? e.GetProperty(k).GetString() : e.GetProperty(k).GetRawText();
+        static long L(System.Text.Json.JsonElement e, string k) => long.Parse(S(e, k)!, System.Globalization.CultureInfo.InvariantCulture);
+        static long? LN(System.Text.Json.JsonElement e, string k) => S(e, k) is { } t ? (long)double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+        static int? IN(System.Text.Json.JsonElement e, string k) => S(e, k) is { } t ? (int)double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+        static double? DN(System.Text.Json.JsonElement e, string k) => S(e, k) is { } t ? double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+        static bool B(System.Text.Json.JsonElement e, string k) => e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.True;
+        return new RoutesInputs(
+            i.GetProperty("characters").EnumerateArray().Select(e => new PartsCharacter(L(e, "cid"), S(e, "name") ?? "", S(e, "world") ?? "", S(e, "account_label") ?? "",
+                IN(e, "sort_index"), S(e, "fc_id"), IN(e, "num_sub_slots") ?? 0, B(e, "has_house"))).ToList(),
+            i.GetProperty("subs").EnumerateArray().Select(e => new RouteSub(L(e, "cid"), S(e, "sub_name") ?? "", IN(e, "slot"), IN(e, "rank") ?? 0,
+                IN(e, "part1"), IN(e, "part2"), IN(e, "part3"), IN(e, "part4"),
+                e.GetProperty("points").ValueKind == System.Text.Json.JsonValueKind.Array ? e.GetProperty("points").EnumerateArray().Select(b => (byte)b.GetInt32()).ToArray() : null,
+                LN(e, "return_time"), LN(e, "current_exp"), LN(e, "next_level_exp"), B(e, "craft_enabled"), S(e, "fc_id"))).ToList(),
+            i.GetProperty("rules").EnumerateArray().Select(e => new PartsRule(L(e, "id"), IN(e, "rank") ?? 0, S(e, "cid_override"), S(e, "sub_filter"),
+                S(e, "hull"), S(e, "stern"), S(e, "bow"), S(e, "bridge"))).ToList(),
+            i.GetProperty("fightClub").EnumerateArray().Select(e => new FightClubRow(L(e, "id"), S(e, "route") ?? "", DN(e, "hours"), S(e, "repair_times"),
+                DN(e, "gil_sub_day"), S(e, "rec_build_notes"), S(e, "unmod_min_rank"), S(e, "min_rank_build"), DN(e, "repair_kit_cost") ?? 0)).ToList(),
+            i.GetProperty("history").EnumerateArray().Select(e => new SubHistoryPoint(L(e, "cid"), S(e, "metric") ?? "", DN(e, "recorded_at") ?? 0, DN(e, "value") ?? 0)).ToList(),
+            i.GetProperty("voyages").EnumerateArray().Select(e => new VoyageSector(S(e, "fc_id") ?? "", L(e, "sub_register"), S(e, "sub_name"), DN(e, "returned_at") ?? 0,
+                IN(e, "sector") ?? 0, IN(e, "leg"))).ToList());
+    }
+
+    // One sub's answers as one line, the plugin's and the app's written alike (numbers to 9 significant figures, dates to
+    // the millisecond).
+    private static string N(double? v) => v is double d ? d.ToString("G9", System.Globalization.CultureInfo.InvariantCulture) : "-";
+    private static string RouteLine(SubRoute s)
+    {
+        var r = s.RankUp;
+        var b = r.NextBuild;
+        return string.Join(" | ", s.Cid, s.SubName, s.CurrentSetup, s.CurrentRoute, s.CurrentMap?.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+            s.TargetRoute, N(s.TargetGilDay), N(s.CurrentGilDay), N(s.Speed), N(s.Range), N(s.RankProgressPct),
+            r.Method ?? "-", r.OutAtSea, N(r.PerDay), r.Voyage is { } v ? $"{N(v.Exp)}/{N(v.Hours)}" : "-", r.Bonus is { } bo ? $"{N(bo.Factor)}x{bo.Voyages}" : "-",
+            r.BuildAhead, r.MaxRank, N(r.NextRank), N(r.NextRankAt is double a ? Math.Round(a) : null), N(r.Voyages),
+            b == null ? "-" : $"{b.Rank} {b.Build} [{string.Join(",", b.Parts)}] {N(b.At is double ba ? Math.Round(ba) : null)} {N(b.Voyages)} "
+                + (b.FightClub is { } f ? $"{f.Route} {N(f.Net)} {N(f.Gain)}" : "-"));
+    }
+
+    private static string AppRouteLine(System.Text.Json.JsonElement e)
+    {
+        static double? D(System.Text.Json.JsonElement x, string k) => x.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetDouble() : null;
+        static string? T(System.Text.Json.JsonElement x, string k) => x.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+        static bool B(System.Text.Json.JsonElement x, string k) => x.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
+        using var doc = System.Text.Json.JsonDocument.Parse(e.GetProperty("rank_up").GetString()!);
+        var r = doc.RootElement;
+        var voyage = r.GetProperty("voyage");
+        var bonus = r.GetProperty("bonus");
+        var b = r.GetProperty("nextBuild");
+        string build = "-";
+        if (b.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            var f = b.GetProperty("fightClub");
+            build = $"{D(b, "rank")} {T(b, "build")} [{string.Join(",", b.GetProperty("parts").EnumerateArray().Select(p => p.GetString()))}] {N(D(b, "at"))} {N(D(b, "voyages"))} "
+                + (f.ValueKind == System.Text.Json.JsonValueKind.Object ? $"{T(f, "route")} {N(D(f, "net"))} {N(D(f, "gain"))}" : "-");
+        }
+        return string.Join(" | ", T(e, "cid"), T(e, "sub_name"), T(e, "current_setup"), T(e, "current_route"), N(D(e, "current_map")),
+            T(e, "target_route"), N(D(e, "target_gil_day")), N(D(e, "current_gil_day")), N(D(e, "speed")), N(D(e, "range")), N(D(e, "rank_progress_pct")),
+            T(r, "method") ?? "-", B(r, "outAtSea"), N(D(r, "perDay")), voyage.ValueKind == System.Text.Json.JsonValueKind.Object ? $"{N(D(voyage, "exp"))}/{N(D(voyage, "hours"))}" : "-",
+            bonus.ValueKind == System.Text.Json.JsonValueKind.Object ? $"{N(D(bonus, "factor"))}x{D(bonus, "voyages")}" : "-",
+            B(r, "buildAhead"), D(r, "maxRank"), N(D(r, "nextRank")), N(D(r, "nextRankAt")), N(D(r, "voyages")), build);
+    }
+
+    private static void RoutesAgainstTheApp()
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var game = GameFrom(doc.RootElement.GetProperty("game"));
+        foreach (var c in doc.RootElement.GetProperty("cases").EnumerateArray())
+        {
+            var input = RoutesInputsFrom(c.GetProperty("inputs"));
+            var plan = SubRoutes.Plan(input, game, c.GetProperty("now").GetDouble());
+            var mine = plan.OrderBy(s => s.Cid).ThenBy(s => s.SubName, StringComparer.Ordinal).Select(RouteLine).ToList();
+            var app = c.GetProperty("expected").EnumerateArray()
+                .OrderBy(e => long.Parse(e.GetProperty("cid").GetString()!, System.Globalization.CultureInfo.InvariantCulture))
+                .ThenBy(e => e.GetProperty("sub_name").GetString(), StringComparer.Ordinal).Select(AppRouteLine).ToList();
+            var first = Enumerable.Range(0, Math.Max(mine.Count, app.Count)).FirstOrDefault(k => k >= mine.Count || k >= app.Count || mine[k] != app[k], -1);
+            Check(first < 0, $"routes: the same as the app's Subs tab, {c.GetProperty("name").GetString()} ({app.Count} subs: {plan.Count(s => s.TargetRoute.Length > 0)} with a Target Route, "
+                + $"{plan.Count(s => s.CurrentGilDay != null)} a Current Gil/Day, {plan.Count(s => s.RankUp.NextRankAt != null)} a Next Rank date, {plan.Count(s => s.RankUp.NextBuild != null)} a Next Build)"
+                + (first < 0 ? "" : $"\n   sub {first + 1}:\n   plugin [{(first < mine.Count ? mine[first] : "none")}]\n   app    [{(first < app.Count ? app[first] : "none")}]"));
+        }
+    }
+
     private static void PartsAgainstTheApp()
     {
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "parts-fixture.json");
@@ -663,6 +833,8 @@ internal static class Program
         PartsAgainstTheApp();
         await PartsReadFromTheDatabase(conn);
         await MarketAgainstTheApp();
+        RoutesAgainstTheApp();
+        await RoutesReadFromTheDatabase(conn);
         await MarketAsksEachPlaceOnce();
         MarketWorkedOutOncePerRead();
         await MarketReadFromTheDatabase(conn);

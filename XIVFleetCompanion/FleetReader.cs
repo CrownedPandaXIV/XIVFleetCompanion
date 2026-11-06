@@ -84,6 +84,9 @@ namespace XIVFleetCompanion
     /// <summary>The venture rewards over the Income window (days; 7 when none were recorded, the app's default).</summary>
     public sealed record VenturesRead(List<VentureIncomeRow> Rows, int WindowDays);
 
+    /// <summary>Every built sub's route answers (SubRoutes), as the app's Subs tab, worked out at At (milliseconds since 1970).</summary>
+    public sealed record RoutesRead(List<SubRoute> Subs, double At);
+
     /// <summary>The Income page's read: each character's income, the venture rewards, the window (days) and repair kit cost.</summary>
     public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
 
@@ -140,6 +143,8 @@ namespace XIVFleetCompanion
         /// <summary>The venture rewards alone (quick), for the Summary's venture income: read with the supplies.</summary>
         public FleetRead<VenturesRead> Ventures { get; private set; } = new(null, null, null);
         public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
+        /// <summary>Routes, gil a day and rank-up dates: read with Parts (the Subs page, Route Optimization, the Summary, Income's expected).</summary>
+        public FleetRead<RoutesRead> Routes { get; private set; } = new(null, null, null);
         public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
         public bool Busy => busy;
         private volatile bool askingUniversalis;
@@ -147,7 +152,14 @@ namespace XIVFleetCompanion
         public bool AskingUniversalis => askingUniversalis;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
-        public FleetReader(Func<string?> connectionString) => this.connectionString = connectionString;
+        /// <param name="subGame">The sectors, ranks and parts from the game's own files, for the routes (asked on the
+        /// calling thread; null when they can't be read).</param>
+        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null)
+        {
+            this.connectionString = connectionString;
+            this.subGame = subGame;
+        }
+        private readonly Func<SubGameData?>? subGame;
 
         /// <summary>
         /// Called while something shows the fleet: starts a read in the background when one is due. withSupplies:
@@ -183,6 +195,7 @@ namespace XIVFleetCompanion
                 Income = Income with { Error = notSetUp };
                 Ventures = Ventures with { Error = notSetUp };
                 Parts = Parts with { Error = notSetUp };
+                Routes = Routes with { Error = notSetUp };
                 Market = Market with { Error = notSetUp };
                 return;
             }
@@ -192,6 +205,7 @@ namespace XIVFleetCompanion
             if (lists) listsAsked = now;
             if (money) moneyAsked = now;
             if (parts) partsAsked = now;
+            var game = parts ? subGame?.Invoke() : null;
             if (market) marketAsked = now;
             Task.Run(async () =>
             {
@@ -225,7 +239,11 @@ namespace XIVFleetCompanion
                         Salvage = await Read(conn, ReadSalvage, Salvage);
                         Income = await Read(conn, ReadIncome, Income);
                     }
-                    if (parts) Parts = await Read(conn, ReadParts, Parts);
+                    if (parts)
+                    {
+                        Parts = await Read(conn, ReadParts, Parts);
+                        Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
+                    }
                     if (market) await ReadMarketNow(conn);
                 }
                 catch (Exception ex)
@@ -235,7 +253,7 @@ namespace XIVFleetCompanion
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
-                    if (parts) Parts = Parts with { Error = text };
+                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; }
                     if (market) Market = Market with { Error = text };
                 }
                 finally
@@ -530,6 +548,52 @@ namespace XIVFleetCompanion
             {
                 return new LiveMarket(new Dictionary<string, WorldMarket>(), ask.Exclude, ex.Message);
             }
+        }
+
+        private static double Ms(NpgsqlDataReader r, string col)
+        {
+            var i = r.GetOrdinal(col);
+            return r.IsDBNull(i) ? 0 : (DateTime.SpecifyKind(r.GetFieldValue<DateTime>(i), DateTimeKind.Utc) - DateTime.UnixEpoch).TotalMilliseconds;
+        }
+
+        /// <summary>Every built sub's route answers (the fleet_route_* views, app 1.8.0 and later, and the game's own
+        /// files), worked out here (SubRoutes) at `now` (milliseconds since 1970).</summary>
+        public static async Task<RoutesRead> ReadRoutes(NpgsqlConnection conn, SubGameData? game, double now)
+        {
+            if (game == null) throw new InvalidOperationException("The game's sea map data couldn't be read.");
+            return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn), game, now), now);
+        }
+
+        public static async Task<RoutesInputs> ReadRoutesInputs(NpgsqlConnection conn)
+        {
+            var parts = await ReadPartsInputs(conn);
+            var subs = new List<RouteSub>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_route_subs_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                {
+                    var points = r.GetOrdinal("points");
+                    subs.Add(new RouteSub(Long(r, "cid"), Text(r, "sub_name"), IntOrNull(r, "slot"), Int(r, "rank"), IntOrNull(r, "part1"), IntOrNull(r, "part2"),
+                        IntOrNull(r, "part3"), IntOrNull(r, "part4"), r.IsDBNull(points) ? null : r.GetFieldValue<byte[]>(points), LongOrNull(r, "return_time"),
+                        LongOrNull(r, "current_exp"), LongOrNull(r, "next_level_exp"), BoolOrNull(r, "craft_enabled") == true, TextOrNull(r, "fc_id")));
+                }
+            var fightClub = new List<FightClubRow>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_route_fight_club_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    fightClub.Add(new FightClubRow(Long(r, "id"), Text(r, "route"), Double(r, "hours"), TextOrNull(r, "repair_times"), Double(r, "gil_sub_day"),
+                        TextOrNull(r, "rec_build_notes"), TextOrNull(r, "unmod_min_rank"), TextOrNull(r, "min_rank_build"), Double(r, "repair_kit_cost") ?? 0));
+            var history = new List<SubHistoryPoint>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_sub_history_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    history.Add(new SubHistoryPoint(Long(r, "cid"), Text(r, "metric"), Ms(r, "recorded_at"), Double(r, "value") ?? 0));
+            var voyages = new List<VoyageSector>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_voyage_sectors_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    voyages.Add(new VoyageSector(Text(r, "fc_id"), Long(r, "sub_register"), TextOrNull(r, "sub_name"), Ms(r, "returned_at"), Int(r, "sector"), IntOrNull(r, "leg")));
+            return new RoutesInputs(parts.Characters, subs, parts.Rules, fightClub, history, voyages);
         }
 
         /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>
