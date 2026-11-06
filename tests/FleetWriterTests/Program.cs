@@ -306,7 +306,7 @@ internal static class Program
         Check(heldItems.SequenceEqual(new[] { 10155 }), "batch 2: the items held, without gil: " + string.Join(",", heldItems));
         // Something the plugin can't take in one read (here a count too big for a number) fails that read alone, saying
         // why, and keeps what was read before; it doesn't stop the others.
-        await Exec(conn, "CREATE OR REPLACE VIEW fleet_retainer_counts_view AS SELECT 99999999999999999999::numeric AS retainers, 1 AS ventures_done, 1 AS retainers_away, 1 AS retainers_idle");
+        await Exec(conn, "DROP VIEW fleet_retainer_counts_view; CREATE VIEW fleet_retainer_counts_view AS SELECT 99999999999999999999::numeric AS retainers, 1 AS ventures_done, 1 AS retainers_away, 1 AS retainers_idle");
         var bad = await FleetReader.Read(conn, FleetReader.ReadRetainerCounts, new FleetRead<RetainerCountsRow>(counts, DateTime.Now, null));
         Check(bad.Data == counts && bad.Error != null && bad.Error.StartsWith("Could not read this from the database"), "batch 2: a read that can't be taken fails alone: " + bad.Error);
         var after = await FleetReader.Read(conn, FleetReader.ReadFcs, new FleetRead<List<FcRow>>(null, null, null));
