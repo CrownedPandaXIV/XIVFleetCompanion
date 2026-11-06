@@ -543,14 +543,14 @@ public partial class MainWindow : Window, IDisposable
     {
         new("character", "Character", sub =>
         {
-            ImGui.TextUnformatted($"{sub.Character} ({sub.World})");
+            CharacterCell(sub.Character, sub.World);
             if (sub.Account.Length > 0) Hover($"Account: {sub.Account}");
         }, sub => sub.Character),
         new("account", "Account", sub => ImGui.TextUnformatted(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
         new("sub", "Sub", sub => ImGui.TextUnformatted(sub.SubName), sub => sub.SubName, Locked: true),
         new("rank", "Rank", sub =>
         {
-            ImGui.TextUnformatted(sub.Rank.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            RightNumber(sub.Rank);
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => sub.Rank),
         new("build", "Build", sub => ImGui.TextUnformatted(sub.Build), sub => sub.Build),
@@ -562,7 +562,7 @@ public partial class MainWindow : Window, IDisposable
             else if (status == "In port") Colored(Dim, status);
             else ImGui.TextUnformatted(status);
         }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
-    }, sub => sub.Account);
+    }, sub => sub.Account, "subs");
 
     private void DrawSubs()
     {
@@ -585,14 +585,14 @@ public partial class MainWindow : Window, IDisposable
     {
         new("character", "Character", c =>
         {
-            ImGui.TextUnformatted($"{c.Character} ({c.World})");
+            CharacterCell(c.Character, c.World);
             Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}{(c.LastSynced.HasValue ? $"\nLast synced {c.LastSynced.Value:g}" : "")}");
         }, c => c.Character, Locked: true),
         new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
-        new("ceruleum", "Ceruleum", c => ImGui.TextUnformatted(c.Ceruleum.ToString("N0")), c => c.Ceruleum),
+        new("ceruleum", "Ceruleum", c => RightNumber(c.Ceruleum, DaysColor(c.CeruleumDaysLeft) ?? (c.CeruleumPerDay != null ? Green : (Vector4?)null)), c => c.Ceruleum),
         new("ceruleumPerDay", "A day##ceruleum", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
         new("ceruleumDays", "Days left##ceruleum", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
-        new("kits", "Repair kits", c => ImGui.TextUnformatted(c.RepairKits.ToString("N0")), c => c.RepairKits),
+        new("kits", "Repair kits", c => RightNumber(c.RepairKits, DaysColor(c.RepairKitsDaysLeft) ?? (c.RepairKitsPerDay != null ? Green : (Vector4?)null)), c => c.RepairKits),
         new("kitsPerDay", "A day##kits", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
         new("kitsDays", "Days left##kits", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
         new("buy", "To buy", c =>
@@ -600,9 +600,9 @@ public partial class MainWindow : Window, IDisposable
             var buy = new List<string>();
             if (c.CeruleumRestock > 0) buy.Add($"{c.CeruleumRestock:N0} ceruleum");
             if (c.RepairKitsRestock > 0) buy.Add($"{c.RepairKitsRestock:N0} kits");
-            ImGui.TextUnformatted(buy.Count > 0 ? string.Join(", ", buy) : "—");
+            if (buy.Count > 0) Colored(Amber, string.Join(", ", buy)); else Colored(Green, "Nothing");
         }, c => (long)c.CeruleumRestock * 1_000_000 + c.RepairKitsRestock),
-    }, c => c.Account);
+    }, c => c.Account, "characters");
 
     private void DrawSupplies()
     {
@@ -623,13 +623,14 @@ public partial class MainWindow : Window, IDisposable
 
     private void PerDayCell(double? perDay)
     {
-        ImGui.TextUnformatted(PerDay(perDay));
+        TableCells.Right(PerDay(perDay), perDay == null ? Dim : (Vector4?)null);
         if (perDay == null) Hover("Not enough history yet (needs a day).");
     }
 
     private void DaysCell(double? daysLeft, double? perDay)
     {
+        // Red under 3 days, amber under 7, green otherwise (and when none are used); dim without enough history.
         var days = Days(daysLeft, perDay);
-        if (DaysColor(daysLeft) is Vector4 color) Colored(color, days); else ImGui.TextUnformatted(days);
+        TableCells.Right(days, perDay == null ? Dim : DaysColor(daysLeft) ?? Green);
     }
 }

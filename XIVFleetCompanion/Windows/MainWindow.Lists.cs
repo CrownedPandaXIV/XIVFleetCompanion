@@ -37,6 +37,41 @@ public partial class MainWindow
 
     private static string Number(long? value) => value.HasValue ? value.Value.ToString("N0", CultureInfo.CurrentCulture) : "—";
 
+    // --- The tables' look: names first with the world softer, numbers on the right, and colours that mean something
+    // (green when fine, amber getting low, red well below a warning). ---
+
+    private void CharacterCell(string name, string world)
+    {
+        ImGui.TextUnformatted(name.Length > 0 ? name : "—");
+        if (world.Length == 0) return;
+        ImGui.SameLine(0, 6 * ImGuiHelpers.GlobalScale);
+        Colored(Dim, world);
+    }
+
+    private static void RightNumber(long? value, Vector4? color = null) => TableCells.Right(Number(value), color);
+
+    // Large gil as "5.86M" (the full amount on hover).
+    private static void GilCell(long? gil)
+    {
+        if (gil is long g && Math.Abs(g) >= 1_000_000)
+        {
+            TableCells.Right((g / 1_000_000.0).ToString("0.00", CultureInfo.CurrentCulture) + "M");
+            Hover($"{Number(g)} gil");
+        }
+        else RightNumber(gil);
+    }
+
+    // A supply against its warning: red under half of it, amber under it, green at or above it. Not coloured when it
+    // doesn't count (no subs built, or no longer synced), as the app's warnings.
+    private Vector4? SupplyColor(int? have, double warning, bool counted)
+    {
+        if (!counted || have == null) return null;
+        if (warning <= 0) return Green;
+        if (have.Value < warning / 2) return Red;
+        if (have.Value < warning) return Amber;
+        return Green;
+    }
+
     private static void Hover(string text)
     {
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(text);
@@ -48,7 +83,7 @@ public partial class MainWindow
     {
         new("character", "Character", c =>
         {
-            ImGui.TextUnformatted($"{c.Character} ({c.World})");
+            CharacterCell(c.Character, c.World);
             Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}");
             if (c.BehindMinutes is int behind)
             {
@@ -61,27 +96,39 @@ public partial class MainWindow
         new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("fc", "FC", c =>
         {
-            ImGui.TextUnformatted(c.FcName ?? "—");
+            if (c.FcName == null) Colored(Dim, "—"); else ImGui.TextUnformatted(c.FcName);
             if (c.FcPoints.HasValue) Hover($"{c.FcPoints.Value:N0} FC points");
         }, c => c.FcName ?? "", c => c.FcName == null),
-        new("fcPoints", "FC Points", c => ImGui.TextUnformatted(Number(c.FcPoints)), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
-        new("house", "House", c => ImGui.TextUnformatted(c.House ?? "—"), c => c.House ?? "", c => c.House == null),
-        new("gil", "Gil", c => ImGui.TextUnformatted(Number(c.Gil)), c => c.Gil),
+        new("fcPoints", "FC Points", c => RightNumber(c.FcPoints), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
+        new("house", "House", c => { if (c.House == null) Colored(Dim, "—"); else ImGui.TextUnformatted(c.House); }, c => c.House ?? "", c => c.House == null),
+        new("gil", "Gil", c => GilCell(c.Gil), c => c.Gil),
         new("ceruleum", "Ceruleum", c =>
         {
-            if (c.LowCeruleum) Colored(Red, Number(c.Ceruleum)); else ImGui.TextUnformatted(Number(c.Ceruleum));
-            if (c.LowCeruleum) Hover("Below the low-ceruleum warning (set in the app: Settings → General → Warnings)");
+            RightNumber(c.Ceruleum, SupplyColor(c.Ceruleum, c.CeruleumWarning, c.SubsBuilt > 0 && c.BehindMinutes == null));
+            if (c.LowCeruleum) Hover($"Below the low-ceruleum warning of {c.CeruleumWarning:N0} (set in the app: Settings → General → Warnings)");
         }, c => c.Ceruleum ?? 0),
         new("repairKits", "Repair kits", c =>
         {
-            if (c.LowRepairKits) Colored(Red, Number(c.RepairKits)); else ImGui.TextUnformatted(Number(c.RepairKits));
-            if (c.LowRepairKits) Hover("Below the low-repair-kit warning (set in the app: Settings → General → Warnings)");
+            RightNumber(c.RepairKits, SupplyColor(c.RepairKits, c.RepairKitWarning, c.SubsBuilt > 0 && c.BehindMinutes == null));
+            if (c.LowRepairKits) Hover($"Below the low-repair-kit warning of {c.RepairKitWarning:N0} (set in the app: Settings → General → Warnings)");
         }, c => c.RepairKits ?? 0),
-        new("retainers", "Retainers", c => ImGui.TextUnformatted(c.Retainers.ToString(CultureInfo.InvariantCulture)), c => c.Retainers),
-        new("subs", "Subs", c => ImGui.TextUnformatted(c.Submarines.ToString(CultureInfo.InvariantCulture)), c => c.Submarines),
+        new("retainers", "Retainers", c => RightNumber(c.Retainers), c => c.Retainers),
+        // Subs as dots out of the slots unlocked: green when every slot has one, amber with a slot free.
+        new("subs", "Subs", c =>
+        {
+            if (c.SubSlots is int slots && slots > 0)
+            {
+                var total = Math.Max(slots, c.Submarines);
+                TableCells.Pips(c.Submarines, total, c.Submarines >= total ? Green : Amber, Dim);
+                Hover($"{c.Submarines} of {slots} sub slot{(slots == 1 ? "" : "s")} {(c.Submarines == 1 ? "has a sub" : "have subs")}");
+            }
+            else RightNumber(c.Submarines);
+        }, c => c.Submarines),
+        // Green while synced; red when the plugin no longer syncs it (as the app's not-synced warning).
         new("lastSynced", "Last synced", c =>
         {
-            ImGui.TextUnformatted(c.LastSynced.HasValue ? FleetReader.Ago(c.LastSynced.Value, DateTime.Now) : "—");
+            var text = c.LastSynced.HasValue ? FleetReader.Ago(c.LastSynced.Value, DateTime.Now) : "—";
+            if (!c.LastSynced.HasValue) Colored(Dim, text); else Colored(c.BehindMinutes == null ? Green : Red, text);
             if (c.LastSynced.HasValue) Hover(c.LastSynced.Value.ToString("g", CultureInfo.CurrentCulture));
         }, c => c.LastSynced ?? DateTime.MinValue),
         new("syncedBy", "Synced by", c =>
@@ -90,8 +137,13 @@ public partial class MainWindow
             Hover(c.LoginPc != null && c.LoggedInAt.HasValue
                 ? $"Last logged in on this setup {c.LoggedInAt.Value:g}. Only this setup syncs the character; others that have it leave it alone."
                 : "No login recorded yet: every setup that has the character syncs it.");
-        }, c => FleetReader.SyncedBy(c.LoginPc, c.LoginLabel)),
-    }, c => c.Account);
+        }, c => FleetReader.SyncedBy(c.LoginPc, c.LoginLabel), Hidden: true),
+    }, c => c.Account, "characters", rows =>
+    {
+        // "Synced by" is usually the same for a whole account: said once, in its band (the column is still there).
+        var by = rows.Select(c => FleetReader.SyncedBy(c.LoginPc, c.LoginLabel)).Distinct().ToList();
+        return by.Count == 1 && by[0] != "—" ? $"synced by {by[0]}" : null;
+    });
 
     private void DrawRoster()
     {
@@ -114,16 +166,16 @@ public partial class MainWindow
         new("retainer", "Retainer", x => ImGui.TextUnformatted(x.R.Name), x => x.R.Name, Locked: true),
         new("owner", "Owner", x =>
         {
-            ImGui.TextUnformatted(x.R.Owner.Length > 0 ? $"{x.R.Owner} ({x.R.World})" : "—");
+            CharacterCell(x.R.Owner, x.R.World);
             if (x.R.Account.Length > 0) Hover($"Account: {x.R.Account}");
         }, x => x.R.Owner),
         new("account", "Account", x => ImGui.TextUnformatted(x.R.Account.Length > 0 ? x.R.Account : "—"), x => x.R.Account, Hidden: true),
         new("job", "Class/Level", x => ImGui.TextUnformatted(x.Job.Length > 0 ? $"{x.Job}/{(x.R.Level.HasValue ? x.R.Level.Value.ToString(CultureInfo.InvariantCulture) : "?")}" : "—"),
             x => x.Job, x => x.Job.Length == 0),
-        new("gil", "Gil", x => ImGui.TextUnformatted(Number(x.R.Gil)), x => x.R.Gil ?? 0, x => x.R.Gil == null),
+        new("gil", "Gil", x => GilCell(x.R.Gil), x => x.R.Gil ?? 0, x => x.R.Gil == null),
         new("ilvl", "Avg ilvl", x =>
         {
-            if (x.Ilvl.HasValue) ImGui.TextUnformatted(x.Ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture)); else Colored(Dim, "—");
+            if (x.Ilvl.HasValue) TableCells.Right(x.Ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture)); else Colored(Dim, "—");
             if (!x.R.ItemsSeen) Hover("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
         }, x => x.Ilvl ?? 0, x => x.Ilvl == null),
         new("venture", "Venture", x => ImGui.TextUnformatted(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
@@ -141,7 +193,7 @@ public partial class MainWindow
             else ImGui.TextUnformatted($"{(x.R.TargetMode == "level" ? "Level" : "ilvl")} {x.R.TargetValue}{(x.R.OnlyCrafted ? ", crafted only" : "")}");
             Hover("Gear targets and the slot-by-slot check are set and shown in the app's Retainers tab for now.");
         }, x => $"{x.R.TargetMode} {x.R.TargetValue:D4}", x => x.R.TargetMode == null),
-    }, x => x.R.Account);
+    }, x => x.R.Account, "retainers");
 
     private void DrawRetainers()
     {
@@ -172,6 +224,12 @@ public partial class MainWindow
 
     private static string YesNo(bool? b) => b == true ? "Yes" : b == false ? "No" : "—";
 
+    // Yes in green; No in the given colour (amber when it's needed, dim when it's optional); unknown dim.
+    private void YesNoCell(bool? b, Vector4 no)
+    {
+        if (b == true) Colored(Green, "Yes"); else if (b == false) Colored(no, "No"); else Colored(Dim, "—");
+    }
+
     private FleetTable<PcRow> PcsTable => pcsTable ??= new FleetTable<PcRow>("pcs", plugin.Configuration, new List<FleetColumn<PcRow>>
     {
         new("pc", "PC", p => ImGui.TextUnformatted(p.Account.Length > 0 ? $"{p.Pc} ({p.Account})" : p.Pc), p => p.Pc, Locked: true),
@@ -191,23 +249,23 @@ public partial class MainWindow
         }, p => p.Characters ?? 0, p => p.Characters == null),
         new("autoretainer", "AutoRetainer", p =>
         {
-            if (p.AutoRetainer == false) Colored(Amber, "No"); else ImGui.TextUnformatted(YesNo(p.AutoRetainer));
+            YesNoCell(p.AutoRetainer, Amber);
             Hover("AutoRetainer running (needed: nothing syncs without it)");
         }, p => YesNo(p.AutoRetainer)),
         new("allagan", "Allagan Tools", p =>
         {
-            if (p.AllaganTools == false) Colored(Amber, "No"); else ImGui.TextUnformatted(YesNo(p.AllaganTools));
+            YesNoCell(p.AllaganTools, Amber);
             Hover("Allagan Tools running (bags, retainers' items, FC chests and listings)");
         }, p => YesNo(p.AllaganTools)),
-        new("fctracker", "FC Tracker", p => { ImGui.TextUnformatted(YesNo(p.FcTracker)); Hover("FC Tracker running in that game (optional: Free Company house details)"); },
+        new("fctracker", "FC Tracker", p => { YesNoCell(p.FcTracker, Dim); Hover("FC Tracker running in that game (optional: Free Company house details)"); },
             p => YesNo(p.FcTracker)),
-        new("subtracker", "Submarine Tracker", p => { ImGui.TextUnformatted(YesNo(p.SubmarineTracker)); Hover("Submarine Tracker running in that game (loot per voyage; only needed with subs)"); },
+        new("subtracker", "Submarine Tracker", p => { YesNoCell(p.SubmarineTracker, Dim); Hover("Submarine Tracker running in that game (loot per voyage; only needed with subs)"); },
             p => YesNo(p.SubmarineTracker)),
-        new("ventures", "Venture Log", p => { ImGui.TextUnformatted(YesNo(p.VentureLog)); Hover("AutoRetainer's venture statistics found: what each retainer's ventures brought back (only with retainers)"); },
+        new("ventures", "Venture Log", p => { YesNoCell(p.VentureLog, Dim); Hover("AutoRetainer's venture statistics found: what each retainer's ventures brought back (only with retainers)"); },
             p => YesNo(p.VentureLog), Hidden: true),
         new("problems", "Could not see", p =>
         {
-            if (p.Problems.Count == 0) { ImGui.TextUnformatted("Nothing"); return; }
+            if (p.Problems.Count == 0) { Colored(Green, "Nothing"); return; }
             Colored(Amber, $"{p.Problems.Count} thing{(p.Problems.Count == 1 ? "" : "s")}");
             Hover(string.Join("\n", p.Problems));
         }, p => p.Problems.Count),
@@ -258,9 +316,8 @@ public partial class MainWindow
         new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
         new("world", "World", f => ImGui.TextUnformatted(GameNames.World(f.HomeWorld) is { Length: > 0 } w ? w : "—"), f => GameNames.World(f.HomeWorld)),
         new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
-        new("points", "FC Points", f => ImGui.TextUnformatted(Number(f.Points)), f => f.Points ?? 0, f => f.Points == null),
-        new("members", "Members", f => ImGui.TextUnformatted(f.Members.HasValue ? f.Members.Value.ToString(CultureInfo.InvariantCulture) : "—"),
-            f => f.Members ?? 0, f => f.Members == null),
+        new("points", "FC Points", f => RightNumber(f.Points), f => f.Points ?? 0, f => f.Points == null),
+        new("members", "Members", f => RightNumber(f.Members), f => f.Members ?? 0, f => f.Members == null),
         new("house", "House", f =>
         {
             if (f.HasHouse) { ImGui.TextUnformatted(f.House ?? "—"); return; }
@@ -273,13 +330,13 @@ public partial class MainWindow
         {
             if (!f.HasHouse) { Colored(Dim, "—"); return; }
             var text = f.HouseDays == null ? "Unknown" : f.HouseDays == 0 ? "Today" : $"{f.HouseDays} day{(f.HouseDays == 1 ? "" : "s")} ago";
-            var color = f.HouseLevel switch { "danger" or "unknown" => (Vector4?)Red, "warn" => Amber, _ => null };
+            var color = f.HouseLevel switch { "danger" or "unknown" => (Vector4?)Red, "warn" => Amber, _ => Green };
             if (color is Vector4 c) Colored(c, text); else ImGui.TextUnformatted(text);
             Hover(f.LastEntered.HasValue
                 ? $"Last entered {f.LastEntered.Value:g}. The game can demolish a house after 45 days without a member entering{(f.DemolitionInDays is int left ? $" ({left} days left)" : "")}."
                 : "FC Tracker has no date for this house yet.");
         }, f => f.HasHouse ? f.HouseDays ?? 9999 : -1, f => !f.HasHouse),
-    }, f => f.Account);
+    }, f => f.Account, "Free Companies");
 
     private void DrawFcs()
     {

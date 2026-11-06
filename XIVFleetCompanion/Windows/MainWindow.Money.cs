@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Numerics;
 
 namespace XIVFleetCompanion.Windows;
 
@@ -46,12 +47,12 @@ public partial class MainWindow
 
     private FleetTable<SalvageRow> SalvageTable => salvageTable ??= new FleetTable<SalvageRow>("salvage", plugin.Configuration, new List<FleetColumn<SalvageRow>>
     {
-        new("character", "Character", s => ImGui.TextUnformatted($"{s.Character} ({s.World})"), s => s.Character, Locked: true),
+        new("character", "Character", s => CharacterCell(s.Character, s.World), s => s.Character, Locked: true),
         new("account", "Account", s => ImGui.TextUnformatted(s.Account.Length > 0 ? s.Account : "—"), s => s.Account, Hidden: true),
-        new("standard", "Standard Salvage", s => { ImGui.TextUnformatted(Number(s.Standard)); SalvageBreakdown(s, true); }, s => s.Standard),
-        new("extravagant", "Extravagant Salvage", s => { ImGui.TextUnformatted(Number(s.Extravagant)); SalvageBreakdown(s, false); }, s => s.Extravagant),
-        new("gil", "Value", s => ImGui.TextUnformatted(Number(s.Gil)), s => s.Gil),
-    }, s => s.Account);
+        new("standard", "Standard Salvage", s => { RightNumber(s.Standard); SalvageBreakdown(s, true); }, s => s.Standard),
+        new("extravagant", "Extravagant Salvage", s => { RightNumber(s.Extravagant); SalvageBreakdown(s, false); }, s => s.Extravagant),
+        new("gil", "Value", s => GilCell(s.Gil), s => s.Gil),
+    }, s => s.Account, "characters");
 
     private void DrawSalvage()
     {
@@ -75,13 +76,13 @@ public partial class MainWindow
     private FleetTable<IncomeRow> IncomeTable => incomeTable ??= new FleetTable<IncomeRow>("income", plugin.Configuration, new List<FleetColumn<IncomeRow>>
     {
         new("character", "Character", c => ImGui.TextUnformatted(c.Character), c => c.Character, Locked: true),
-        new("world", "World", c => ImGui.TextUnformatted(c.World), c => c.World),
+        new("world", "World", c => Colored(Dim, c.World), c => c.World),
         new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
-        new("subs", "Subs", c => ImGui.TextUnformatted(c.Subs.ToString(CultureInfo.InvariantCulture)), c => c.Subs),
+        new("subs", "Subs", c => RightNumber(c.Subs), c => c.Subs),
         new("salvage", "Salvage / day", c =>
         {
             if (!c.Enough) { Colored(Dim, "Not enough history"); return; }
-            ImGui.TextUnformatted(Gil(c.SalvagePerDay));
+            TableCells.Right(Gil(c.SalvagePerDay), Green);
             var hover = $"{Number(c.Pieces)} salvage pieces came in over {c.SpanDays:0.0} days";
             if (c.FromChest > 0) hover += $"; {Number(c.FromChest)} taken out of the FC chest are not counted";
             if (c.FirstStored > 0) hover += $"; {Number(c.FirstStored)} seen for the first time (a retainer first opened on a PC) are not counted";
@@ -90,23 +91,23 @@ public partial class MainWindow
         new("repairs", "Repairs / day", c =>
         {
             if (!c.Enough) return;
-            ImGui.TextUnformatted(c.KitPerDay > 0 ? $"−{Gil(c.KitPerDay)}" : "0");
+            TableCells.Right(c.KitPerDay > 0 ? $"−{Gil(c.KitPerDay)}" : "0", c.KitPerDay > 0 ? Amber : (Vector4?)null);
             Hover($"{Number(c.KitsUsed)} repair kits used over {c.SpanDays:0.0} days");
         }, c => c.Enough ? c.KitPerDay : 0, c => !c.Enough),
-        new("real", "Real net / day", c => { if (c.Enough) ImGui.TextUnformatted(Gil(c.PerDay)); }, c => c.Enough ? c.PerDay : 0, c => !c.Enough),
-    }, c => c.Account);
+        new("real", "Real net / day", c => { if (c.Enough) TableCells.Right(Gil(c.PerDay), c.PerDay > 0 ? Green : Red); }, c => c.Enough ? c.PerDay : 0, c => !c.Enough),
+    }, c => c.Account, "characters");
 
     private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration,
         new List<FleetColumn<FleetReader.VentureSummary>>
         {
             new("character", "Character", v => ImGui.TextUnformatted(v.Character), v => v.Character, Locked: true),
-            new("world", "World", v => ImGui.TextUnformatted(v.World.Length > 0 ? v.World : "—"), v => v.World),
+            new("world", "World", v => Colored(Dim, v.World.Length > 0 ? v.World : "—"), v => v.World),
             new("account", "Account", v => ImGui.TextUnformatted(v.Account.Length > 0 ? v.Account : "—"), v => v.Account, Hidden: true),
-            new("retainers", "Retainers", v => ImGui.TextUnformatted(v.Retainers.ToString(CultureInfo.InvariantCulture)), v => v.Retainers),
-            new("rewards", "Rewards", v => ImGui.TextUnformatted(v.Rewards.ToString(CultureInfo.InvariantCulture)), v => v.Rewards),
-            new("perDay", "Vendor value / day", v => ImGui.TextUnformatted(Gil(v.PerDay)), v => v.PerDay),
+            new("retainers", "Retainers", v => RightNumber(v.Retainers), v => v.Retainers),
+            new("rewards", "Rewards", v => RightNumber(v.Rewards), v => v.Rewards),
+            new("perDay", "Vendor value / day", v => TableCells.Right(Gil(v.PerDay), Green), v => v.PerDay),
             new("top", "Most valuable", v => ImGui.TextUnformatted(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
-        }, v => v.Account);
+        }, v => v.Account, "characters");
 
     private void DrawIncome()
     {

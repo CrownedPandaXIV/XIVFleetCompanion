@@ -27,7 +27,8 @@ namespace XIVFleetCompanion
     /// syncs it, else null. House null: none.</summary>
     public sealed record RosterRow(long Cid, string Character, string World, string Account, int SortIndex, string? FcName, int? FcPoints, string? House,
         long Gil, int? Ceruleum, int? RepairKits, int Retainers, int Submarines, DateTime? LastSynced,
-        string? LoginPc, string? LoginLabel, DateTime? LoggedInAt, int? BehindMinutes, bool LowCeruleum, bool LowRepairKits);
+        string? LoginPc, string? LoginLabel, DateTime? LoggedInAt, int? BehindMinutes, bool LowCeruleum, bool LowRepairKits,
+        int? SubSlots = null, double CeruleumWarning = 0, double RepairKitWarning = 0, int SubsBuilt = 0);
 
     /// <summary>One retainer, from fleet_retainers_view. Job and VentureId are the game's numbers (ClassJob, RetainerTask),
     /// named in the window from the game's own files; VentureEndsAt in Unix seconds.</summary>
@@ -317,7 +318,9 @@ namespace XIVFleetCompanion
                     TextOrNull(r, "fc_name"), IntOrNull(r, "fc_points"), TextOrNull(r, "house"),
                     Long(r, "gil"), IntOrNull(r, "ceruleum"), IntOrNull(r, "repair_kits"), Int(r, "retainer_count"), Int(r, "submarine_count"),
                     Time(r, "last_synced_at"), TextOrNull(r, "login_pc"), TextOrNull(r, "login_label"), Time(r, "logged_in_at"),
-                    IntOrNull(r, "behind_minutes"), BoolOrNull(r, "low_ceruleum") == true, BoolOrNull(r, "low_repair_kits") == true));
+                    IntOrNull(r, "behind_minutes"), BoolOrNull(r, "low_ceruleum") == true, BoolOrNull(r, "low_repair_kits") == true,
+                    Has(r, "num_sub_slots") ? IntOrNull(r, "num_sub_slots") : null, Has(r, "ceruleum_warning") ? Double(r, "ceruleum_warning") ?? 0 : 0,
+                    Has(r, "repair_kit_warning") ? Double(r, "repair_kit_warning") ?? 0 : 0, Has(r, "subs_built") ? Int(r, "subs_built") : 0));
             return FleetOrder.Roster(list);
         }
 

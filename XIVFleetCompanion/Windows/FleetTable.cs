@@ -33,17 +33,24 @@ public sealed class FleetTable<T>
     private readonly Configuration config;
     private readonly IReadOnlyList<FleetColumn<T>> columns;
     private readonly Func<T, string?>? account;
+    private readonly string countNoun;
+    private readonly Func<IReadOnlyList<T>, string?>? groupNote;
     private bool resetSort;
     private bool sorted;
 
     /// <param name="id">The table's name in the settings (its columns and grouping are saved under it).</param>
     /// <param name="account">A row's account label, for Group by account (null: the table doesn't group).</param>
-    public FleetTable(string id, Configuration config, IReadOnlyList<FleetColumn<T>> columns, Func<T, string?>? account = null)
+    /// <param name="countNoun">What a row is ("characters"), for each account's band: "Account 2 · 40 characters".</param>
+    /// <param name="groupNote">Anything else the band says about the account's rows (null: nothing).</param>
+    public FleetTable(string id, Configuration config, IReadOnlyList<FleetColumn<T>> columns, Func<T, string?>? account = null,
+        string countNoun = "", Func<IReadOnlyList<T>, string?>? groupNote = null)
     {
         this.id = id;
         this.config = config;
         this.columns = columns;
         this.account = account;
+        this.countNoun = countNoun;
+        this.groupNote = groupNote;
     }
 
     /// <summary>Whether a column sorts the table (as of the last frame drawn).</summary>
@@ -168,6 +175,8 @@ public sealed class FleetTable<T>
         var shown = Shown();
         if (shown.Count == 0) return;
         // A table of its own for each choice of columns, so ImGui's saved widths always fit the columns shown.
+        // A little more room in each row, so long tables read easily.
+        using var padding = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(ImGui.GetStyle().CellPadding.X + 2, ImGui.GetStyle().CellPadding.Y + 2) );
         using var table = ImRaii.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}", shown.Count, Flags);
         if (!table) return;
         ImGui.TableSetupScrollFreeze(1, 1);
@@ -200,7 +209,11 @@ public sealed class FleetTable<T>
             lines = new List<Line>();
             foreach (var (label, groupRows) in FleetOrder.ByAccount(rows, account))
             {
-                lines.Add(new Line(default!, label));
+                // The account's band: its name, how many rows, and anything the table adds ("synced on ...").
+                var band = label;
+                if (countNoun.Length > 0) band += $" · {groupRows.Count} {countNoun}";
+                if (groupNote?.Invoke(groupRows) is { Length: > 0 } note) band += $" · {note}";
+                lines.Add(new Line(default!, band));
                 lines.AddRange(groupRows.Select(r => new Line(r, null)));
             }
         }
@@ -219,9 +232,11 @@ public sealed class FleetTable<T>
                 ImGui.TableNextRow();
                 if (line.Heading != null)
                 {
+                    // A band in the look's accent across the whole row.
                     ImGui.TableSetColumnIndex(0);
-                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(ImGuiCol.TableHeaderBg));
-                    ImGui.TextUnformatted(line.Heading);
+                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(ImGuiCol.Header));
+                    using (ImRaii.PushColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.CheckMark)))
+                        ImGui.TextUnformatted(line.Heading);
                     continue;
                 }
                 using var rowId = ImRaii.PushId(i);
@@ -234,5 +249,39 @@ public sealed class FleetTable<T>
             }
         }
         clipper.Destroy();
+    }
+}
+
+/// <summary>Cells shared by the in-game tables: numbers on the right, and dots for counts.</summary>
+public static class TableCells
+{
+    /// <summary>Text pushed to the right of its cell, so numbers line up (color: null for the usual).</summary>
+    public static void Right(string text, Vector4? color = null)
+    {
+        var width = ImGui.CalcTextSize(text).X;
+        var room = ImGui.GetContentRegionAvail().X;
+        if (room > width) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + room - width);
+        if (color is Vector4 c)
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, c)) ImGui.TextUnformatted(text);
+        }
+        else ImGui.TextUnformatted(text);
+    }
+
+    /// <summary>Filled and empty dots, filled out of total (for example subs out of the sub slots unlocked).</summary>
+    public static void Pips(int filled, int total, Vector4 on, Vector4 off)
+    {
+        var height = ImGui.GetTextLineHeight();
+        var radius = height * 0.27f;
+        var step = radius * 2.7f;
+        var start = ImGui.GetCursorScreenPos();
+        var draw = ImGui.GetWindowDrawList();
+        for (var i = 0; i < total; i++)
+        {
+            var center = new Vector2(start.X + radius + i * step, start.Y + height / 2);
+            if (i < filled) draw.AddCircleFilled(center, radius, ImGui.GetColorU32(on));
+            else draw.AddCircle(center, radius, ImGui.GetColorU32(off), 12, 1.5f);
+        }
+        ImGui.Dummy(new Vector2(Math.Max(1, total) * step, height));
     }
 }

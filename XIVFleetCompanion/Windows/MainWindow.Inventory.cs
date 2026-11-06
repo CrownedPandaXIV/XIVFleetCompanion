@@ -33,10 +33,10 @@ public partial class MainWindow
     private FleetTable<HoldingRow> CharacterInventoryTable => characterInventoryTable ??= new FleetTable<HoldingRow>("inventoryCharacters", plugin.Configuration,
         new List<FleetColumn<HoldingRow>>
         {
-            new("character", "Character", h => ImGui.TextUnformatted($"{h.Who}{(h.World.Length > 0 ? $" ({h.World})" : "")}"), h => h.Who),
+            new("character", "Character", h => CharacterCell(h.Who, h.World), h => h.Who),
             new("location", "Location", h => ImGui.TextUnformatted(FleetOrder.CharacterLocation(h)), h => FleetOrder.CharacterLocation(h)),
             new("item", "Item", h => ImGui.TextUnformatted(ItemName(h.ItemId, h.Hq)), h => ItemName(h.ItemId, h.Hq), Locked: true),
-            new("quantity", "Quantity", h => ImGui.TextUnformatted(Number(h.Quantity)), h => h.Quantity),
+            new("quantity", "Quantity", h => RightNumber(h.Quantity), h => h.Quantity),
         });
 
     private FleetTable<HoldingRow> FcInventoryTable => fcInventoryTable ??= new FleetTable<HoldingRow>("inventoryFcs", plugin.Configuration,
@@ -45,14 +45,14 @@ public partial class MainWindow
             new("fc", "FC", h => ImGui.TextUnformatted(h.Who), h => h.Who),
             new("tab", "Tab", h => ImGui.TextUnformatted($"Tab {h.Container - 20000 + 1}"), h => h.Container),
             new("item", "Item", h => ImGui.TextUnformatted(ItemName(h.ItemId, h.Hq)), h => ItemName(h.ItemId, h.Hq), Locked: true),
-            new("quantity", "Quantity", h => ImGui.TextUnformatted(Number(h.Quantity)), h => h.Quantity),
+            new("quantity", "Quantity", h => RightNumber(h.Quantity), h => h.Quantity),
         });
 
     private FleetTable<ItemTotalRow> FleetTotalsTable => fleetTotalsTable ??= new FleetTable<ItemTotalRow>("inventoryTotals", plugin.Configuration,
         new List<FleetColumn<ItemTotalRow>>
         {
             new("item", "Item", t => ImGui.TextUnformatted(ItemName(t.ItemId, t.Hq)), t => ItemName(t.ItemId, t.Hq), Locked: true),
-            new("total", "Total Quantity", t => ImGui.TextUnformatted(Number(t.Total)), t => t.Total),
+            new("total", "Total Quantity", t => RightNumber(t.Total), t => t.Total),
         });
 
     private void DrawInventory()

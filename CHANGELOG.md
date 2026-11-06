@@ -96,6 +96,12 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   Salvage leads with the Fleet-Wide Salvage Total, each hover ends with its total (pieces and gil), and the Summary
   shows the Fleet-Wide Salvage Total too, as the app's. The Summary also shows the venture income per day (last days of
   the Income window, at what a vendor pays), read with the supplies.
+- **Tables that read at a glance**: colours that mean something (green when fine, amber getting low, red well below a
+  warning: the Roster's ceruleum and repair kits against the app's warnings, Supplies' days left, Last synced, Income,
+  houses, the PCs' plugins), subs as dots out of the slots unlocked, numbers on the right, large gil as "5.86M" (the
+  full amount on hover), the world softer after each name, a band for each account with how many it has (and, on the
+  Roster, which setup syncs it, so Synced by is hidden by default; Columns brings it back), a little more room per row
+  and stronger stripes.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by
