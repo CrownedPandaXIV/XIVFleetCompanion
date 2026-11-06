@@ -25,6 +25,20 @@ namespace XIVFleetCompanion
         public static List<RosterRow> Roster(IEnumerable<RosterRow> rows) =>
             rows.OrderBy(r => r.SortIndex).ThenBy(r => r.Character, Text).ToList();
 
+        /// <summary>The Roster's order for any rows of characters (Salvage, Income, ventures): saved place first (none last),
+        /// then name.</summary>
+        public static List<T> Roster<T>(IEnumerable<T> rows, Func<T, int> sortIndex, Func<T, string> name) =>
+            rows.OrderBy(sortIndex).ThenBy(name, Text).ToList();
+
+        /// <summary>Every search box (2.x, as the app): matches when the text has every word typed, in any order, ignoring
+        /// case ("diadochos healing" finds "Diadochos Bottoms of Healing"). Nothing typed matches everything.</summary>
+        public static bool MatchesWords(string? text, string? query)
+        {
+            var haystack = text ?? "";
+            return (query ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .All(word => haystack.Contains(word, StringComparison.OrdinalIgnoreCase));
+        }
+
         /// <summary>The Retainers tab's order (renderer sortByRoster): the owner's place in the Roster (none last), the
         /// owner's name, hiring order (none last), then the retainer's name.</summary>
         public static List<RetainerRow> Retainers(IEnumerable<RetainerRow> rows) =>

@@ -87,6 +87,16 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - **Fleet in the info bar keeps working after an update.** Right after the plugin updated, clicking "Fleet" could do
   nothing until the plugin was turned off and on: the old copy's entry was still on screen. The plugin now asks again
   every few seconds until "Fleet" is its own, and takes it back if it ever isn't (noted in /xllog).
+- **Stage 6, part 3: Salvage and Income** (with app 1.8.0's views). Salvage: the salvage each character holds, standard
+  and extravagant, with each piece on hover and its value at the fixed salvage prices. Income: each character's real
+  net income per day from its subs (salvage that came in, less repair kits used) and the venture rewards per character
+  at what a vendor pays (from the game's files), over the Income window set in the app. Read every 5 minutes while
+  shown. Fight Club's expected figures and Loot per Voyage come later in 2.x, with routes. `/xivfleet salvage` and
+  `/xivfleet income` open them.
+- **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
+  finds every piece of Diadochos healing gear).
+- **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by
+  the characters and their retainers. One choice for all three, saved.
 - **Free Companies and Inventory read with real Free Company ids.** These ids are too big for the number the plugin
   read them into, so the Free Companies list failed and took every other read down with it ("Could not reach the
   database" everywhere until the next read, and again on every Refresh). They're read in full now, and a read that

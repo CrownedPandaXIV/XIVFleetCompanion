@@ -54,12 +54,34 @@ namespace XIVFleetCompanion
 
     /// <summary>One stack of an item, from fleet_holdings_view. Kind: "character", "retainer" or "fc". ItemId is the plain
     /// item (Hq: high quality). OwnerCid: the character, or for an FC chest the member it's counted on. Money: gil, not items.</summary>
+    /// Equipped: gear being worn by a character or retainer (for "Hide equipped gear").</summary>
     public sealed record HoldingRow(string Kind, long? OwnerCid, decimal? FcId, int Container, int ItemId, bool Hq, long Quantity,
         string Who, string World, string? OwnerName, string Account, int SortIndex, string? RetainerName, int HireOrder,
-        string? ContainerName, bool Money, string Place);
+        string? ContainerName, bool Money, string Place, bool Equipped = false);
 
-    /// <summary>How many of an item the fleet holds, from fleet_item_totals_view (high quality apart).</summary>
-    public sealed record ItemTotalRow(int ItemId, bool Hq, long Total);
+    /// <summary>How many of an item the fleet holds, from fleet_item_totals_view (high quality apart); Equipped: how many of
+    /// them are being worn.</summary>
+    public sealed record ItemTotalRow(int ItemId, bool Hq, long Total, long Equipped = 0);
+
+    /// <summary>The salvage a character holds, from fleet_salvage_view (bags, retainers and the FC chest it's counted on):
+    /// standard and extravagant pieces, their worth at the fixed salvage prices, and how many of each piece (Pieces[0] is
+    /// item 22500, up to Pieces[7], 22507).</summary>
+    public sealed record SalvageRow(long Cid, string Character, string World, string Account, int SortIndex, long Standard, long Extravagant,
+        long Gil, long[] Pieces);
+
+    /// <summary>A character's real net income from its subs over the Income window, from fleet_income_view. Enough: a day or
+    /// more of salvage history (the numbers are 0 otherwise).</summary>
+    public sealed record IncomeRow(long Cid, string Character, string World, string Account, int SortIndex, int Subs, bool Enough, double SpanDays,
+        long Pieces, long FromChest, long FirstStored, double SalvageGil, long KitsUsed, double KitGil, double Net, double PerDay,
+        double SalvagePerDay, double KitPerDay);
+
+    /// <summary>One character's venture rewards of one item over the Income window, from fleet_venture_income_view, with its
+    /// rewards and retainers in that time. SalvagePrice: salvage's fixed price; anything else is priced from the game's files.</summary>
+    public sealed record VentureIncomeRow(long Cid, string Character, string World, string Account, int SortIndex, int ItemId, long Quantity,
+        int? SalvagePrice, int Rewards, int Retainers);
+
+    /// <summary>The Income page's read: each character's income, the venture rewards, the window (days) and repair kit cost.</summary>
+    public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
 
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
@@ -76,6 +98,8 @@ namespace XIVFleetCompanion
         public static readonly TimeSpan SuppliesEvery = TimeSpan.FromMinutes(5);
         /// <summary>The Roster, Retainers and PCs: every minute, and only while one of them is shown.</summary>
         public static readonly TimeSpan ListsEvery = TimeSpan.FromMinutes(1);
+        /// <summary>Salvage and Income: every 5 minutes while one of them is shown (Income takes the database a moment).</summary>
+        public static readonly TimeSpan MoneyEvery = TimeSpan.FromMinutes(5);
         public const string MissingViewsText =
             "The database doesn't have the fleet views yet. Update the XIV Fleet Companion app to 1.8.0 or later and open it once; it adds them.";
 
@@ -84,6 +108,7 @@ namespace XIVFleetCompanion
         private DateTime subsAsked = DateTime.MinValue;
         private DateTime suppliesAsked = DateTime.MinValue;
         private DateTime listsAsked = DateTime.MinValue;
+        private DateTime moneyAsked = DateTime.MinValue;
 
         public FleetRead<List<SubRow>> Subs { get; private set; } = new(null, null, null);
         public FleetRead<List<SupplyRow>> Supplies { get; private set; } = new(null, null, null);
@@ -94,6 +119,8 @@ namespace XIVFleetCompanion
         public FleetRead<List<PcRow>> Pcs { get; private set; } = new(null, null, null);
         public FleetRead<RetainerCountsRow> RetainerCounts { get; private set; } = new(null, null, null);
         public FleetRead<List<FcRow>> Fcs { get; private set; } = new(null, null, null);
+        public FleetRead<List<SalvageRow>> Salvage { get; private set; } = new(null, null, null);
+        public FleetRead<IncomeRead> Income { get; private set; } = new(null, null, null);
         public bool Busy => busy;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
@@ -102,16 +129,18 @@ namespace XIVFleetCompanion
         /// <summary>
         /// Called while something shows the fleet: starts a read in the background when one is due. withSupplies:
         /// false for the info bar line, which only needs the subs and what needs attention. withLists: true while the
-        /// Roster, Retainers or PCs page is shown (everything reads them too).
+        /// Roster, Retainers or PCs page is shown (everything reads them too). withMoney: true while Salvage or Income is
+        /// shown (everything reads them too).
         /// </summary>
-        public void ReadIfDue(bool everything = false, bool withSupplies = true, bool withLists = false)
+        public void ReadIfDue(bool everything = false, bool withSupplies = true, bool withLists = false, bool withMoney = false)
         {
             if (busy) return;
             var now = DateTime.UtcNow;
             var subs = everything || now - subsAsked >= SubsEvery;
             var supplies = everything || (withSupplies && now - suppliesAsked >= SuppliesEvery);
             var lists = everything || (withLists && now - listsAsked >= ListsEvery);
-            if (!subs && !supplies && !lists) return;
+            var money = everything || (withMoney && now - moneyAsked >= MoneyEvery);
+            if (!subs && !supplies && !lists && !money) return;
             var cs = connectionString();
             if (cs == null)
             {
@@ -125,12 +154,15 @@ namespace XIVFleetCompanion
                 Pcs = Pcs with { Error = notSetUp };
                 RetainerCounts = RetainerCounts with { Error = notSetUp };
                 Fcs = Fcs with { Error = notSetUp };
+                Salvage = Salvage with { Error = notSetUp };
+                Income = Income with { Error = notSetUp };
                 return;
             }
             busy = true;
             if (subs) subsAsked = now;
             if (supplies) suppliesAsked = now;
             if (lists) listsAsked = now;
+            if (money) moneyAsked = now;
             Task.Run(async () =>
             {
                 try
@@ -155,6 +187,11 @@ namespace XIVFleetCompanion
                         Pcs = await Read(conn, ReadPcs, Pcs);
                         Fcs = await Read(conn, ReadFcs, Fcs);
                     }
+                    if (money)
+                    {
+                        Salvage = await Read(conn, ReadSalvage, Salvage);
+                        Income = await Read(conn, ReadIncome, Income);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -162,6 +199,7 @@ namespace XIVFleetCompanion
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
+                    if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
                 }
                 finally
                 {
@@ -204,6 +242,12 @@ namespace XIVFleetCompanion
         private static long? LongOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToInt64(r.GetValue(i), CultureInfo.InvariantCulture); }
         private static int? IntOrNull(NpgsqlDataReader r, string col) => (int?)LongOrNull(r, col);
         private static bool? BoolOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : r.GetBoolean(i); }
+        // A column a newer app's views have (an older one's don't, until the app is updated): its value, or the fallback.
+        private static bool Has(NpgsqlDataReader r, string col)
+        {
+            for (var i = 0; i < r.FieldCount; i++) if (r.GetName(i) == col) return true;
+            return false;
+        }
         private static DateTime? Time(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : r.GetFieldValue<DateTime>(i).ToLocalTime(); }
 
         public static async Task<List<SubRow>> ReadSubs(NpgsqlConnection conn)
@@ -343,7 +387,7 @@ namespace XIVFleetCompanion
                 list.Add(new HoldingRow(Text(r, "kind"), LongOrNull(r, "owner_cid"), DecimalOrNull(r, "fc_id"), Int(r, "container"), Int(r, "item_id"),
                     BoolOrNull(r, "hq") == true, Long(r, "quantity"), Text(r, "who"), Text(r, "world"), TextOrNull(r, "owner_name"), Text(r, "account_label"),
                     Int(r, "sort_index", int.MaxValue), TextOrNull(r, "retainer_name"), Int(r, "hire_order_index", int.MaxValue), TextOrNull(r, "container_name"),
-                    BoolOrNull(r, "money") == true, Text(r, "place")));
+                    BoolOrNull(r, "money") == true, Text(r, "place"), Has(r, "equipped") && BoolOrNull(r, "equipped") == true));
             return list;
         }
 
@@ -353,8 +397,69 @@ namespace XIVFleetCompanion
             await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_item_totals_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
-                list.Add(new ItemTotalRow(Int(r, "item_id"), BoolOrNull(r, "hq") == true, Long(r, "total")));
+                list.Add(new ItemTotalRow(Int(r, "item_id"), BoolOrNull(r, "hq") == true, Long(r, "total"), Has(r, "equipped") ? Long(r, "equipped") : 0));
             return list;
+        }
+
+        public static async Task<List<SalvageRow>> ReadSalvage(NpgsqlConnection conn)
+        {
+            var list = new List<SalvageRow>();
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_salvage_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                list.Add(new SalvageRow(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
+                    Long(r, "standard"), Long(r, "extravagant"), Long(r, "gil"), Enumerable.Range(22500, 8).Select(id => Long(r, $"q{id}")).ToArray()));
+            return FleetOrder.Roster(list, x => x.SortIndex, x => x.Character);
+        }
+
+        public static async Task<IncomeRead> ReadIncome(NpgsqlConnection conn)
+        {
+            var characters = new List<IncomeRow>();
+            var windowDays = 7;
+            var kitCost = 0.0;
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_income_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    characters.Add(new IncomeRow(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
+                        Int(r, "subs"), BoolOrNull(r, "enough") == true, Double(r, "span_days") ?? 0, Long(r, "pieces"), Long(r, "from_chest"), Long(r, "first_stored"),
+                        Double(r, "salvage_gil") ?? 0, Long(r, "kits_used"), Double(r, "kit_gil") ?? 0, Double(r, "net") ?? 0, Double(r, "per_day") ?? 0,
+                        Double(r, "salvage_per_day") ?? 0, Double(r, "kit_per_day") ?? 0));
+                    windowDays = Int(r, "window_days", 7);
+                    kitCost = Double(r, "kit_cost") ?? 0;
+                }
+            }
+            var ventures = new List<VentureIncomeRow>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_venture_income_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    ventures.Add(new VentureIncomeRow(Long(r, "owner_cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
+                        Int(r, "item_id"), Long(r, "quantity"), IntOrNull(r, "salvage_price"), Int(r, "rewards"), Int(r, "retainers")));
+                    windowDays = Int(r, "window_days", windowDays);
+                }
+            }
+            return new IncomeRead(FleetOrder.Roster(characters, x => x.SortIndex, x => x.Character), ventures, windowDays, kitCost);
+        }
+
+        /// <summary>Each character's venture rewards added up, as the Income tab's Retainer Ventures: rewards, retainers,
+        /// vendor value (salvage at its fixed price, anything else at price, what a vendor pays) and per day over the window,
+        /// and the three items worth most (the larger item number last when two are worth the same).</summary>
+        public sealed record VentureSummary(long Cid, string Character, string World, string Account, int SortIndex, int Rewards, int Retainers,
+            double Gil, double PerDay, List<(int ItemId, long Quantity, double Gil)> Top);
+
+        public static List<VentureSummary> SummarizeVentures(IEnumerable<VentureIncomeRow> rows, int windowDays, Func<int, double> price)
+        {
+            return rows.GroupBy(x => x.Cid).Select(g =>
+            {
+                var first = g.First();
+                var items = g.Select(x => (x.ItemId, x.Quantity, Gil: x.Quantity * (x.SalvagePrice ?? price(x.ItemId)))).ToList();
+                var gil = items.Sum(x => x.Gil);
+                return new VentureSummary(first.Cid, first.Character, first.World, first.Account, first.SortIndex, first.Rewards, first.Retainers,
+                    gil, windowDays > 0 ? gil / windowDays : 0, items.OrderByDescending(x => x.Gil).ThenBy(x => x.ItemId).Take(3).ToList());
+            }).ToList();
         }
 
         /// <summary>Every item the fleet holds (not gil), for searching by name in Where is it?.</summary>

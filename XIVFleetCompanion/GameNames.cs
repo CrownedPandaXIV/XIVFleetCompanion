@@ -16,6 +16,7 @@ namespace XIVFleetCompanion
         private static readonly Dictionary<int, string> Items = new();
         private static readonly Dictionary<int, int?> ItemLevels = new();
         private static readonly Dictionary<int, string> Worlds = new();
+        private static readonly Dictionary<int, double> VendorPrices = new();
 
         /// <summary>A world's name for its number; "" when unknown.</summary>
         public static string World(int world)
@@ -91,6 +92,20 @@ namespace XIVFleetCompanion
             }
             catch (Exception ex) { Plugin.Log.Debug($"Fleet Companion: item {itemId} — {ex.Message}"); }
             return Items[itemId] = name;
+        }
+
+        /// <summary>What a vendor pays for an item (the game's own price, as the app's game data); 0 when unknown.</summary>
+        public static double VendorPrice(int itemId)
+        {
+            if (VendorPrices.TryGetValue(itemId, out var known)) return known;
+            double price = 0;
+            try
+            {
+                var row = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault((uint)itemId);
+                if (row.HasValue) price = row.Value.PriceLow;
+            }
+            catch (Exception ex) { Plugin.Log.Debug($"Fleet Companion: item {itemId} — {ex.Message}"); }
+            return VendorPrices[itemId] = price;
         }
 
         /// <summary>An item's level (ilvl); null when the game doesn't know the item.</summary>

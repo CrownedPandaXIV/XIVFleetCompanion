@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Roster, Retainers, Fcs, Inventory, Pcs, Check, SpeedTest, Status, Settings }
+    public enum Tab { Summary, Subs, Supplies, Roster, Retainers, Fcs, Inventory, Salvage, Income, Pcs, Check, SpeedTest, Status, Settings }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -117,6 +117,8 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Retainers: DrawRetainers(); break;
             case Tab.Fcs: DrawFcs(); break;
             case Tab.Inventory: DrawInventory(); break;
+            case Tab.Salvage: DrawSalvage(); break;
+            case Tab.Income: DrawIncome(); break;
             case Tab.Pcs: DrawPcs(); break;
             case Tab.Check: plugin.CheckPage.DrawPage(); break;
             case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
@@ -195,6 +197,8 @@ public partial class MainWindow : Window, IDisposable
                     Entry(Tab.Fcs, FontAwesomeIcon.Home, "Free Companies", folded, housesAtRisk > 0 ? $"{housesAtRisk} house{(housesAtRisk == 1 ? "" : "s")}" : null, p.Warn,
                         housesAtRisk > 0 ? $"{housesAtRisk} house{(housesAtRisk == 1 ? "" : "s")} not entered for a while" : null);
                     Entry(Tab.Inventory, FontAwesomeIcon.BoxOpen, "Inventory", folded, null, p.Dim, "What the fleet holds, and Where is it?");
+                    Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
+                    Entry(Tab.Income, FontAwesomeIcon.Coins, "Income", folded, null, p.Dim, "Real income from the subs, and venture rewards");
                     break;
                 case "Tools":
                     Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);

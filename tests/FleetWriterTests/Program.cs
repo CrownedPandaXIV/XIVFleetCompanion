@@ -311,7 +311,56 @@ internal static class Program
         Check(bad.Data == counts && bad.Error != null && bad.Error.StartsWith("Could not read this from the database"), "batch 2: a read that can't be taken fails alone: " + bad.Error);
         var after = await FleetReader.Read(conn, FleetReader.ReadFcs, new FleetRead<List<FcRow>>(null, null, null));
         Check(after.Error == null && after.Data?.Count == 2, "batch 2: and the connection still reads the next one: " + after.Error);
+        Check(holdings.All(h => !h.Equipped) && totals[0].Equipped == 0, "batch 2: views from before batch 3 (no equipped column) still read, nothing marked worn");
         await Exec(conn, "DROP VIEW fleet_retainer_counts_view, fleet_fcs_view, fleet_holdings_view, fleet_item_totals_view");
+
+        // Batch 3: Salvage, Income, venture rewards, equipped gear, and searching word by word.
+        await Exec(conn, @"
+            CREATE VIEW fleet_holdings_view AS SELECT * FROM (VALUES
+              ('character'::text, 1::numeric, 1::numeric, NULL::numeric, 1000::int, 40000::int, false, 1::int, 'Aki'::text, 'Maduin'::text, 'Aki'::text, 'A'::text, 2::int, NULL::text, NULL::int, 'GearSet0'::text, false, 'Equipped'::text, true),
+              ('retainer', 1, 100, NULL, 3200, 40000, false, 2, 'Aki', 'Maduin', 'Aki', 'A', 2, 'Zed', 0, NULL, false, 'Armoury chest', false))
+              AS t(kind, owner_cid, retainer_id, fc_id, container, item_id, hq, quantity, who, world, owner_name, account_label, sort_index, retainer_name,
+                   hire_order_index, container_name, money, place, equipped);
+            CREATE VIEW fleet_item_totals_view AS SELECT 40000::int AS item_id, false AS hq, 3::bigint AS total, 1::bigint AS equipped;
+            CREATE VIEW fleet_salvage_view AS SELECT * FROM (VALUES
+              (2::numeric, 'Bex'::text, 'Maduin'::text, 'B'::text, 1::int, 3::bigint, 1::bigint, 61000::bigint, 2::bigint, 0::bigint, 1::bigint, 0::bigint, 0::bigint, 0::bigint, 0::bigint, 1::bigint),
+              (1, 'Aki', 'Maduin', 'A', NULL, 0, 2, 57000, 0, 0, 0, 0, 0, 2, 0, 0))
+              AS t(cid, name, world, account_label, sort_index, standard, extravagant, gil, q22500, q22501, q22502, q22503, q22504, q22505, q22506, q22507);
+            CREATE VIEW fleet_income_view AS SELECT * FROM (VALUES
+              (1::numeric, 'Aki'::text, 'Maduin'::text, 'A'::text, 5::int, now(), 4::bigint, true, 3.5::numeric, 7::numeric, 2::numeric, 3::numeric, 61000::numeric, 4::numeric, 6920::numeric, 54080::numeric, 15451.4::float8, 17428.6::float8, 1977.1::float8, 3::int, 1730::numeric),
+              (18014498577484004, 'Cal', 'Exodus', '', NULL, now(), 1, false, 0.4, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 3, 1730))
+              AS t(cid, name, world, account_label, sort_index, last_synced_at, subs, enough, span_days, pieces, from_chest, first_stored, salvage_gil, kits_used, kit_gil, net,
+                   per_day, salvage_per_day, kit_per_day, window_days, kit_cost);
+            CREATE VIEW fleet_venture_income_view AS SELECT * FROM (VALUES
+              (1::numeric, 'Aki'::text, 'Maduin'::text, 'A'::text, 5::int, 5111::int, 10::bigint, NULL::int, 3::bigint, 2::bigint, 3::int),
+              (1, 'Aki', 'Maduin', 'A', 5, 22500, 1, 8000, 3, 2, 3),
+              (1, 'Aki', 'Maduin', 'A', 5, 6000, 4, NULL, 3, 2, 3),
+              (1, 'Aki', 'Maduin', 'A', 5, 6001, 1, NULL, 3, 2, 3))
+              AS t(owner_cid, name, world, account_label, sort_index, item_id, quantity, salvage_price, rewards, retainers, window_days);");
+        var worn = await FleetReader.ReadHoldings(conn, "true", _ => { });
+        Check(worn.Count == 2 && worn[0].Equipped && !worn[1].Equipped, "batch 3: equipped gear marked: " + string.Join(" | ", worn));
+        var wornTotals = await FleetReader.ReadItemTotals(conn);
+        Check(wornTotals.Single() == new ItemTotalRow(40000, false, 3, 1), "batch 3: the fleet's totals say how many are worn: " + wornTotals.Single());
+        var shownPlaces = FleetOrder.WhereIsIt(worn.Where(h => !h.Equipped), id => "Ring").Single();
+        Check(shownPlaces.Total == 2 && shownPlaces.Places.Single().Where == "Armoury chest", "batch 3: Where is it? without worn gear counts only the rest");
+        var salvage = await FleetReader.ReadSalvage(conn);
+        Check(salvage.Count == 2 && salvage[0].Character == "Bex" && salvage[0].Pieces.SequenceEqual(new long[] { 2, 0, 1, 0, 0, 0, 0, 1 }) && salvage[0].Gil == 61000
+              && salvage[1].Character == "Aki" && salvage[1].SortIndex == int.MaxValue && salvage[1].Extravagant == 2,
+            "batch 3: salvage read, in the Roster's order, each piece apart: " + string.Join(" | ", salvage.Select(x => $"{x.Character} {string.Join(",", x.Pieces)}")));
+        var income = await FleetReader.ReadIncome(conn);
+        var aki = income.Characters[0];
+        Check(income.WindowDays == 3 && income.KitCost == 1730 && income.Characters.Count == 2 && aki.Enough && aki.Pieces == 7 && aki.FromChest == 2 && aki.FirstStored == 3
+              && aki.KitsUsed == 4 && Math.Abs(aki.PerDay - 15451.4) < 1e-9 && !income.Characters[1].Enough && income.Characters[1].Cid == 18014498577484004 && income.Ventures.Count == 4,
+            "batch 3: income read, with not enough history kept apart: " + string.Join(" | ", income.Characters));
+        var prices = new Dictionary<int, double> { [5111] = 100, [6000] = 250, [6001] = 1000, [22500] = 3 };
+        var summary = FleetReader.SummarizeVentures(income.Ventures, income.WindowDays, id => prices[id]).Single();
+        Check(summary.Rewards == 3 && summary.Retainers == 2 && summary.Gil == 1000 + 8000 + 1000 + 1000 && Math.Abs(summary.PerDay - 11000 / 3.0) < 1e-9
+              && summary.Top.Select(t => t.ItemId).SequenceEqual(new[] { 22500, 5111, 6000 }),
+            "batch 3: venture rewards valued as the app (salvage at its fixed price), the three worth most, ties by item number: " + string.Join(",", summary.Top));
+        Check(FleetOrder.MatchesWords("Diadochos Bottoms of Healing", "diadochos  healing") && FleetOrder.MatchesWords("Diadochos Bottoms of Healing", "heal diad")
+              && !FleetOrder.MatchesWords("Diadochos Bottoms of Casting", "diadochos healing") && FleetOrder.MatchesWords("Anything", "  ") && FleetOrder.MatchesWords(null, ""),
+            "batch 3: searching word by word, in any order, ignoring case");
+        await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);
         reader.ReadIfDue(everything: true);

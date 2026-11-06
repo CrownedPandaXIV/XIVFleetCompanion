@@ -25,6 +25,9 @@ public class Configuration : IPluginConfiguration
     // it groups by account when not sorted by a column (none saved: yes, as the app).
     public Dictionary<string, List<string>> TableColumns { get; set; } = new();
     public Dictionary<string, bool> TableGroupByAccount { get; set; } = new();
+    // The Inventory page's "Hide equipped gear" (Characters, Fleet totals and Where is it?): leaves out gear being worn
+    // by the characters and their retainers.
+    public bool HideEquippedGear { get; set; } = false;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";

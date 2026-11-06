@@ -99,6 +99,19 @@ public partial class MainWindow
         }
     }
 
+    // "Hide equipped gear": one choice for Characters, Fleet totals and Where is it?, saved.
+    private void HideEquippedBox()
+    {
+        ImGui.SameLine();
+        var hide = plugin.Configuration.HideEquippedGear;
+        if (ImGui.Checkbox("Hide equipped gear##hideEquipped", ref hide))
+        {
+            plugin.Configuration.HideEquippedGear = hide;
+            plugin.Configuration.Save();
+        }
+        Hover("Leave out gear being worn by the characters and their retainers.");
+    }
+
     private static string Ids<TKey>(IEnumerable<TKey> ids) => string.Join(",", ids.OrderBy(x => x));
 
     private void DrawCharacterInventory()
@@ -109,6 +122,7 @@ public partial class MainWindow
         ImGui.SameLine();
         CharacterInventoryTable.DrawControls();
         FilterBox(ref inventoryFilter, "inventory");
+        HideEquippedBox();
         if (inventoryCharacters.Count == 0)
         {
             ImGui.TextWrapped("Choose one or more characters to see what they and their retainers hold.");
@@ -119,6 +133,7 @@ public partial class MainWindow
         reader.ReadHoldingsIfDue(key, "kind <> 'fc' AND container <> 2000 AND owner_cid = ANY(CAST(@ids AS numeric[]))",
             p => p.AddWithValue("ids", ids));
         DrawHoldings(key, CharacterInventoryTable, rows => rows
+            .Where(h => !(plugin.Configuration.HideEquippedGear && h.Equipped))
             .OrderBy(h => h.SortIndex).ThenBy(h => h.Who).ThenBy(h => h.Kind == "retainer" ? 1 : 0).ThenBy(h => h.HireOrder)
             .ThenBy(h => FleetOrder.CharacterLocation(h)).ThenBy(h => ItemName(h.ItemId, h.Hq)).ToList());
     }
@@ -163,9 +178,13 @@ public partial class MainWindow
         reader.ReadItemTotalsIfDue();
         FleetTotalsTable.DrawControls();
         FilterBox(ref inventoryFilter, "inventory");
+        HideEquippedBox();
         ReadLine(reader.ItemTotals, FleetReader.ListsEvery);
         var totals = reader.ItemTotals.Data;
         if (totals == null) return;
+        // Hiding equipped gear counts only what isn't being worn; an item that is only worn drops out.
+        if (plugin.Configuration.HideEquippedGear)
+            totals = totals.Select(t => t with { Total = t.Total - t.Equipped, Equipped = 0 }).Where(t => t.Total > 0).ToList();
         // The most held first, as the app.
         FleetTotalsTable.Draw(totals.Where(t => Matches(inventoryFilter, ItemName(t.ItemId, t.Hq)))
             .OrderByDescending(t => t.Total).ThenBy(t => ItemName(t.ItemId, t.Hq)).ToList());
@@ -180,6 +199,7 @@ public partial class MainWindow
         ImGui.InputText("Item name##whereIsIt", ref whereIsItSearch, 64);
         ImGui.SameLine();
         ImGui.Checkbox("Group by account##whereIsIt", ref whereByAccount);
+        HideEquippedBox();
         var held = reader.HeldItems.Data;
         if (reader.HeldItems.Error != null) Colored(Amber, reader.HeldItems.Error);
         var term = whereIsItSearch.Trim();
@@ -193,7 +213,7 @@ public partial class MainWindow
 
         // Which held items match, by their names in the game's files.
         var matches = held.Select(id => (Id: id, Name: GameNames.Item(id)))
-            .Where(x => x.Name.Contains(term, StringComparison.OrdinalIgnoreCase))
+            .Where(x => FleetOrder.MatchesWords(x.Name, term))
             .OrderBy(x => x.Name, StringComparer.CurrentCulture).ToList();
         if (matches.Count == 0) { ImGui.TextUnformatted("Nothing the fleet holds matches."); return; }
         var more = matches.Count > WhereIsItLimit;
@@ -210,8 +230,14 @@ public partial class MainWindow
 
         using var child = ImRaii.Child("##whereResults", System.Numerics.Vector2.Zero, false);
         if (!child.Success) return;
-        var items = FleetOrder.WhereIsIt(reader.Holdings.Data, id => ItemName(id, false)).ToList();
-        var widths = WhereWidths(reader.Holdings.Data, items);
+        var all = FleetOrder.WhereIsIt(reader.Holdings.Data, id => ItemName(id, false)).ToList();
+        // Hiding equipped gear leaves out the places where it's being worn, and the items held only as worn gear. The
+        // widths come from everything, so the columns don't move when it's ticked.
+        var items = plugin.Configuration.HideEquippedGear
+            ? FleetOrder.WhereIsIt(reader.Holdings.Data.Where(h => !h.Equipped), id => ItemName(id, false)).ToList()
+            : all;
+        var widths = WhereWidths(reader.Holdings.Data, all);
+        if (items.Count == 0) ImGui.TextUnformatted("Only equipped gear matches.");
         foreach (var item in items)
         {
             if (!ImGui.CollapsingHeader($"{item.Name}: {item.Total:N0}##where{item.ItemId}", ImGuiTreeNodeFlags.DefaultOpen)) continue;

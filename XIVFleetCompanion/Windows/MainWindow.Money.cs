@@ -1,0 +1,152 @@
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility.Raii;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+
+namespace XIVFleetCompanion.Windows;
+
+// 2.x, the Salvage and Income pages, as the app's tabs: the salvage each character holds (fleet_salvage_view), and the
+// real net income from the subs plus the venture rewards over the Income window (fleet_income_view and
+// fleet_venture_income_view). Read every 5 minutes while one of them is shown. Fight Club's "expected" figures and Loot
+// per Voyage come later in 2.x, with routes; venture rewards are valued at what a vendor pays, from the game's files.
+public partial class MainWindow
+{
+    private string salvageFilter = "";
+    private string incomeFilter = "";
+    private FleetTable<SalvageRow>? salvageTable;
+    private FleetTable<IncomeRow>? incomeTable;
+    private FleetTable<FleetReader.VentureSummary>? venturesTable;
+
+    private static string Gil(double value) => Math.Round(value).ToString("N0", CultureInfo.CurrentCulture);
+
+    private static int SalvagePrice(int itemId) => itemId switch
+    {
+        22500 => 8000, 22501 => 9000, 22502 => 10000, 22503 => 13000,
+        22504 => 27000, 22505 => 28500, 22506 => 30000, 22507 => 34500,
+        _ => 0,
+    };
+
+    // What a vendor pays for an item (the game's files); 0 when it can't be sold.
+    private static double VendorPrice(int itemId) => GameNames.VendorPrice(itemId);
+
+    // The pieces making up a row's standard (22500 to 22503) or extravagant (22504 to 22507) salvage, on hover.
+    private static void SalvageBreakdown(SalvageRow s, bool standard)
+    {
+        var lines = Enumerable.Range(0, 8).Where(i => standard ? i < 4 : i >= 4).Where(i => s.Pieces[i] > 0)
+            .Select(i => $"{ItemName(22500 + i, false)}: {Number(s.Pieces[i])} × {Gil(SalvagePrice(22500 + i))} = {Gil(s.Pieces[i] * (double)SalvagePrice(22500 + i))}")
+            .ToList();
+        if (lines.Count > 0) Hover(string.Join("\n", lines));
+    }
+
+    private FleetTable<SalvageRow> SalvageTable => salvageTable ??= new FleetTable<SalvageRow>("salvage", plugin.Configuration, new List<FleetColumn<SalvageRow>>
+    {
+        new("character", "Character", s => ImGui.TextUnformatted($"{s.Character} ({s.World})"), s => s.Character, Locked: true),
+        new("account", "Account", s => ImGui.TextUnformatted(s.Account.Length > 0 ? s.Account : "—"), s => s.Account, Hidden: true),
+        new("standard", "Standard Salvage", s => { ImGui.TextUnformatted(Number(s.Standard)); SalvageBreakdown(s, true); }, s => s.Standard),
+        new("extravagant", "Extravagant Salvage", s => { ImGui.TextUnformatted(Number(s.Extravagant)); SalvageBreakdown(s, false); }, s => s.Extravagant),
+        new("gil", "Value", s => ImGui.TextUnformatted(Number(s.Gil)), s => s.Gil),
+    }, s => s.Account);
+
+    private void DrawSalvage()
+    {
+        reader.ReadIfDue(withMoney: true);
+        RefreshButton();
+        ImGui.SameLine();
+        SalvageTable.DrawControls();
+        FilterBox(ref salvageFilter, "salvage");
+        ReadLine(reader.Salvage, FleetReader.MoneyEvery);
+        var salvage = reader.Salvage.Data;
+        if (salvage == null) return;
+        var rows = salvage.Where(s => Matches(salvageFilter, s.Character, s.World, s.Account)).ToList();
+        Colored(Dim, $"Salvage in bags, retainers and saddlebags, and in the FC chest (counted on one member), at the fixed salvage prices. " +
+                     $"Fleet: {Number(rows.Sum(s => s.Standard))} standard, {Number(rows.Sum(s => s.Extravagant))} extravagant, {Number(rows.Sum(s => s.Gil))} gil.");
+        if (rows.Count == 0) { ImGui.TextUnformatted(salvage.Count == 0 ? "No salvage held." : "Nothing matches."); return; }
+        SalvageTable.Draw(rows);
+    }
+
+    private FleetTable<IncomeRow> IncomeTable => incomeTable ??= new FleetTable<IncomeRow>("income", plugin.Configuration, new List<FleetColumn<IncomeRow>>
+    {
+        new("character", "Character", c => ImGui.TextUnformatted(c.Character), c => c.Character, Locked: true),
+        new("world", "World", c => ImGui.TextUnformatted(c.World), c => c.World),
+        new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
+        new("subs", "Subs", c => ImGui.TextUnformatted(c.Subs.ToString(CultureInfo.InvariantCulture)), c => c.Subs),
+        new("salvage", "Salvage / day", c =>
+        {
+            if (!c.Enough) { Colored(Dim, "Not enough history"); return; }
+            ImGui.TextUnformatted(Gil(c.SalvagePerDay));
+            var hover = $"{Number(c.Pieces)} salvage pieces came in over {c.SpanDays:0.0} days";
+            if (c.FromChest > 0) hover += $"; {Number(c.FromChest)} taken out of the FC chest are not counted";
+            if (c.FirstStored > 0) hover += $"; {Number(c.FirstStored)} seen for the first time (a retainer first opened on a PC) are not counted";
+            Hover(hover);
+        }, c => c.Enough ? c.SalvagePerDay : 0, c => !c.Enough),
+        new("repairs", "Repairs / day", c =>
+        {
+            if (!c.Enough) return;
+            ImGui.TextUnformatted(c.KitPerDay > 0 ? $"−{Gil(c.KitPerDay)}" : "0");
+            Hover($"{Number(c.KitsUsed)} repair kits used over {c.SpanDays:0.0} days");
+        }, c => c.Enough ? c.KitPerDay : 0, c => !c.Enough),
+        new("real", "Real net / day", c => { if (c.Enough) ImGui.TextUnformatted(Gil(c.PerDay)); }, c => c.Enough ? c.PerDay : 0, c => !c.Enough),
+    }, c => c.Account);
+
+    private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration,
+        new List<FleetColumn<FleetReader.VentureSummary>>
+        {
+            new("character", "Character", v => ImGui.TextUnformatted(v.Character), v => v.Character, Locked: true),
+            new("world", "World", v => ImGui.TextUnformatted(v.World.Length > 0 ? v.World : "—"), v => v.World),
+            new("account", "Account", v => ImGui.TextUnformatted(v.Account.Length > 0 ? v.Account : "—"), v => v.Account, Hidden: true),
+            new("retainers", "Retainers", v => ImGui.TextUnformatted(v.Retainers.ToString(CultureInfo.InvariantCulture)), v => v.Retainers),
+            new("rewards", "Rewards", v => ImGui.TextUnformatted(v.Rewards.ToString(CultureInfo.InvariantCulture)), v => v.Rewards),
+            new("perDay", "Vendor value / day", v => ImGui.TextUnformatted(Gil(v.PerDay)), v => v.PerDay),
+            new("top", "Most valuable", v => ImGui.TextUnformatted(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
+        }, v => v.Account);
+
+    private void DrawIncome()
+    {
+        reader.ReadIfDue(withMoney: true);
+        RefreshButton();
+        FilterBox(ref incomeFilter, "income");
+        ReadLine(reader.Income, FleetReader.MoneyEvery);
+        var income = reader.Income.Data;
+        if (income == null) return;
+        using var tabs = ImRaii.TabBar("##incomeTabs");
+        if (!tabs) return;
+        using (var tab = ImRaii.TabItem("Subs"))
+        {
+            if (tab) DrawSubIncome(income);
+        }
+        using (var tab = ImRaii.TabItem("Retainer ventures"))
+        {
+            if (tab) DrawVentureIncome(income);
+        }
+    }
+
+    private void DrawSubIncome(IncomeRead income)
+    {
+        var counted = income.Characters.Where(c => c.Enough).ToList();
+        var notEnough = income.Characters.Count - counted.Count;
+        Heading($"Fleet real net per day: {Gil(counted.Sum(c => c.PerDay))} gil");
+        Colored(Dim, $"{Gil(counted.Sum(c => c.SalvagePerDay))} salvage − {Gil(counted.Sum(c => c.KitPerDay))} repairs, over the last {income.WindowDays} days (set in the app's Income tab).");
+        ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted). " +
+                          (income.KitCost > 0 ? $"Repairs: repair kits used at {Gil(income.KitCost)} gil each." : "Repairs: set the repair kit cost in the app's Settings to count them.") +
+                          (notEnough > 0 ? $" {notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history." : "") +
+                          " Fight Club's expected figures come later in 2.x.");
+        IncomeTable.DrawControls();
+        var rows = income.Characters.Where(c => Matches(incomeFilter, c.Character, c.World, c.Account)).ToList();
+        if (rows.Count == 0) { ImGui.TextUnformatted(income.Characters.Count == 0 ? "No characters with subs built yet." : "Nothing matches."); return; }
+        IncomeTable.Draw(rows);
+    }
+
+    private void DrawVentureIncome(IncomeRead income)
+    {
+        var ventures = FleetOrder.Roster(FleetReader.SummarizeVentures(income.Ventures, income.WindowDays, VendorPrice), v => v.SortIndex, v => v.Character);
+        Heading($"Retainer ventures: {Gil(ventures.Sum(v => v.PerDay))} gil a day");
+        Colored(Dim, $"Venture rewards AutoRetainer recorded over the last {income.WindowDays} days, at what a vendor pays (items are often worth more on the market board). " +
+                     $"{Number(ventures.Sum(v => (long)v.Rewards))} rewards, {Gil(ventures.Sum(v => v.Gil))} gil.");
+        VenturesTable.DrawControls();
+        var rows = ventures.Where(v => Matches(incomeFilter, v.Character, v.World, v.Account)).ToList();
+        if (rows.Count == 0) { ImGui.TextUnformatted(ventures.Count == 0 ? "No venture rewards recorded in this time (AutoRetainer: \"Record statistics\")." : "Nothing matches."); return; }
+        VenturesTable.Draw(rows);
+    }
+}

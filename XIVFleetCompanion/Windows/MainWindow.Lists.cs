@@ -24,8 +24,9 @@ public partial class MainWindow
     private FleetTable<PcRow>? pcsTable;
     private FleetTable<FcRow>? fcsTable;
 
+    // Word by word (as the app): every word typed is somewhere in these values, in any order.
     private static bool Matches(string filter, params string?[] values) =>
-        string.IsNullOrWhiteSpace(filter) || values.Any(v => v != null && v.Contains(filter, StringComparison.OrdinalIgnoreCase));
+        FleetOrder.MatchesWords(string.Join("\n", values.Where(v => v != null)), filter);
 
     private void FilterBox(ref string filter, string id)
     {
