@@ -10,7 +10,7 @@ namespace XIVFleetCompanion.Windows;
 // unlocked empty slot; and whether a spare covers it, the part another sub gives up when upgraded, or it needs crafting.
 // Worked out here (PartsPlanner) from the database's fleet_parts_* views, read every 5 minutes. Sub Rules and Craft? are
 // set in the app. Look ahead: also the parts of each sub's next build due within 3, 7 or 14 days (the Subs page's Next
-// Build), after what's needed now.
+// Build), after what's needed now. The Shopping List tab is in MainWindow.Shopping.cs.
 public partial class MainWindow
 {
     private string partsFilter = "";
@@ -128,6 +128,11 @@ public partial class MainWindow
                     PartsCraftTable.Draw(craft);
                 }
             }
+        }
+        // Everything to craft, gather or buy for those parts (Look ahead's too), less what the fleet holds.
+        using (var tab = ImRaii.TabItem("Shopping List"))
+        {
+            if (tab) DrawShopping(parts);
         }
     }
 }

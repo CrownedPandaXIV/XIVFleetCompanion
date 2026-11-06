@@ -94,6 +94,11 @@ namespace XIVFleetCompanion
     /// <summary>Inputs: what they were worked out from, for Look ahead (worked out again with the builds coming up).</summary>
     public sealed record PartsRead(List<PartNeed> Needs, PartsInputs? Inputs = null);
 
+    /// <summary>What the Shopping List needs from the database: what's held where (fleet_shopping_held_view), the ticks
+    /// (fleet_shopping_progress_view), the fleet's own retainers (their listings aren't the market), whether Live Market
+    /// Prices is on and how many characters are on each world (for "Prices from").</summary>
+    public sealed record ShoppingRead(List<HeldRow> Held, string? Progress, HashSet<string> Exclude, bool LivePrices, List<(string World, int Characters)> Worlds);
+
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
 
@@ -783,6 +788,10 @@ namespace XIVFleetCompanion
         public string? HoldingsKey { get; private set; }
         public FleetRead<List<ItemTotalRow>> ItemTotals { get; private set; } = new(null, null, null);
         public FleetRead<List<int>> HeldItems { get; private set; } = new(null, null, null);
+        /// <summary>The Shopping List's (on the Parts page): read with the Parts page's, while the list is shown.</summary>
+        public FleetRead<ShoppingRead> Shopping { get; private set; } = new(null, null, null);
+        /// <summary>The Universalis client (its answers are kept for 30 minutes), for the Shopping List's market prices.</summary>
+        public Universalis UniversalisClient => universalis;
 
         /// <summary>Reads the stacks for key (say "characters:1,2") when it isn't what was last read, or that is over a
         /// minute old.</summary>
@@ -802,6 +811,45 @@ namespace XIVFleetCompanion
         {
             if (!force && ItemTotals.At.HasValue && DateTime.Now - ItemTotals.At.Value < ListsEvery) return;
             RunInventoryRead(async conn => ItemTotals = await Read(conn, ReadItemTotals, ItemTotals), text => ItemTotals = ItemTotals with { Error = text });
+        }
+
+        /// <summary>The Shopping List's database part, when it hasn't been read since the Parts page's last read or is 5 minutes old.</summary>
+        public void ReadShoppingIfDue(bool force = false)
+        {
+            var at = Shopping.At;
+            if (!force && at.HasValue && DateTime.Now - at.Value < PartsEvery && !(Parts.At is DateTime partsAt && partsAt > at.Value)) return;
+            RunInventoryRead(async conn => Shopping = await Read(conn, ReadShopping, Shopping), text => Shopping = Shopping with { Error = text });
+        }
+
+        public static async Task<ShoppingRead> ReadShopping(NpgsqlConnection conn)
+        {
+            var held = new List<HeldRow>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who, place", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    held.Add(new HeldRow(Int(r, "item_id"), Text(r, "who"), Text(r, "place"), Long(r, "qty")));
+            string? progress = null;
+            await using (var cmd = new NpgsqlCommand("SELECT progress FROM fleet_shopping_progress_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                if (await r.ReadAsync()) progress = TextOrNull(r, "progress");
+            var live = false;
+            await using (var cmd = new NpgsqlCommand("SELECT live_prices FROM fleet_market_settings_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                if (await r.ReadAsync()) live = BoolOrNull(r, "live_prices") == true;
+            var exclude = new HashSet<string>();
+            var worlds = new Dictionary<string, int>();
+            if (live)
+            {
+                await using (var cmd = new NpgsqlCommand("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
+                await using (var r = await cmd.ExecuteReaderAsync())
+                    while (await r.ReadAsync())
+                        if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
+                await using (var cmd = new NpgsqlCommand("SELECT world FROM fleet_parts_characters_view", conn))
+                await using (var r = await cmd.ExecuteReaderAsync())
+                    while (await r.ReadAsync())
+                        if (TextOrNull(r, "world") is { Length: > 0 } world) worlds[world] = worlds.GetValueOrDefault(world) + 1;
+            }
+            return new ShoppingRead(held, progress, exclude, live, worlds.Select(kv => (kv.Key, kv.Value)).ToList());
         }
 
         public void ReadHeldItemsIfDue(bool force = false)

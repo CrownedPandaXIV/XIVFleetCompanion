@@ -19,6 +19,86 @@ namespace XIVFleetCompanion
         private static readonly Dictionary<int, double> VendorPrices = new();
 
         private static SubGameData? subGame;
+        private static ShoppingGame? shopGame;
+        private static readonly object ShopLock = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string?> ShopNames = new();
+
+        /// <summary>What the Shopping List is worked out from: the recipes (Recipe), how the FC workshop builds sub parts
+        /// (CompanyCraftSequence, CompanyCraftPart, CompanyCraftProcess, CompanyCraftSupplyItem), what gil shops sell
+        /// (GilShopItem) at the item's vendor price (Item's PriceMid), and item names. Read once, on whichever thread asks
+        /// first (the Shopping List works in the background); null when they can't be read.</summary>
+        public static ShoppingGame? ShopGame()
+        {
+            lock (ShopLock)
+            {
+                if (shopGame != null) return shopGame;
+                try
+                {
+                    var recipes = new List<ShopRecipeRow>();
+                    foreach (var r in Plugin.DataManager.GetExcelSheet<Recipe>())
+                    {
+                        if (r.ItemResult.RowId == 0) continue;
+                        var ingredients = new List<(int, int)>();
+                        for (var i = 0; i < r.Ingredient.Count && i < r.AmountIngredient.Count; i++)
+                            ingredients.Add(((int)r.Ingredient[i].RowId, r.AmountIngredient[i]));
+                        recipes.Add(new ShopRecipeRow((int)r.RowId, (int)r.ItemResult.RowId, r.AmountResult, (int)r.CraftType.RowId, ingredients));
+                    }
+                    var sequences = new List<ShopSequence>();
+                    foreach (var q in Plugin.DataManager.GetExcelSheet<CompanyCraftSequence>())
+                    {
+                        if (q.ResultItem.RowId == 0) continue;
+                        var parts = new List<int>();
+                        for (var i = 0; i < q.CompanyCraftPart.Count; i++) parts.Add((int)q.CompanyCraftPart[i].RowId);
+                        sequences.Add(new ShopSequence((int)q.RowId, (int)q.ResultItem.RowId, parts));
+                    }
+                    var craftParts = new List<(int, List<int>)>();
+                    foreach (var c in Plugin.DataManager.GetExcelSheet<CompanyCraftPart>())
+                    {
+                        var procs = new List<int>();
+                        for (var i = 0; i < c.CompanyCraftProcess.Count; i++) procs.Add((int)c.CompanyCraftProcess[i].RowId);
+                        craftParts.Add(((int)c.RowId, procs));
+                    }
+                    var processes = new List<ShopProcess>();
+                    foreach (var p in Plugin.DataManager.GetExcelSheet<CompanyCraftProcess>())
+                    {
+                        var supply = new List<int>();
+                        var perSet = new List<int>();
+                        var sets = new List<int>();
+                        for (var i = 0; i < p.SupplyItem.Count; i++)
+                        {
+                            supply.Add((int)p.SupplyItem[i].RowId);
+                            perSet.Add(i < p.SetQuantity.Count ? p.SetQuantity[i] : 0);
+                            sets.Add(i < p.SetsRequired.Count ? p.SetsRequired[i] : 0);
+                        }
+                        processes.Add(new ShopProcess((int)p.RowId, supply, perSet, sets));
+                    }
+                    var supplyItems = new List<(int, int)>();
+                    foreach (var x in Plugin.DataManager.GetExcelSheet<CompanyCraftSupplyItem>()) supplyItems.Add(((int)x.RowId, (int)x.Item.RowId));
+                    var items = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>();
+                    var vendor = new Dictionary<int, double>();
+                    foreach (var rows in Plugin.DataManager.GetSubrowExcelSheet<GilShopItem>())
+                        foreach (var g in rows)
+                        {
+                            var id = (int)g.Item.RowId;
+                            if (id <= 0 || vendor.ContainsKey(id)) continue;
+                            if (items.GetRowOrDefault((uint)id) is { } item && item.PriceMid > 0) vendor[id] = item.PriceMid;
+                        }
+                    shopGame = new ShoppingGame(recipes, sequences, craftParts, processes, supplyItems, vendor, id => ShopNames.GetOrAdd(id, key =>
+                    {
+                        try
+                        {
+                            return Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault((uint)key) is { } row ? row.Name.ExtractText() : null;
+                        }
+                        catch { return null; }
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.Warning(ex, "Could not read the crafting data from the game's files");
+                }
+                return shopGame;
+            }
+        }
 
         /// <summary>The sectors, maps, ranks and parts the routes are worked out from (SubmarineExploration, SubmarineMap,
         /// SubmarineRank, SubmarinePart), read once; null when they can't be read.</summary>

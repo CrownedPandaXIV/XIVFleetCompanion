@@ -80,6 +80,17 @@ namespace XIVFleetCompanion
             return item?.ToString(CultureInfo.InvariantCulture) ?? "null";
         }
 
+        /// <summary>A part's item number from its class ("Shark"), slot ("Bow") and whether it's modified (ipc/parts.js partItemId); null when not a sub part.</summary>
+        public static int? PartItemId(string cls, string slot, bool modified)
+        {
+            var letter = ClassOfLetter.FirstOrDefault(kv => kv.Value == cls).Key;
+            var offset = System.Array.IndexOf(SpareSlotOrder, slot);
+            if (letter == null || offset < 0) return null;
+            foreach (var (b, l) in Bases)
+                if (l == (modified ? letter + "+" : letter)) return b + offset;
+            return null;
+        }
+
         /// <summary>A spare's class, slot and whether it's modified; null for anything that isn't a sub part.</summary>
         public static (string Class, string Slot, bool Modified)? SparePart(int item)
         {

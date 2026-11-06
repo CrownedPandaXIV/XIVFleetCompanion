@@ -163,6 +163,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   with live prices, at the market on the sub's world, data center and region too (worked out in the background).
 - **Next Rank forecasts** on the Subs page: how close the dates the app saved came to the real rank-ups, each recent one
   on hover. Both are checked against the app's answers for the same made-up fleets.
+- **Shopping List** on the Parts page, as the app's: the sub parts to craft (Look ahead's too), everything to craft on
+  the way in the order to make it, and the raw materials and crystals to gather or buy, less what the fleet holds in bags,
+  saddlebags, crystals, retainers and Free Company chests (where, on hover). Buy from vendors, Show items already held in
+  full and Copy as Text, as in the app. With Live Market Prices on, each part's cheapest listing against what making it
+  costs (each ingredient on hover), each material's cheapest way, and what buying instead costs, from the world, data
+  center or region chosen in Prices from (asked of Universalis in the background). The recipes come from the game's own
+  files, so it works without the app's game data. Parts ticked off in the app show as made; ticking them off in the game
+  comes later in 2.x. Checked against the app's answers for made-up fleets, recipes and listings, every way of asking.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

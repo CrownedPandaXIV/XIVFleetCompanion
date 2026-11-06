@@ -7,6 +7,8 @@ using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using XIVFleetCompanion;
 
@@ -244,6 +246,33 @@ internal static class Program
 
     // Routes stage: the routes read through the database (stand-ins for the views with the PostgreSQL types they give:
     // ids numeric, a sub's stops bytea, times timestamptz), worked out at the fixture's moment: the app's answers.
+    // The Shopping List's database part: what's held where, the ticks, and (with Live Market Prices on) the fleet's own
+    // retainers and how many characters are on each world.
+    private static async Task ShoppingReadFromTheDatabase(NpgsqlConnection conn)
+    {
+        await Exec(conn, @"DROP TABLE IF EXISTS fleet_shopping_held_view, fleet_shopping_progress_view, fleet_market_settings_view, fleet_retainers_view, fleet_parts_characters_view;
+            CREATE TABLE fleet_shopping_held_view (item_id int, who text, place text, qty bigint);
+            INSERT INTO fleet_shopping_held_view VALUES (31001, 'Char1 (Maduin)', 'Bags', 20), (31001, 'Company 7', 'FC chest', 999), (2, 'Char1 (Maduin)', 'Crystals', 5);
+            CREATE TABLE fleet_shopping_progress_view (progress text);
+            INSERT INTO fleet_shopping_progress_view VALUES ('{""24348"":{""made"":1,""outOf"":2}}');
+            CREATE TABLE fleet_market_settings_view (stale_days int, live_prices boolean);
+            INSERT INTO fleet_market_settings_view VALUES (7, false);
+            CREATE TABLE fleet_retainers_view (retainer_name text, world text);
+            INSERT INTO fleet_retainers_view VALUES ('Amy', 'Maduin'), ('', 'Golem');
+            CREATE TABLE fleet_parts_characters_view (world text);
+            INSERT INTO fleet_parts_characters_view VALUES ('Maduin'), ('Maduin'), ('Golem'), (NULL), ('');");
+        var off = await FleetReader.ReadShopping(conn);
+        Check(off.Held.Count == 3 && off.Held[0] == new HeldRow(2, "Char1 (Maduin)", "Crystals", 5) && off.Held.Sum(h => h.Qty) == 1024
+              && off.Progress == "{\"24348\":{\"made\":1,\"outOf\":2}}" && !off.LivePrices && off.Exclude.Count == 0 && off.Worlds.Count == 0,
+            "shopping: reads what's held where and the ticks; with Live Market Prices off, not the retainers or worlds");
+        await Exec(conn, "UPDATE fleet_market_settings_view SET live_prices = true; DELETE FROM fleet_shopping_progress_view");
+        var on = await FleetReader.ReadShopping(conn);
+        Check(on.LivePrices && on.Progress == null && on.Exclude.SetEquals(new[] { Universalis.RetainerKey("Amy", "Maduin") })
+              && on.Worlds.OrderBy(w => w.World).SequenceEqual(new[] { ("Golem", 1), ("Maduin", 2) }),
+            "shopping: with Live Market Prices on, the fleet's own retainers (not unnamed ones) and the characters on each world");
+        await Exec(conn, "DROP TABLE fleet_shopping_held_view, fleet_shopping_progress_view, fleet_market_settings_view, fleet_retainers_view, fleet_parts_characters_view");
+    }
+
     private static async Task RoutesReadFromTheDatabase(NpgsqlConnection conn)
     {
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
@@ -394,6 +423,124 @@ internal static class Program
             B(r, "buildAhead"), D(r, "maxRank"), N(D(r, "nextRank")), N(D(r, "nextRankAt")), N(D(r, "voyages")), build);
     }
 
+    // The fixture's made-up crafting data as the plugin reads the game's sheets.
+    private static ShoppingGame ShopGameFrom(System.Text.Json.JsonElement shop)
+    {
+        static List<int> Ints(System.Text.Json.JsonElement e) => e.EnumerateArray().Select(x => x.GetInt32()).ToList();
+        var items = shop.GetProperty("items").EnumerateArray().ToDictionary(e => e.GetProperty("id").GetInt32(),
+            e => (Name: e.GetProperty("name").ValueKind == System.Text.Json.JsonValueKind.String ? e.GetProperty("name").GetString() : null, Price: e.GetProperty("priceMid").GetDouble()));
+        var vendor = new Dictionary<int, double>();
+        foreach (var id in Ints(shop.GetProperty("gilShop"))) if (items.TryGetValue(id, out var it)) vendor[id] = it.Price;
+        return new ShoppingGame(
+            shop.GetProperty("recipes").EnumerateArray().Select(r => new ShopRecipeRow(r.GetProperty("id").GetInt32(), r.GetProperty("result").GetInt32(), r.GetProperty("yield").GetInt32(),
+                r.GetProperty("craftType").GetInt32(), r.GetProperty("ingredients").EnumerateArray().Select(x => (x[0].GetInt32(), x[1].GetInt32())).ToList())),
+            shop.GetProperty("sequences").EnumerateArray().Select(q => new ShopSequence(q.GetProperty("id").GetInt32(), q.GetProperty("result").GetInt32(), Ints(q.GetProperty("parts")))),
+            shop.GetProperty("craftParts").EnumerateArray().Select(c => (c.GetProperty("id").GetInt32(), Ints(c.GetProperty("procs")))),
+            shop.GetProperty("processes").EnumerateArray().Select(p => new ShopProcess(p.GetProperty("id").GetInt32(), Ints(p.GetProperty("supply")), Ints(p.GetProperty("perSet")), Ints(p.GetProperty("sets")))),
+            shop.GetProperty("supplyItems").EnumerateArray().Select(x => (x.GetProperty("id").GetInt32(), x.GetProperty("item").GetInt32())),
+            vendor, id => items.TryGetValue(id, out var it) ? it.Name : null);
+    }
+
+    // The fixture's made-up Universalis: its places, and the listings it gave the app for each place and item.
+    private sealed class FixtureMarket : IShoppingMarket
+    {
+        private readonly Dictionary<string, (string Name, string Dc, string Region)> places = new();
+        private readonly System.Text.Json.JsonElement listings;
+        public FixtureMarket(System.Text.Json.JsonElement placeList, System.Text.Json.JsonElement listings)
+        {
+            foreach (var dc in placeList.EnumerateArray())
+                foreach (var w in dc[2].EnumerateArray()) places[w.GetString()!.ToLowerInvariant()] = (w.GetString()!, dc[0].GetString()!, dc[1].GetString()!);
+            this.listings = listings;
+        }
+        public Dictionary<string, (string Name, string Dc, string Region)> Places() => places;
+        public (Dictionary<int, List<MarketListing>> Listings, (string Problem, DateTime Since)? Stale) ListingsIn(string scope, List<int> ids)
+        {
+            var result = new Dictionary<int, List<MarketListing>>();
+            if (!listings.TryGetProperty(scope, out var byItem)) return (result, null);
+            foreach (var id in ids)
+                if (byItem.TryGetProperty(id.ToString(System.Globalization.CultureInfo.InvariantCulture), out var list))
+                    result[id] = list.EnumerateArray().Select(l => new MarketListing(l.GetProperty("pricePerUnit").GetDouble(), l.GetProperty("quantity").GetInt32(),
+                        l.GetProperty("hq").GetBoolean(), l.GetProperty("retainerName").GetString(), l.TryGetProperty("worldName", out var w) ? w.GetString() : null)).ToList();
+            return (result, null);
+        }
+    }
+
+    // The list as the app's get-shopping-list answers it (the same names and the same fields in each section).
+    private static System.Text.Json.Nodes.JsonNode ShopJson(ShoppingResult r)
+    {
+        if (r.Error != null) return new JsonObject { ["success"] = false, ["error"] = r.Error };
+        if (r.Empty) return new JsonObject { ["success"] = true, ["empty"] = true };
+        JsonNode? Market(ShopMarket? m) => m == null ? null : new JsonObject { ["price"] = m.Price, ["world"] = m.World,
+            ["listings"] = new JsonArray(m.Listings.Select(l => (JsonNode)new JsonObject { ["price"] = l.Price, ["quantity"] = l.Quantity, ["world"] = l.World }).ToArray()) };
+        JsonNode? Buying(ShopBuying? x) => x == null ? null : new JsonObject { ["gil"] = x.Gil, ["got"] = x.Got, ["wanted"] = x.Wanted };
+        JsonNode? Breakdown(List<ShopBreakdown>? list) => list == null ? null : new JsonArray(list.Select(x => (JsonNode)new JsonObject { ["itemId"] = x.ItemId, ["name"] = x.Name,
+            ["amount"] = x.Amount, ["each"] = x.Each, ["how"] = x.How, ["world"] = x.World, ["parts"] = Breakdown(x.Parts) }).ToArray());
+        JsonObject Row(ShopRow x, string kind)
+        {
+            var o = new JsonObject { ["itemId"] = x.ItemId, ["need"] = x.Need };
+            if (kind == "part") { o["crafts"] = x.Crafts; o["job"] = x.Job; if (x.NoRecipe) o["noRecipe"] = true; }
+            else if (kind == "craft") { o["have"] = x.Have; o["make"] = x.Short; o["crafts"] = x.Crafts; o["yield"] = x.Yield; o["job"] = x.Job; }
+            else { o["have"] = x.Have; o["short"] = x.Short; }
+            o["name"] = x.Name;
+            o["places"] = new JsonArray(x.Places.Select(p => (JsonNode)new JsonObject { ["who"] = p.Who, ["where"] = p.Where, ["qty"] = p.Qty }).ToArray());
+            o["vendorPrice"] = x.VendorPrice;
+            if (kind == "part") o["made"] = x.Made;
+            if (kind == "buy") o["cost"] = x.Cost;
+            if (r.Priced && kind != "buy")
+            {
+                o["market"] = Market(x.Market);
+                if (kind == "part") { o["makeCost"] = x.MakeCost; o["makeBreakdown"] = Breakdown(x.MakeBreakdown); o["cheaper"] = x.Cheaper; }
+                else o["cheapest"] = x.Cheapest;
+                o["buying"] = Buying(x.Buying);
+            }
+            return o;
+        }
+        JsonArray Rows(List<ShopRow> rows, string kind) => new(rows.Select(x => (JsonNode)Row(x, kind)).ToArray());
+        var m = r.Market;
+        var market = new JsonObject { ["enabled"] = m.Enabled };
+        if (m.Enabled)
+        {
+            market["choices"] = new JsonArray((m.Choices ?? new()).Select(c => (JsonNode)new JsonObject { ["value"] = c.Value, ["label"] = c.Label, ["kind"] = c.Kind, ["scope"] = c.Scope }).ToArray());
+            if (m.Scope != null) { market["scope"] = m.Scope; market["label"] = m.Label; market["kind"] = m.Kind; }
+            if (m.Error != null) market["error"] = m.Error;
+            else market["stale"] = m.Stale is { } st ? new JsonObject { ["problem"] = st.Problem, ["since"] = (st.Since - DateTime.UnixEpoch).TotalMilliseconds } : null;
+        }
+        var o = new JsonObject
+        {
+            ["success"] = true, ["vendorsLoaded"] = r.VendorsLoaded, ["buyFromVendors"] = r.BuyFromVendors,
+            ["parts"] = Rows(r.Parts, "part"), ["craft"] = Rows(r.Craft, "craft"), ["gather"] = Rows(r.Gather, "gather"), ["crystals"] = Rows(r.Crystals, "gather"),
+            ["buy"] = Rows(r.Buy, "buy"), ["buyCost"] = r.BuyCost, ["market"] = market,
+        };
+        if (r.Totals is { } t)
+            o["marketTotals"] = new JsonObject { ["parts"] = t.Parts, ["partsUnlisted"] = t.PartsUnlisted, ["partsTooFew"] = t.PartsTooFew,
+                ["materials"] = t.Materials, ["materialsUnlisted"] = t.MaterialsUnlisted, ["materialsTooFew"] = t.MaterialsTooFew };
+        return o;
+    }
+
+    // The first place two JSON answers differ (numbers as the same double, objects with the same fields), or null.
+    private static string? JsonDiff(System.Text.Json.JsonElement a, System.Text.Json.JsonElement b, string at)
+    {
+        if (a.ValueKind != b.ValueKind && !(a.ValueKind is JsonValueKind.True or JsonValueKind.False && b.ValueKind is JsonValueKind.True or JsonValueKind.False))
+            return $"{at}: plugin {a.GetRawText()}, app {b.GetRawText()}";
+        switch (a.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var ak = a.EnumerateObject().Select(p => p.Name).ToHashSet();
+                var bk = b.EnumerateObject().Select(p => p.Name).ToHashSet();
+                if (!ak.SetEquals(bk)) return $"{at}: plugin has [{string.Join(",", ak.Except(bk))}], app has [{string.Join(",", bk.Except(ak))}]";
+                foreach (var k in ak) if (JsonDiff(a.GetProperty(k), b.GetProperty(k), $"{at}.{k}") is { } d) return d;
+                return null;
+            case JsonValueKind.Array:
+                if (a.GetArrayLength() != b.GetArrayLength()) return $"{at}: plugin {a.GetArrayLength()} long, app {b.GetArrayLength()}";
+                for (var k = 0; k < a.GetArrayLength(); k++) if (JsonDiff(a[k], b[k], $"{at}[{k}]") is { } d) return d;
+                return null;
+            case JsonValueKind.Number:
+                return a.GetDouble() == b.GetDouble() ? null : $"{at}: plugin {a.GetRawText()}, app {b.GetRawText()}";
+            default:
+                return a.GetRawText() == b.GetRawText() ? null : $"{at}: plugin {a.GetRawText()}, app {b.GetRawText()}";
+        }
+    }
+
     private static void RoutesAgainstTheApp()
     {
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
@@ -433,6 +580,29 @@ internal static class Program
             Check(badPart < 0 && PartsPlanner.Plan(partsInput).Count == ahead.Count(n => !n.Ahead),
                 $"routes: Look ahead on the Parts page (14 days) the same as the app's, {c.GetProperty("name").GetString()} ({appParts.Count} parts, {ahead.Count(n => n.Ahead)} for builds coming up)"
                 + (badPart < 0 ? "" : $"\n   part {badPart + 1}:\n   plugin [{(badPart < mineParts.Count ? mineParts[badPart] : "none")}]\n   app    [{(badPart < appParts.Count ? appParts[badPart] : "none")}]"));
+            // The Shopping List, asked each way the fixture asked the app (Look ahead, Buy from vendors, Live Market Prices
+            // and Prices from), from the same ticks, held items, made-up recipes and made-up Universalis.
+            var shopGame = ShopGameFrom(doc.RootElement.GetProperty("game").GetProperty("shop"));
+            var held = i.GetProperty("shoppingHeld").EnumerateArray().Select(e => new HeldRow(PI(e, "item_id") ?? 0, PS(e, "who") ?? "", PS(e, "place") ?? "", PL(e, "qty") ?? 0)).ToList();
+            var ticks = i.GetProperty("shoppingProgress").EnumerateArray().Select(e => PS(e, "progress")).FirstOrDefault();
+            var worlds = input.Characters.Where(ch => !string.IsNullOrEmpty(ch.World)).GroupBy(ch => ch.World!).Select(g => (g.Key, g.Count())).ToList();
+            var exclude = i.GetProperty("retainers").EnumerateArray().Where(e => !string.IsNullOrEmpty(PS(e, "name"))).Select(e => Universalis.RetainerKey(PS(e, "name")!, PS(e, "world"))).ToHashSet();
+            var fakeMarket = new FixtureMarket(doc.RootElement.GetProperty("places"), c.GetProperty("listings"));
+            foreach (var run in c.GetProperty("shopping").EnumerateArray())
+            {
+                var options = run.GetProperty("options");
+                var days = options.TryGetProperty("aheadDays", out var d) ? d.GetInt32() : 0;
+                var longest = ShoppingMath.LongestAhead(days, ticks);
+                var shopNeeds = longest == 0 ? PartsPlanner.Plan(partsInput) : PartsPlanner.Plan(partsInput, SubRoutes.Upcoming(plan, now, longest));
+                // Held rows the other way round: the order they're read in mustn't matter.
+                var list = ShoppingMath.Make(shopNeeds, now, days, ticks, shopGame, Enumerable.Reverse(held).ToList(), options.TryGetProperty("buyFromVendors", out var b) && b.GetBoolean(),
+                    run.GetProperty("live").GetBoolean() ? fakeMarket : null, worlds, exclude, options.TryGetProperty("priceScope", out var ps) ? ps.GetString() : null);
+                using var myList = System.Text.Json.JsonDocument.Parse(ShopJson(list).ToJsonString());
+                var diff = JsonDiff(myList.RootElement, run.GetProperty("result"), "");
+                Check(diff == null, $"shopping: the Shopping List the same as the app's, {c.GetProperty("name").GetString()} {options.GetRawText()}"
+                    + (list.Parts.Count > 0 ? $" ({list.Parts.Count} parts, {list.Craft.Count} to craft first, {list.Gather.Count + list.Crystals.Count} to gather{(list.Priced ? ", priced" : "")})" : "")
+                    + (diff == null ? "" : $"\n   {diff}"));
+            }
             // Loot per Voyage on the Income page, at vendor prices and at (made-up) market prices.
             var expectedLoot = c.GetProperty("expectedLoot");
             var lootRows = i.GetProperty("loot").EnumerateArray().Select(e => new VoyageLootRow(PS(e, "fc_id") ?? "", PL(e, "sub_register") ?? 0, PD(e, "returned_at") ?? 0,
@@ -947,6 +1117,7 @@ internal static class Program
         await MarketAsksEachPlaceOnce();
         MarketWorkedOutOncePerRead();
         await MarketReadFromTheDatabase(conn);
+        await ShoppingReadFromTheDatabase(conn);
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);

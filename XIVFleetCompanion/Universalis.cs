@@ -239,6 +239,19 @@ namespace XIVFleetCompanion
             return (result, stale);
         }
 
+        /// <summary>The worlds Universalis knows (lowercase name -> its name, data center and region), else the built-in list.</summary>
+        public Task<Dictionary<string, (string Name, string Dc, string Region)>> PlacesAsync() => Places();
+
+        /// <summary>The listings of these items in one world, data center or region (scope: its name), from what's kept or
+        /// Universalis; the problem and since when, when some are from an earlier check because it didn't answer.</summary>
+        public async Task<(Dictionary<int, List<MarketListing>> Listings, (string Problem, DateTime Since)? Stale)> ListingsInAsync(string scope, List<int> ids)
+        {
+            var wanted = ids.Where(id => id > 0).Distinct().ToList();
+            if (string.IsNullOrEmpty(scope) || wanted.Count == 0) return (new Dictionary<int, List<MarketListing>>(), null);
+            using var gate = new SemaphoreSlim(Parallel);
+            return await ListingsFor(scope, wanted, gate);
+        }
+
         /// <summary>For each world: its data center and region, and the listings of the items wanted there (wanted: each
         /// world with an item listed or earned there) on the world, its data center and its region. Each world, data center
         /// and region is asked once for every item wanted there, a few requests at a time (Universalis allows several at

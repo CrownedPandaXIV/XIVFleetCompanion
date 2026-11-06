@@ -28,6 +28,12 @@ public class Configuration : IPluginConfiguration
     // The Inventory page's "Hide equipped gear" (Characters, Fleet totals and Where is it?): leaves out gear being worn
     // by the characters and their retainers.
     public bool HideEquippedGear { get; set; } = false;
+    // The Parts page's Shopping List: buy from vendors what they sell (instead of crafting or gathering it), show items
+    // already held in full, and where market board prices are from ("dc:Dynamis"; none saved: the data center with the
+    // most characters).
+    public bool ShoppingBuyFromVendors { get; set; } = false;
+    public bool ShoppingShowHeld { get; set; } = false;
+    public string? ShoppingPriceScope { get; set; } = null;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";
