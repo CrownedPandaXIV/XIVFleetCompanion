@@ -24,7 +24,7 @@ internal static class Program
         public CannedUniversalis(System.Text.Json.JsonElement fixtureCase) => c = fixtureCase;
         protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken token)
         {
-            Asked++;
+            System.Threading.Interlocked.Increment(ref Asked);
             var path = request.RequestUri!.AbsolutePath;
             System.Net.Http.HttpResponseMessage Reply(int status, string body) => new((System.Net.HttpStatusCode)status) { Content = new System.Net.Http.StringContent(body) };
             if (path == "/api/v2/data-centers") return Task.FromResult(Reply(200, c.GetProperty("dataCenters").GetRawText()));
@@ -40,6 +40,46 @@ internal static class Program
             string Item(string id) => $"{{\"itemID\":{id},\"listings\":{byItem.GetProperty(id).GetRawText()}}}";
             return Task.FromResult(Reply(200, ids.Count == 1 ? Item(ids[0]) : $"{{\"items\":{{{string.Join(",", found.Select(id => $"\"{id}\":{Item(id)}"))}}}}}"));
         }
+    }
+
+    // Universalis asked the quick way: each world, data center and region once, only for the items wanted on its worlds,
+    // several requests at a time but never more than 4.
+    private sealed class SlowUniversalis : System.Net.Http.HttpMessageHandler
+    {
+        public readonly System.Collections.Concurrent.ConcurrentBag<string> Paths = new();
+        private int now;
+        public int Most;
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken token)
+        {
+            var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
+            if (path.EndsWith("data-centers") || path.EndsWith("worlds")) return new(System.Net.HttpStatusCode.InternalServerError);
+            Paths.Add(path);
+            var at = System.Threading.Interlocked.Increment(ref now);
+            lock (Paths) Most = Math.Max(Most, at);
+            await Task.Delay(50, token);
+            System.Threading.Interlocked.Decrement(ref now);
+            return new(System.Net.HttpStatusCode.NotFound) { Content = new System.Net.Http.StringContent("{}") };
+        }
+    }
+
+    private static async Task MarketAsksEachPlaceOnce()
+    {
+        var handler = new SlowUniversalis();
+        var universalis = new Universalis(new System.Net.Http.HttpClient(handler), "https://universalis.test");
+        // Maduin and Halicarnassus share Dynamis; Zalera is on Crystal; all three in North America. 120 items on Maduin (3 batches).
+        var wanted = Enumerable.Range(1, 120).Select(id => ((string?)"Maduin", id))
+            .Concat(new[] { ((string?)"Halicarnassus", 500), ((string?)"Halicarnassus", 1), ((string?)"Zalera", 700), ((string?)null, 900) }).ToList();
+        var market = await universalis.MarketFor(wanted);
+        var paths = handler.Paths.ToList();
+        static List<int> Ids(string path) => path.Split('/').Last().Split(',').Select(x => int.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        List<int> AskedOf(string place) => paths.Where(x => x.StartsWith($"/api/v2/{place}/")).SelectMany(Ids).OrderBy(x => x).ToList();
+        var maduin = Enumerable.Range(1, 120).ToList();
+        Check(AskedOf("Halicarnassus").SequenceEqual(new[] { 1, 500 }) && AskedOf("Zalera").SequenceEqual(new[] { 700 }) && AskedOf("Maduin").SequenceEqual(maduin)
+              && AskedOf("Dynamis").SequenceEqual(maduin.Append(500)) && AskedOf("Crystal").SequenceEqual(new[] { 700 })
+              && AskedOf("North-America").SequenceEqual(maduin.Append(500).Append(700))
+              && paths.Count == 3 + 1 + 1 + 3 + 1 + 3 && handler.Most > 1 && handler.Most <= 4
+              && market.Count == 3 && market["Halicarnassus"].Names.Dc == "Dynamis" && !paths.Any(x => x.Contains("900")),
+            $"market: Universalis asked each world, data center and region once, only for the items wanted there, at most 4 at a time ({paths.Count} requests, {handler.Most} at once)");
     }
 
     // The Gil & Market page read through the database (stand-ins for the views with their PostgreSQL types), Live Market
@@ -84,8 +124,7 @@ internal static class Program
             var ventures = c.GetProperty("ventures").EnumerateArray().Select(v => (Cid: v.GetProperty("cid").GetString()!, World: v.GetProperty("world").GetString()!,
                 Items: v.GetProperty("items").EnumerateArray().Select(i => (i.GetProperty("item_id").GetInt32(), i.GetProperty("quantity").GetInt64(), i.GetProperty("hq_quantity").GetInt64())).ToList())).ToList();
             var vendor = c.GetProperty("vendor").EnumerateObject().ToDictionary(p => int.Parse(p.Name, System.Globalization.CultureInfo.InvariantCulture), p => p.Value.GetDouble());
-            var market = await universalis.MarketFor(listings.Select(l => l.World).Concat(ventures.Select(v => v.World)),
-                listings.Select(l => l.ItemId).Concat(ventures.SelectMany(v => v.Items.Select(i => i.Item1))));
+            var market = await universalis.MarketFor(listings.Select(l => (l.World, l.ItemId)).Concat(ventures.SelectMany(v => v.Items.Select(i => ((string?)v.World, i.Item1)))));
             var expected = c.GetProperty("expected");
             var names = expected.GetProperty("names").EnumerateArray().Select(n => $"{n.GetProperty("world").GetString()}:{n.GetProperty("names").GetProperty("dc").GetString() ?? "-"}:{n.GetProperty("names").GetProperty("region").GetString() ?? "-"}").ToList();
             var mineNames = market.Select(kv => $"{kv.Key}:{kv.Value.Names.Dc ?? "-"}:{kv.Value.Names.Region ?? "-"}").ToList();
@@ -97,7 +136,7 @@ internal static class Program
             var ventureMine = ventures.Select(v => $"{v.Cid} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(MarketMath.VentureGil(v.Items, market.GetValueOrDefault(v.World), s, vendor, exclude), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
             var ventureApp = expected.GetProperty("ventures").EnumerateArray().Select(v => $"{v.GetProperty("cid").GetString()} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(v.GetProperty("gil").GetProperty(s).GetDouble(), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
             var asked = handler.Asked;
-            await universalis.MarketFor(listings.Select(l => l.World), listings.Select(l => l.ItemId));
+            await universalis.MarketFor(listings.Select(l => (l.World, l.ItemId)));
             Check(names.SequenceEqual(mineNames) && firstListing < 0 && ventureMine.SequenceEqual(ventureApp) && handler.Asked == asked,
                 $"market prices the same as the app's, {c.GetProperty("name").GetString()}: {compared.Count} listings ({compared.Count(x => x.Contains(" True "))} undercut), {ventureMine.Count} characters' ventures, asked again within 30 minutes: kept"
                 + (firstListing >= 0 ? $" | listing {firstListing + 1}: plugin [{(firstListing < compared.Count ? compared[firstListing] : "none")}], app [{(firstListing < app.Count ? app[firstListing] : "none")}]" : "")
@@ -573,6 +612,7 @@ internal static class Program
         PartsAgainstTheApp();
         await PartsReadFromTheDatabase(conn);
         await MarketAgainstTheApp();
+        await MarketAsksEachPlaceOnce();
         await MarketReadFromTheDatabase(conn);
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

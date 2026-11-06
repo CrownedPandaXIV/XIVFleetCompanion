@@ -137,6 +137,10 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   a count beside the page in the sidebar), and venture rewards at market prices on the Income page and the Summary.
   With it off, nothing is asked. The Summary shows the listings unsold for a while, as the app's tile. The app's tests
   run its own Universalis code on canned listings, and the plugin's tests check it gets the same answers.
+- **Live prices no longer hold up the rest.** The prices are asked of Universalis in the background, apart from the
+  database reads, so the Summary, Supplies, Salvage and every other page keep updating while they come in (the Gil &
+  Market page says "Getting live prices from Universalis..." meanwhile). Each world, data center and region is asked
+  once, only for the items listed or earned on its worlds, up to 4 requests at a time instead of one after another.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

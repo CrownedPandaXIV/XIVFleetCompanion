@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace XIVFleetCompanion
@@ -34,6 +35,8 @@ namespace XIVFleetCompanion
         public static readonly string[] Scopes = { "world", "dc", "region" };
         private const int Batch = 50;
         private const int ListingsPerItem = 20;
+        /// <summary>Requests at once (Universalis allows several).</summary>
+        private const int Parallel = 4;
         private static readonly TimeSpan Keep = TimeSpan.FromMinutes(30);
 
         private static readonly Dictionary<string, string> RegionLabels = new()
@@ -177,21 +180,25 @@ namespace XIVFleetCompanion
             return items;
         }
 
-        // Item -> listings for one world, data center or region, from what's kept or Universalis. When Universalis doesn't
-        // answer, items asked for before keep their last listings (stale says since when and why); a new one fails.
-        private async Task<Dictionary<int, List<MarketListing>>> ListingsFor(string scope, List<int> ids, Action<string, DateTime> stale)
+        // Item -> listings for one world, data center or region, from what's kept or Universalis, a few batches at a time
+        // (gate). When Universalis doesn't answer, items asked for before keep their last listings (the problem and since
+        // when come back with them); a new one fails.
+        private async Task<(Dictionary<int, List<MarketListing>> Listings, (string Problem, DateTime Since)? Stale)> ListingsFor(string scope, List<int> ids, SemaphoreSlim gate)
         {
             var result = new Dictionary<int, List<MarketListing>>();
+            (string Problem, DateTime Since)? stale = null;
             var missing = new List<int>();
-            foreach (var id in ids)
+            lock (cache)
+                foreach (var id in ids)
+                {
+                    if (cache.TryGetValue($"{scope}|{id}", out var hit) && now() - hit.At < Keep) result[id] = hit.Listings;
+                    else missing.Add(id);
+                }
+            var batches = Enumerable.Range(0, (missing.Count + Batch - 1) / Batch).Select(i => missing.Skip(i * Batch).Take(Batch).ToList()).ToList();
+            await Task.WhenAll(batches.Select(async batch =>
             {
-                if (cache.TryGetValue($"{scope}|{id}", out var hit) && now() - hit.At < Keep) result[id] = hit.Listings;
-                else missing.Add(id);
-            }
-            for (var i = 0; i < missing.Count; i += Batch)
-            {
-                var batch = missing.Skip(i).Take(Batch).ToList();
                 Dictionary<int, List<MarketListing>> items;
+                await gate.WaitAsync();
                 try
                 {
                     using var doc = await GetJson($"/api/v2/{Uri.EscapeDataString(scope)}/{string.Join(",", batch)}?listings={ListingsPerItem}&entries=0", missingOk: true);
@@ -199,41 +206,71 @@ namespace XIVFleetCompanion
                 }
                 catch (Exception ex)
                 {
-                    var old = batch.Select(id => cache.TryGetValue($"{scope}|{id}", out var o) ? o : ((DateTime At, List<MarketListing> Listings)?)null).ToList();
-                    if (old.Any(o => o == null)) throw;
-                    for (var k = 0; k < batch.Count; k++) result[batch[k]] = old[k]!.Value.Listings;
-                    stale(ex.Message, old.Min(o => o!.Value.At));
-                    continue;
+                    lock (cache)
+                    {
+                        var old = batch.Select(id => cache.TryGetValue($"{scope}|{id}", out var o) ? o : ((DateTime At, List<MarketListing> Listings)?)null).ToList();
+                        if (old.Any(o => o == null)) throw;
+                        for (var k = 0; k < batch.Count; k++) result[batch[k]] = old[k]!.Value.Listings;
+                        var since = old.Min(o => o!.Value.At);
+                        stale = (ex.Message, stale == null || since < stale.Value.Since ? since : stale.Value.Since);
+                    }
+                    return;
                 }
-                foreach (var id in batch)
+                finally
                 {
-                    var listings = items.TryGetValue(id, out var found) ? found : new List<MarketListing>();
-                    cache[$"{scope}|{id}"] = (now(), listings);
-                    result[id] = listings;
+                    gate.Release();
                 }
-            }
-            return result;
+                lock (cache)
+                    foreach (var id in batch)
+                    {
+                        var listings = items.TryGetValue(id, out var found) ? found : new List<MarketListing>();
+                        cache[$"{scope}|{id}"] = (now(), listings);
+                        result[id] = listings;
+                    }
+            }));
+            return (result, stale);
         }
 
-        /// <summary>For each world: its data center and region, and the listings of each item there, on its data center and
-        /// in its region.</summary>
-        public async Task<Dictionary<string, WorldMarket>> MarketFor(IEnumerable<string?> worlds, IEnumerable<int> ids)
+        /// <summary>For each world: its data center and region, and the listings of the items wanted there (wanted: each
+        /// world with an item listed or earned there) on the world, its data center and its region. Each world, data center
+        /// and region is asked once for every item wanted there, a few requests at a time (Universalis allows several at
+        /// once), so a slow answer doesn't hold up the rest.</summary>
+        public async Task<Dictionary<string, WorldMarket>> MarketFor(IEnumerable<(string? World, int ItemId)> wanted)
         {
             var where = await Places();
-            var itemIds = ids.Where(id => id > 0).Distinct().ToList();
-            var result = new Dictionary<string, WorldMarket>();
-            foreach (var world in worlds.Where(w => !string.IsNullOrEmpty(w)).Select(w => w!).Distinct())
+            var byWorld = new Dictionary<string, List<int>>();
+            foreach (var (world, id) in wanted)
             {
-                var place = where.TryGetValue(world.ToLowerInvariant(), out var p) ? p : ((string, string Dc, string Region)?)null;
-                var scopes = new Dictionary<string, string?> { ["world"] = world, ["dc"] = place?.Dc, ["region"] = place?.Region };
+                if (string.IsNullOrEmpty(world)) continue;
+                if (!byWorld.TryGetValue(world, out var list)) byWorld[world] = list = new List<int>();
+                if (id > 0 && !list.Contains(id)) list.Add(id);
+            }
+            var placeOf = byWorld.Keys.ToDictionary(w => w, w => where.TryGetValue(w.ToLowerInvariant(), out var p) ? p : ((string, string Dc, string Region)?)null);
+            Dictionary<string, string?> ScopeNames(string world) => new() { ["world"] = world, ["dc"] = placeOf[world]?.Dc, ["region"] = placeOf[world]?.Region };
+            // Every place asked once, for every item wanted on a world in it.
+            var askFor = new Dictionary<string, List<int>>();
+            foreach (var (world, ids) in byWorld)
+                foreach (var name in ScopeNames(world).Values.OfType<string>())
+                {
+                    if (!askFor.TryGetValue(name, out var list)) askFor[name] = list = new List<int>();
+                    foreach (var id in ids) if (!list.Contains(id)) list.Add(id);
+                }
+            using var gate = new SemaphoreSlim(Parallel);
+            var asked = await Task.WhenAll(askFor.Where(kv => kv.Value.Count > 0).Select(async kv => (Name: kv.Key, Answer: await ListingsFor(kv.Key, kv.Value, gate))));
+            var answers = asked.ToDictionary(a => a.Name, a => a.Answer);
+            var result = new Dictionary<string, WorldMarket>();
+            foreach (var (world, ids) in byWorld)
+            {
                 var byScope = new Dictionary<string, Dictionary<int, List<MarketListing>>>();
                 (string Problem, DateTime Since)? stale = null;
-                foreach (var s in Scopes)
-                    byScope[s] = scopes[s] is { } name && itemIds.Count > 0
-                        ? await ListingsFor(name, itemIds, (problem, since) => stale = (problem, stale == null || since < stale.Value.Since ? since : stale.Value.Since))
-                        : new Dictionary<int, List<MarketListing>>();
-                var region = place?.Region;
-                result[world] = new WorldMarket(new MarketPlaceNames(world, place?.Dc, region == null ? null : RegionLabels.TryGetValue(region, out var label) ? label : region), byScope, stale);
+                foreach (var (scope, name) in ScopeNames(world))
+                {
+                    var answer = name != null && answers.TryGetValue(name, out var a) ? a : (Listings: new Dictionary<int, List<MarketListing>>(), Stale: ((string Problem, DateTime Since)?)null);
+                    byScope[scope] = ids.Where(answer.Listings.ContainsKey).ToDictionary(id => id, id => answer.Listings[id]);
+                    if (answer.Stale is { } s) stale = (s.Problem, stale == null || s.Since < stale.Value.Since ? s.Since : stale.Value.Since);
+                }
+                var region = placeOf[world]?.Region;
+                result[world] = new WorldMarket(new MarketPlaceNames(world, placeOf[world]?.Dc, region == null ? null : RegionLabels.TryGetValue(region, out var label) ? label : region), byScope, stale);
             }
             return result;
         }

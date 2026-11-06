@@ -142,6 +142,9 @@ namespace XIVFleetCompanion
         public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
         public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
         public bool Busy => busy;
+        private volatile bool askingUniversalis;
+        /// <summary>True while live prices are being asked of Universalis (apart from the database reads).</summary>
+        public bool AskingUniversalis => askingUniversalis;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
         public FleetReader(Func<string?> connectionString) => this.connectionString = connectionString;
@@ -223,7 +226,7 @@ namespace XIVFleetCompanion
                         Income = await Read(conn, ReadIncome, Income);
                     }
                     if (parts) Parts = await Read(conn, ReadParts, Parts);
-                    if (market) Market = await Read(conn, c => ReadMarket(c, universalis), Market);
+                    if (market) await ReadMarketNow(conn);
                 }
                 catch (Exception ex)
                 {
@@ -238,6 +241,37 @@ namespace XIVFleetCompanion
                 finally
                 {
                     busy = false;
+                }
+            });
+        }
+
+        // The Gil & Market page's database part now, keeping the live prices from before; then, with Live Market Prices
+        // on, Universalis in the background (unless it's still being asked), so a slow answer holds up nothing else.
+        private async Task ReadMarketNow(NpgsqlConnection conn)
+        {
+            MarketAsk? ask = null;
+            Market = await Read(conn, async c =>
+            {
+                var (read, a) = await ReadMarketData(c);
+                ask = a;
+                return a == null ? read : read with { Live = Market.Data?.Live };
+            }, Market);
+            if (ask is not { } toAsk || askingUniversalis) return;
+            askingUniversalis = true;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var live = await LivePrices(universalis, toAsk);
+                    if (Market.Data is { } data) Market = Market with { Data = data with { Live = live } };
+                }
+                catch (Exception ex)
+                {
+                    if (Market.Data is { } data) Market = Market with { Data = data with { Live = new LiveMarket(new Dictionary<string, WorldMarket>(), toAsk.Exclude, ex.Message) } };
+                }
+                finally
+                {
+                    askingUniversalis = false;
                 }
             });
         }
@@ -441,9 +475,22 @@ namespace XIVFleetCompanion
         /// The Gil &amp; Market page (fleet_market_* views, app 1.8.0 and later): its settings, gil per account and every
         /// listing; with Live Market Prices on, Universalis's listings for the listed items and the venture rewards on each
         /// character's world, data center and region (the player's own retainers' listings left out). Universalis not
-        /// answering doesn't fail the read: it says why instead.
+        /// answering doesn't fail the read: it says why instead. The window reads the two apart (ReadMarketData, then
+        /// LivePrices in the background), so asking Universalis never holds up the database reads.
         /// </summary>
         public static async Task<MarketRead> ReadMarket(NpgsqlConnection conn, Universalis? universalis)
+        {
+            var (read, ask) = await ReadMarketData(conn);
+            return ask != null && universalis != null ? read with { Live = await LivePrices(universalis, ask) } : read;
+        }
+
+        /// <summary>What to ask Universalis: the player's own retainers (left out of the rivals), and each world with an
+        /// item listed or earned on a venture there.</summary>
+        public sealed record MarketAsk(HashSet<string> Exclude, List<(string? World, int ItemId)> Wanted);
+
+        /// <summary>The database's part of the Gil &amp; Market page (Live left empty), and what to ask Universalis when
+        /// Live Market Prices is on (else null).</summary>
+        public static async Task<(MarketRead Read, MarketAsk? Ask)> ReadMarketData(NpgsqlConnection conn)
         {
             MarketSettings settings;
             await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_settings_view", conn))
@@ -461,27 +508,28 @@ namespace XIVFleetCompanion
                     listings.Add(new ListingRow(Long(r, "retainer_id"), Long(r, "owner_cid"), Int(r, "slot"), Int(r, "item_id"), Int(r, "quantity"), BoolOrNull(r, "hq") == true,
                         Long(r, "unit_price"), Time(r, "first_seen_at"), TextOrNull(r, "retainer_name"), TextOrNull(r, "owner_name"), TextOrNull(r, "world"),
                         TextOrNull(r, "account_label"), IntOrNull(r, "sort_index"), Long(r, "value"), Double(r, "age_days") ?? 0, BoolOrNull(r, "stale") == true));
-            LiveMarket? live = null;
-            if (settings.LivePrices && universalis != null)
+            var read = new MarketRead(settings, accounts, listings, null);
+            if (!settings.LivePrices) return (read, null);
+            var exclude = new HashSet<string>();
+            await using (var cmd = new NpgsqlCommand("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
+            var ventures = (await ReadVentures(conn)).Rows;
+            return (read, new MarketAsk(exclude, listings.Select(l => (l.World, l.ItemId)).Concat(ventures.Select(v => ((string?)v.World, v.ItemId))).ToList()));
+        }
+
+        /// <summary>Universalis's listings for what the database says to ask (MarketAsk); why not, when it doesn't answer.</summary>
+        public static async Task<LiveMarket> LivePrices(Universalis universalis, MarketAsk ask)
+        {
+            try
             {
-                var exclude = new HashSet<string>();
-                await using (var cmd = new NpgsqlCommand("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
-                await using (var r = await cmd.ExecuteReaderAsync())
-                    while (await r.ReadAsync())
-                        if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
-                var ventures = (await ReadVentures(conn)).Rows;
-                try
-                {
-                    var markets = await universalis.MarketFor(listings.Select(l => l.World).Concat(ventures.Select(v => (string?)v.World)),
-                        listings.Select(l => l.ItemId).Concat(ventures.Select(v => v.ItemId)));
-                    live = new LiveMarket(markets, exclude, null);
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
-                {
-                    live = new LiveMarket(new Dictionary<string, WorldMarket>(), exclude, ex.Message);
-                }
+                return new LiveMarket(await universalis.MarketFor(ask.Wanted), ask.Exclude, null);
             }
-            return new MarketRead(settings, accounts, listings, live);
+            catch (Exception ex) when (ex is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+            {
+                return new LiveMarket(new Dictionary<string, WorldMarket>(), ask.Exclude, ex.Message);
+            }
         }
 
         /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>

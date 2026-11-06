@@ -10,8 +10,8 @@ namespace XIVFleetCompanion.Windows;
 // 2.x market prices, the Gil & Market page, as the app's Gil & Market tab: the fleet's gil per account, what the
 // retainers have up for sale and what has sat unsold for a while (the app's days setting); with Live Market Prices on
 // (the app's Settings), the cheapest someone else sells each item for on its world, data center and region, and the
-// listings undercut on their own world. Read every 5 minutes (FleetReader.ReadMarket); Universalis is asked by the
-// plugin itself, at most every 30 minutes for an item.
+// listings undercut on their own world. Read every 5 minutes (FleetReader.ReadMarketData); Universalis is asked by the
+// plugin itself in the background (FleetReader.LivePrices), at most every 30 minutes for an item.
 public partial class MainWindow
 {
     private string marketFilter = "";
@@ -110,6 +110,8 @@ public partial class MainWindow
         var compared = Compared(m).Where(x => Matches(marketFilter, ItemName(x.Listing.ItemId, x.Listing.Hq), x.Listing.RetainerName, x.Listing.OwnerName, x.Listing.World, x.Listing.Account)).ToList();
         if (m.Live?.Error is { } error) Colored(Amber, $"Live prices: {error}");
         else if (m.Live?.Stale is { } old) Colored(Amber, $"Some live prices are from {old.Since.ToLocalTime():g}: {old.Problem} They update at the next read.");
+        if (m.Settings.LivePrices && reader.AskingUniversalis)
+            Colored(Dim, m.Live == null ? "Getting live prices from Universalis..." : "Updating live prices from Universalis...");
         if (!m.Settings.LivePrices) Colored(Dim, "Live Market Prices is off (the app's Settings → General): turn it on to see the cheapest rivals and undercut listings.");
         if (live)
         {
