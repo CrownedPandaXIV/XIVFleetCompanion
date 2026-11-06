@@ -15,7 +15,7 @@ namespace XIVFleetCompanion.Windows;
 public partial class MainWindow
 {
     private readonly HashSet<long> inventoryCharacters = new();
-    private readonly HashSet<long> inventoryFcs = new();
+    private readonly HashSet<decimal> inventoryFcs = new();
     private string inventoryFilter = "";
     private string whereIsItSearch = "";
     private bool whereByAccount = true;
@@ -79,7 +79,7 @@ public partial class MainWindow
     }
 
     // A "Choose ... (N)" button with a list to tick, in the given order.
-    private static void ChooseList<T>(string label, string id, IReadOnlyList<T> options, Func<T, long> key, Func<T, string> name, HashSet<long> chosen)
+    private static void ChooseList<T, TKey>(string label, string id, IReadOnlyList<T> options, Func<T, TKey> key, Func<T, string> name, HashSet<TKey> chosen) where TKey : notnull
     {
         if (ImGui.Button($"{label} ({chosen.Count})##{id}")) ImGui.OpenPopup($"choose##{id}");
         using var popup = ImRaii.Popup($"choose##{id}");
@@ -99,7 +99,7 @@ public partial class MainWindow
         }
     }
 
-    private static string Ids(IEnumerable<long> ids) => string.Join(",", ids.OrderBy(x => x));
+    private static string Ids<TKey>(IEnumerable<TKey> ids) => string.Join(",", ids.OrderBy(x => x));
 
     private void DrawCharacterInventory()
     {

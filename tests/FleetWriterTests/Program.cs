@@ -279,24 +279,24 @@ internal static class Program
         await Exec(conn, @"
             CREATE VIEW fleet_retainer_counts_view AS SELECT 160::int AS retainers, 65::int AS ventures_done, 94::int AS retainers_away, 1::int AS retainers_idle;
             CREATE VIEW fleet_fcs_view AS SELECT * FROM (VALUES
-              (11::numeric, 'Kittehs'::text, 'Aki'::text, 52000::int, '8'::text, 3::int, true, 'Mist W12 P30'::text, 34::int, now(), 9::int, 'warn'::text, 36::int, NULL::timestamptz, NULL::text, 'A'::text, 3::int),
+              (9232379236109516865::numeric, 'Kittehs'::text, 'Aki'::text, 52000::int, '8'::text, 3::int, true, 'Mist W12 P30'::text, 34::int, now(), 9::int, 'warn'::text, 36::int, NULL::timestamptz, NULL::text, 'A'::text, 3::int),
               (12::numeric, 'Young', NULL, NULL, NULL, NULL, false, NULL, NULL, NULL, NULL, NULL, NULL, now(), 'Eligible in 3 days', NULL, NULL))
               AS t(fc_id, fc_name, fc_master, fc_points, fc_rank, total_members, has_house, house, home_world_id, house_last_visited, house_days, house_level,
                    demolition_in_days, eligible_at, eligibility, account_label, sort_index);
             CREATE VIEW fleet_holdings_view AS SELECT * FROM (VALUES
               ('character'::text, 1::numeric, 1::numeric, NULL::numeric, 0::int, 10155::int, true, 5::int, 'Aki'::text, 'Maduin'::text, 'Aki'::text, 'A'::text, 2::int, NULL::text, NULL::int, 'Inventory 1'::text, false, 'Bags'::text),
-              ('fc', 1, NULL, 11, 22000, 1, false, 500000, 'Kittehs', NULL, 'Aki', 'A', 2, NULL, NULL, NULL, true, 'FC container 22000'))
+              ('fc', 1, NULL, 9232379236109516865, 22000, 1, false, 500000, 'Kittehs', NULL, 'Aki', 'A', 2, NULL, NULL, NULL, true, 'FC container 22000'))
               AS t(kind, owner_cid, retainer_id, fc_id, container, item_id, hq, quantity, who, world, owner_name, account_label, sort_index, retainer_name,
                    hire_order_index, container_name, money, place);
             CREATE VIEW fleet_item_totals_view AS SELECT 10155::int AS item_id, true AS hq, 5::bigint AS total;");
         var counts = await FleetReader.ReadRetainerCounts(conn);
         Check(counts == new RetainerCountsRow(160, 65, 94, 1), "batch 2: the retainer counts read: " + counts);
         var fcs = await FleetReader.ReadFcs(conn);
-        Check(fcs.Count == 2 && fcs[0].Name == "Kittehs" && fcs[0].HasHouse && fcs[0].HouseLevel == "warn" && fcs[0].HomeWorld == 34 && fcs[0].Points == 52000
+        Check(fcs.Count == 2 && fcs[0].FcId == 9232379236109516865m && fcs[0].Name == "Kittehs" && fcs[0].HasHouse && fcs[0].HouseLevel == "warn" && fcs[0].HomeWorld == 34 && fcs[0].Points == 52000
               && fcs[1].Name == "Young" && !fcs[1].HasHouse && fcs[1].Eligibility == "Eligible in 3 days" && fcs[1].SortIndex == int.MaxValue && fcs[1].Account == "",
             "batch 2: the Free Companies read, in the Roster's order: " + string.Join(" | ", fcs));
         var holdings = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 1 }));
-        Check(holdings.Count == 2 && holdings[0].Hq && holdings[0].Place == "Bags" && holdings[0].ContainerName == "Inventory 1" && holdings[1].Money && holdings[1].FcId == 11 && holdings[1].World == "",
+        Check(holdings.Count == 2 && holdings[0].Hq && holdings[0].Place == "Bags" && holdings[0].ContainerName == "Inventory 1" && holdings[1].Money && holdings[1].FcId == 9232379236109516865m && holdings[1].World == "",
             "batch 2: stacks read with a condition: " + string.Join(" | ", holdings));
         var none = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 2 }));
         Check(none.Count == 0, "batch 2: only the stacks asked for");
@@ -304,6 +304,13 @@ internal static class Program
         Check(totals.Count == 1 && totals[0] == new ItemTotalRow(10155, true, 5), "batch 2: the fleet's totals read");
         var heldItems = await FleetReader.ReadHeldItems(conn);
         Check(heldItems.SequenceEqual(new[] { 10155 }), "batch 2: the items held, without gil: " + string.Join(",", heldItems));
+        // Something the plugin can't take in one read (here a count too big for a number) fails that read alone, saying
+        // why, and keeps what was read before; it doesn't stop the others.
+        await Exec(conn, "CREATE OR REPLACE VIEW fleet_retainer_counts_view AS SELECT 99999999999999999999::numeric AS retainers, 1 AS ventures_done, 1 AS retainers_away, 1 AS retainers_idle");
+        var bad = await FleetReader.Read(conn, FleetReader.ReadRetainerCounts, new FleetRead<RetainerCountsRow>(counts, DateTime.Now, null));
+        Check(bad.Data == counts && bad.Error != null && bad.Error.StartsWith("Could not read this from the database"), "batch 2: a read that can't be taken fails alone: " + bad.Error);
+        var after = await FleetReader.Read(conn, FleetReader.ReadFcs, new FleetRead<List<FcRow>>(null, null, null));
+        Check(after.Error == null && after.Data?.Count == 2, "batch 2: and the connection still reads the next one: " + after.Error);
         await Exec(conn, "DROP VIEW fleet_retainer_counts_view, fleet_fcs_view, fleet_holdings_view, fleet_item_totals_view");
 
         var reader = new FleetReader(() => null);

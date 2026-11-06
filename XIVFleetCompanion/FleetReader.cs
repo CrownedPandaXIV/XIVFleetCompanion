@@ -48,13 +48,13 @@ namespace XIVFleetCompanion
 
     /// <summary>One Free Company, from fleet_fcs_view. HomeWorld: a World number, named from the game's files.
     /// HouseLevel: "ok", "warn", "danger" or "unknown" (null without a house). Eligibility: when it can bid, without a house.</summary>
-    public sealed record FcRow(long FcId, string Name, string? Leader, int? Points, int? Members, bool HasHouse, string? House,
+    public sealed record FcRow(decimal FcId, string Name, string? Leader, int? Points, int? Members, bool HasHouse, string? House,
         int HomeWorld, int? HouseDays, string? HouseLevel, int? DemolitionInDays, DateTime? LastEntered, string? Eligibility,
         DateTime? EligibleAt, string Account, int SortIndex);
 
     /// <summary>One stack of an item, from fleet_holdings_view. Kind: "character", "retainer" or "fc". ItemId is the plain
     /// item (Hq: high quality). OwnerCid: the character, or for an FC chest the member it's counted on. Money: gil, not items.</summary>
-    public sealed record HoldingRow(string Kind, long? OwnerCid, long? FcId, int Container, int ItemId, bool Hq, long Quantity,
+    public sealed record HoldingRow(string Kind, long? OwnerCid, decimal? FcId, int Container, int ItemId, bool Hq, long Quantity,
         string Who, string World, string? OwnerName, string Account, int SortIndex, string? RetainerName, int HireOrder,
         string? ContainerName, bool Money, string Place);
 
@@ -171,7 +171,7 @@ namespace XIVFleetCompanion
         }
 
         // A failed read keeps what was read before, with the reason.
-        private static async Task<FleetRead<T>> Read<T>(NpgsqlConnection conn, Func<NpgsqlConnection, Task<T>> read, FleetRead<T> before) where T : class
+        internal static async Task<FleetRead<T>> Read<T>(NpgsqlConnection conn, Func<NpgsqlConnection, Task<T>> read, FleetRead<T> before) where T : class
         {
             try
             {
@@ -185,6 +185,11 @@ namespace XIVFleetCompanion
             {
                 return before with { Error = ex.MessageText };
             }
+            // Something in what was read the plugin couldn't take (not the connection): only this read fails, and says so.
+            catch (Exception ex) when (ex is not NpgsqlException)
+            {
+                return before with { Error = $"Could not read this from the database: {ex.Message}" };
+            }
         }
 
         // Values of whatever numeric type the view gives, and nulls.
@@ -193,6 +198,9 @@ namespace XIVFleetCompanion
         private static int Int(NpgsqlDataReader r, string col, int fallback = 0) => (int)Long(r, col, fallback);
         private static double? Double(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToDouble(r.GetValue(i), CultureInfo.InvariantCulture); }
         private static string? TextOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture); }
+        // Free Company ids go past what a long holds (the game's are unsigned 64-bit numbers): read them as decimals.
+        private static decimal Decimal(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? 0 : Convert.ToDecimal(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static decimal? DecimalOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToDecimal(r.GetValue(i), CultureInfo.InvariantCulture); }
         private static long? LongOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToInt64(r.GetValue(i), CultureInfo.InvariantCulture); }
         private static int? IntOrNull(NpgsqlDataReader r, string col) => (int?)LongOrNull(r, col);
         private static bool? BoolOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : r.GetBoolean(i); }
@@ -316,7 +324,7 @@ namespace XIVFleetCompanion
             await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_fcs_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
-                list.Add(new FcRow(Long(r, "fc_id"), Text(r, "fc_name"), TextOrNull(r, "fc_master"), IntOrNull(r, "fc_points"), IntOrNull(r, "total_members"),
+                list.Add(new FcRow(Decimal(r, "fc_id"), Text(r, "fc_name"), TextOrNull(r, "fc_master"), IntOrNull(r, "fc_points"), IntOrNull(r, "total_members"),
                     BoolOrNull(r, "has_house") == true, TextOrNull(r, "house"), Int(r, "home_world_id"), IntOrNull(r, "house_days"), TextOrNull(r, "house_level"),
                     IntOrNull(r, "demolition_in_days"), Time(r, "house_last_visited"), TextOrNull(r, "eligibility"), Time(r, "eligible_at"),
                     Text(r, "account_label"), Int(r, "sort_index", int.MaxValue)));
@@ -332,7 +340,7 @@ namespace XIVFleetCompanion
             addParameters(cmd.Parameters);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
-                list.Add(new HoldingRow(Text(r, "kind"), LongOrNull(r, "owner_cid"), LongOrNull(r, "fc_id"), Int(r, "container"), Int(r, "item_id"),
+                list.Add(new HoldingRow(Text(r, "kind"), LongOrNull(r, "owner_cid"), DecimalOrNull(r, "fc_id"), Int(r, "container"), Int(r, "item_id"),
                     BoolOrNull(r, "hq") == true, Long(r, "quantity"), Text(r, "who"), Text(r, "world"), TextOrNull(r, "owner_name"), Text(r, "account_label"),
                     Int(r, "sort_index", int.MaxValue), TextOrNull(r, "retainer_name"), Int(r, "hire_order_index", int.MaxValue), TextOrNull(r, "container_name"),
                     BoolOrNull(r, "money") == true, Text(r, "place")));
