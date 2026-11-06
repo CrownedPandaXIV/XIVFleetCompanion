@@ -37,7 +37,11 @@ public partial class MainWindow
         var lines = Enumerable.Range(0, 8).Where(i => standard ? i < 4 : i >= 4).Where(i => s.Pieces[i] > 0)
             .Select(i => $"{ItemName(22500 + i, false)}: {Number(s.Pieces[i])} × {Gil(SalvagePrice(22500 + i))} = {Gil(s.Pieces[i] * (double)SalvagePrice(22500 + i))}")
             .ToList();
-        if (lines.Count > 0) Hover(string.Join("\n", lines));
+        if (lines.Count == 0) return;
+        var pieces = Enumerable.Range(0, 8).Where(i => standard ? i < 4 : i >= 4).Sum(i => s.Pieces[i]);
+        var gil = Enumerable.Range(0, 8).Where(i => standard ? i < 4 : i >= 4).Sum(i => s.Pieces[i] * (double)SalvagePrice(22500 + i));
+        lines.Add($"Total: {Number(pieces)} piece{(pieces == 1 ? "" : "s")}, {Gil(gil)} gil");
+        Hover(string.Join("\n", lines));
     }
 
     private FleetTable<SalvageRow> SalvageTable => salvageTable ??= new FleetTable<SalvageRow>("salvage", plugin.Configuration, new List<FleetColumn<SalvageRow>>
@@ -60,8 +64,10 @@ public partial class MainWindow
         var salvage = reader.Salvage.Data;
         if (salvage == null) return;
         var rows = salvage.Where(s => Matches(salvageFilter, s.Character, s.World, s.Account)).ToList();
-        Colored(Dim, $"Salvage in bags, retainers and saddlebags, and in the FC chest (counted on one member), at the fixed salvage prices. " +
-                     $"Fleet: {Number(rows.Sum(s => s.Standard))} standard, {Number(rows.Sum(s => s.Extravagant))} extravagant, {Number(rows.Sum(s => s.Gil))} gil.");
+        // The fleet's total first, as the app's Summary tile (the characters shown, when a filter is typed).
+        Heading($"Fleet-Wide Salvage Total: {Number(rows.Sum(s => s.Gil))} gil{(rows.Count < salvage.Count ? " (the characters shown)" : "")}");
+        ImGui.TextUnformatted($"{Number(rows.Sum(s => s.Standard))} standard, {Number(rows.Sum(s => s.Extravagant))} extravagant");
+        Colored(Dim, "Salvage in bags, retainers and saddlebags, and in the FC chest (counted on one member), at the fixed salvage prices.");
         if (rows.Count == 0) { ImGui.TextUnformatted(salvage.Count == 0 ? "No salvage held." : "Nothing matches."); return; }
         SalvageTable.Draw(rows);
     }

@@ -179,6 +179,8 @@ namespace XIVFleetCompanion
                     {
                         Supplies = await Read(conn, ReadSupplies, Supplies);
                         Summary = await Read(conn, ReadSummary, Summary);
+                        // The Summary's salvage total (quick), unless the Salvage page reads it now anyway.
+                        if (!money) Salvage = await Read(conn, ReadSalvage, Salvage);
                     }
                     if (lists)
                     {
@@ -197,7 +199,7 @@ namespace XIVFleetCompanion
                 {
                     var text = $"Could not reach the database: {ex.Message}";
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
-                    if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; }
+                    if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
                 }

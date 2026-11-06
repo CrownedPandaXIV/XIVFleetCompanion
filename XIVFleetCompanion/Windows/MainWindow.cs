@@ -517,6 +517,13 @@ public partial class MainWindow : Window, IDisposable
             }
         }
         ReadLine(reader.Summary, FleetReader.SuppliesEvery);
+
+        // As the app's Summary: the fleet-wide salvage total (the Salvage page has each character's).
+        Heading("Salvage");
+        var salvage = reader.Salvage.Data;
+        if (salvage != null) ImGui.TextUnformatted($"Fleet-Wide Salvage Total: {Number(salvage.Sum(x => x.Gil))} gil");
+        else if (reader.Salvage.Error == null) ImGui.TextUnformatted("Reading...");
+        ReadLine(reader.Salvage, FleetReader.SuppliesEvery);
     }
 
     private FleetTable<SubRow>? subsTable;
