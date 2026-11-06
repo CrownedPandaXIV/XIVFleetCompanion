@@ -34,7 +34,8 @@ namespace XIVFleetCompanion
     {
         public static readonly string[] Scopes = { "world", "dc", "region" };
         private const int Batch = 50;
-        private const int ListingsPerItem = 20;
+        // Enough that the Shopping List's "buying all of them" covers what a fleet needs (as the app).
+        private const int ListingsPerItem = 100;
         /// <summary>Requests at once (Universalis allows several).</summary>
         private const int Parallel = 4;
         private static readonly TimeSpan Keep = TimeSpan.FromMinutes(30);

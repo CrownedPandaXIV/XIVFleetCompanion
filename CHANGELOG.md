@@ -173,6 +173,8 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   comes later in 2.x. Checked against the app's answers for made-up fleets, recipes and listings, every way of asking.
   Each of its tables is only as tall as its rows and the page scrolls as a whole, so every section shows. The Parts
   page now remembers Look ahead, as the app does.
+  Market prices look at the 100 cheapest listings of each item (as the app now does), and "only 1,639 of 2,277 for
+  sale" says plainly what buying those costs and that the rest can't be bought there right now.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

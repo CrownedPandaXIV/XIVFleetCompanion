@@ -106,7 +106,7 @@ public partial class MainWindow
     }
 
     // The cheapest listing in gold, with its world when prices are from a data center or region; "none listed" when
-    // nobody sells it there; "only 3 of 5 listed" when fewer are up than needed. Hover: what buying all those costs.
+    // nobody sells it there; "only 3 of 5 for sale" when fewer are up than needed. Hover: what buying all those costs.
     private void MarketCell(ShopRow r, string? kind)
     {
         if (r.Market is not { } m)
@@ -118,8 +118,10 @@ public partial class MainWindow
         Tinted(Palette.Gil, $"{Number((long)SubRoutes.Round(m.Price))} gil");
         var buying = r.Buying;
         var title = buying == null ? null
-            : $"Buying {(buying.Wanted == 1 ? "it" : $"all {Number(buying.Wanted)}")}: {Number((long)SubRoutes.Round(buying.Gil))} gil, going up the listings from the cheapest"
-              + (buying.Got < buying.Wanted ? $". Only {Number(buying.Got)} of {Number(buying.Wanted)} are listed there; that price is for those." : ".");
+            : buying.Got < buying.Wanted
+                ? $"Only {Number(buying.Got)} of the {Number(buying.Wanted)} needed are for sale there: {Number((long)SubRoutes.Round(buying.Gil))} gil for those, from the cheapest listing up. "
+                  + $"The other {Number(buying.Wanted - buying.Got)} can't be bought there right now."
+                : $"Buying {(buying.Wanted == 1 ? "it" : $"all {Number(buying.Wanted)}")} from the cheapest listing up: {Number((long)SubRoutes.Round(buying.Gil))} gil.";
         if (title != null) Hover(title);
         if (kind != "world" && m.World != null)
         {
@@ -129,7 +131,7 @@ public partial class MainWindow
         if (buying != null && buying.Got < buying.Wanted)
         {
             ImGui.SameLine(0, ImGui.CalcTextSize(" ").X);
-            Colored(Amber, $"· only {Number(buying.Got)} of {Number(buying.Wanted)} listed");
+            Colored(Amber, $"· only {Number(buying.Got)} of {Number(buying.Wanted)} for sale");
             if (title != null) Hover(title);
         }
     }
@@ -315,7 +317,7 @@ public partial class MainWindow
         {
             var bits = new List<string>();
             if (none > 0) bits.Add($"{none} not listed");
-            if (few > 0) bits.Add($"{few} with too few listed");
+            if (few > 0) bits.Add($"{few} with too few for sale");
             return bits.Count > 0 ? $" ({string.Join(", ", bits)})" : "";
         }
         Note($"Market board prices from {market.Label}: the cheapest listing of each, leaving out your own retainers'. Totals go up the listings from the cheapest, as buying them would.");
