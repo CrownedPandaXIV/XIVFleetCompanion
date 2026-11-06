@@ -98,6 +98,14 @@ namespace XIVFleetCompanion
         {
             var prices = new Dictionary<int, double>(vendor);
             if (market == null) return prices;
+            foreach (var (id, price) in CheapestPrices(market, scope, exclude, hq)) prices[id] = price;
+            return prices;
+        }
+
+        /// <summary>ScopePrices without the vendor fallback: only the items someone else lists in that scope.</summary>
+        public static Dictionary<int, double> CheapestPrices(WorldMarket market, string scope, ISet<string>? exclude, bool hq = false)
+        {
+            var prices = new Dictionary<int, double>();
             var world = scope == "world" ? market.Names.World : null;
             foreach (var (id, listings) in market.Listings[scope])
             {

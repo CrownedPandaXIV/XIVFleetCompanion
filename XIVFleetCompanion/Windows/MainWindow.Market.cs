@@ -74,10 +74,9 @@ public partial class MainWindow
         new("total", "Total", a => GilCell(a.Total), a => a.Total),
     });
 
-    /// <summary>The listings compared with live prices (rivals none without them).</summary>
-    private static List<ComparedListing> Compared(MarketRead m) => m.Live is { Error: null } live
-        ? MarketMath.Compare(m.Listings, live.Markets, live.Exclude)
-        : m.Listings.Select(l => new ComparedListing(l, null, null, null)).ToList();
+    private readonly MarketCache marketCache = new();
+    // The page's lists for the filter typed, kept until the next read or a change to the filter.
+    private (List<ComparedListing> For, string Filter, List<ComparedListing> Undercut, List<ComparedListing> Unsold)? marketRows;
 
     private void DrawMarket()
     {
@@ -107,17 +106,25 @@ public partial class MainWindow
             if (child.Success) MarketAccountsTable.Draw(m.Accounts);
         }
 
-        var compared = Compared(m).Where(x => Matches(marketFilter, ItemName(x.Listing.ItemId, x.Listing.Hq), x.Listing.RetainerName, x.Listing.OwnerName, x.Listing.World, x.Listing.Account)).ToList();
+        var all = marketCache.Compared(m);
+        if (marketRows is not { } kept || !ReferenceEquals(kept.For, all) || kept.Filter != marketFilter)
+        {
+            var compared = all.Where(x => Matches(marketFilter, ItemName(x.Listing.ItemId, x.Listing.Hq), x.Listing.RetainerName, x.Listing.OwnerName, x.Listing.World, x.Listing.Account)).ToList();
+            marketRows = kept = (all, marketFilter,
+                compared.Where(x => x.Undercut).OrderByDescending(x => (x.UndercutBy ?? 0) * x.Listing.Quantity).ToList(),
+                compared.Where(x => x.Listing.Stale).OrderByDescending(x => x.Listing.AgeDays).ToList());
+        }
         if (m.Live?.Error is { } error) Colored(Amber, $"Live prices: {error}");
         else if (m.Live?.Stale is { } old) Colored(Amber, $"Some live prices are from {old.Since.ToLocalTime():g}: {old.Problem} They update at the next read.");
         if (m.Settings.LivePrices && reader.AskingUniversalis)
             Colored(Dim, m.Live == null ? "Getting live prices from Universalis..." : "Updating live prices from Universalis...");
+        else if (m.Live is { Error: null } && marketCache.Working) Colored(Dim, "Working out the new prices...");
         if (!m.Settings.LivePrices) Colored(Dim, "Live Market Prices is off (the app's Settings → General): turn it on to see the cheapest rivals and undercut listings.");
         if (live)
         {
             Heading("Undercut listings");
             Colored(Dim, "Your listings that someone else sells cheaper on the same world (same item and quality), from Universalis, with the cheapest on the data center and region. Biggest gap first.");
-            var undercut = compared.Where(x => x.Undercut).OrderByDescending(x => (x.UndercutBy ?? 0) * x.Listing.Quantity).ToList();
+            var undercut = kept.Undercut;
             if (undercut.Count == 0) ImGui.TextUnformatted("None of your listings is undercut on its world.");
             else
             {
@@ -130,7 +137,7 @@ public partial class MainWindow
 
         Heading("Listings unsold for a while");
         Colored(Dim, $"Up for {m.Settings.StaleDays} days or more (set in the app's Gil & Market tab), since the plugin first saw each listing (a repriced listing keeps its time). Oldest first.");
-        var unsold = compared.Where(x => x.Listing.Stale).OrderByDescending(x => x.Listing.AgeDays).ToList();
+        var unsold = kept.Unsold;
         if (unsold.Count == 0) { ImGui.TextUnformatted($"Nothing has been up for {m.Settings.StaleDays} days or more."); return; }
         // With live prices, the cheapest rivals too (a table of its own, so each keeps its own columns).
         var table = live
@@ -140,20 +147,8 @@ public partial class MainWindow
         table.Draw(unsold);
     }
 
-    // The venture rewards at market prices per day, by scope, for the Income page and the Summary (null without live prices).
-    private Dictionary<long, Dictionary<string, double>>? VentureMarketPerDay(VenturesRead ventures)
-    {
-        if (reader.Market.Data?.Live is not { Error: null } live) return null;
-        var result = new Dictionary<long, Dictionary<string, double>>();
-        foreach (var g in ventures.Rows.GroupBy(v => v.Cid))
-        {
-            var world = g.First().World;
-            var market = live.Markets.TryGetValue(world, out var wm) ? wm : null;
-            if (market == null) continue;
-            var vendor = g.Select(v => v.ItemId).Distinct().ToDictionary(id => id, id => ListingVendor(id));
-            result[g.Key] = Universalis.Scopes.ToDictionary(s => s, s =>
-                MarketMath.VentureGil(g.Select(v => (v.ItemId, v.Quantity, v.HqQuantity)), market, s, vendor, live.Exclude) / Math.Max(1, ventures.WindowDays));
-        }
-        return result;
-    }
+    // The venture rewards at market prices per day, by scope, for the Income page and the Summary (null without live
+    // prices): worked out once per read (MarketCache), not every frame.
+    private Dictionary<long, Dictionary<string, double>>? VentureMarketPerDay(List<VentureIncomeRow> rows, int windowDays) =>
+        marketCache.VenturesPerDay(reader.Market.Data, rows, windowDays, ListingVendor);
 }

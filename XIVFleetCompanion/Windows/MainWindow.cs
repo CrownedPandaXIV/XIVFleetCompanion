@@ -206,7 +206,7 @@ public partial class MainWindow : Window, IDisposable
                     Entry(Tab.Inventory, FontAwesomeIcon.BoxOpen, "Inventory", folded, null, p.Dim, "What the fleet holds, and Where is it?");
                     Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
                     Entry(Tab.Income, FontAwesomeIcon.Coins, "Income", folded, null, p.Dim, "Real income from the subs, and venture rewards");
-                    var undercutNow = reader.Market.Data is { Live: { Error: null } } marketNow ? Compared(marketNow).Count(x => x.Undercut) : 0;
+                    var undercutNow = reader.Market.Data is { Live: { Error: null } } marketNow ? marketCache.Undercut(marketNow) : 0;
                     Entry(Tab.Market, FontAwesomeIcon.Store, "Gil & Market", folded, undercutNow > 0 ? $"{undercutNow} undercut" : null, p.Warn,
                         undercutNow > 0 ? $"{undercutNow} listing{(undercutNow == 1 ? " is" : "s are")} undercut on its world" : "Gil per account, and listings unsold for a while");
                     break;
@@ -538,11 +538,11 @@ public partial class MainWindow : Window, IDisposable
         if (ventures != null && ventures.Rows.Count == 0) ImGui.TextUnformatted("Venture income: no rewards recorded in the Income window (AutoRetainer: \"Record statistics\")");
         else if (ventures != null)
         {
-            var perDay = FleetReader.SummarizeVentures(ventures.Rows, ventures.WindowDays, VendorPrice).Sum(v => v.PerDay);
+            var perDay = marketCache.VentureSummaries(ventures.Rows, ventures.WindowDays, VendorPrice).Sum(v => v.PerDay);
             ImGui.TextUnformatted($"Venture income: {Gil(perDay)} gil a day");
             Colored(Dim, $"Last {ventures.WindowDays} days, at what a vendor pays (Income page)");
             // With live prices, the same rewards at the cheapest listing on each character's world, data center and region.
-            if (VentureMarketPerDay(ventures) is { } market)
+            if (VentureMarketPerDay(ventures.Rows, ventures.WindowDays) is { } market)
                 Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(s => $"{Gil(market.Values.Sum(v => v[s]))} ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})")) + " a day");
         }
         if (reader.Ventures.Error != null) Colored(Amber, reader.Ventures.Error);
@@ -550,7 +550,7 @@ public partial class MainWindow : Window, IDisposable
         if (reader.Market.Data is { } marketRead)
         {
             var unsold = marketRead.Listings.Where(l => l.Stale).ToList();
-            var undercut = marketRead.Live is { Error: null } ? Compared(marketRead).Count(x => x.Undercut) : 0;
+            var undercut = marketCache.Undercut(marketRead);
             var text = $"Listings unsold for a while: {Number(unsold.Count)} (up for {marketRead.Settings.StaleDays}+ days, {Gil(unsold.Sum(l => l.Value))} gil{(undercut > 0 ? $" · {undercut} undercut" : "")}) (Gil & Market page)";
             if (unsold.Count > 0 || undercut > 0) Colored(Amber, text); else ImGui.TextUnformatted(text);
         }

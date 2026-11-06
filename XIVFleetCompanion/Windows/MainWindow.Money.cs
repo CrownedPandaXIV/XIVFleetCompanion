@@ -157,11 +157,11 @@ public partial class MainWindow
 
     private void DrawVentureIncome(IncomeRead income)
     {
-        var ventures = FleetOrder.Roster(FleetReader.SummarizeVentures(income.Ventures, income.WindowDays, VendorPrice), v => v.SortIndex, v => v.Character);
+        var ventures = FleetOrder.Roster(marketCache.VentureSummaries(income.Ventures, income.WindowDays, VendorPrice), v => v.SortIndex, v => v.Character);
         Heading($"Retainer ventures: {Gil(ventures.Sum(v => v.PerDay))} gil a day");
         Colored(Dim, $"Venture rewards AutoRetainer recorded over the last {income.WindowDays} days, at what a vendor pays (items are often worth more on the market board). " +
                      $"{Number(ventures.Sum(v => (long)v.Rewards))} rewards, {Gil(ventures.Sum(v => v.Gil))} gil.");
-        ventureMarket = VentureMarketPerDay(new VenturesRead(income.Ventures, income.WindowDays));
+        ventureMarket = VentureMarketPerDay(income.Ventures, income.WindowDays);
         if (ventureMarket != null)
             Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(s => $"{Gil(ventureMarket.Values.Sum(v => v[s]))} ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})")) + " a day, from Universalis.");
         var table = ventureMarket != null ? VenturesLiveTable : VenturesTable;

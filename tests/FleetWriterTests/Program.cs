@@ -82,6 +82,57 @@ internal static class Program
             $"market: Universalis asked each world, data center and region once, only for the items wanted there, at most 4 at a time ({paths.Count} requests, {handler.Most} at once)");
     }
 
+    // The window draws every frame: the market's working out (each listing against the cheapest rivals, every venture
+    // reward at market prices) is done once per read and kept, not done again each frame. A fleet about the size of a big
+    // one: 1,500 listings, 160 retainers, 60 characters with 150 kinds of venture reward on 5 worlds.
+    private static void MarketWorkedOutOncePerRead()
+    {
+        var rnd = new Random(1);
+        var worlds = new[] { "Maduin", "Halicarnassus", "Zalera", "Siren", "Gilgamesh" };
+        var exclude = Enumerable.Range(0, 160).Select(i => Universalis.RetainerKey($"Ret{i}", worlds[i % 5])).ToHashSet();
+        List<MarketListing> Ls(string? w) => Enumerable.Range(0, 20).Select(k => new MarketListing(rnd.Next(100, 9999), 1, k % 3 == 0, $"Seller{k}", w)).ToList();
+        var items = Enumerable.Range(1, 400).ToList();
+        WorldMarket Market(string w) => new(new MarketPlaceNames(w, "Dynamis", "NA"),
+            Universalis.Scopes.ToDictionary(s => s, s => items.ToDictionary(id => id, id => Ls(s == "world" ? null : "Elsewhere"))), null);
+        var live = new LiveMarket(worlds.ToDictionary(w => w, Market), exclude, null);
+        var listings = Enumerable.Range(0, 1500).Select(i => new ListingRow(i, 0, i % 20, items[i % 400], 1, false, 500, null, $"Ret{i % 160}", "A", worlds[i % 5], null, null, 500, 3, false)).ToList();
+        var read = new MarketRead(new MarketSettings(7, true), new List<MarketAccountRow>(), listings, live);
+        var rows = Enumerable.Range(0, 60).SelectMany(ch => items.Take(150).Select(id => new VentureIncomeRow(ch, $"Char{ch}", worlds[ch % 5], "A", ch, id, 5, null, 1, 1, 1))).ToList();
+        // In the background: asking takes no time on the game's thread, and the answers follow.
+        var cache = new MarketCache();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        cache.Undercut(read);
+        cache.VenturesPerDay(read, rows, 7, _ => 10);
+        var asking = sw.Elapsed.TotalMilliseconds;
+        sw.Restart();
+        while (cache.Working) System.Threading.Thread.Sleep(1);
+        var background = sw.Elapsed.TotalMilliseconds;
+        var undercut = cache.Undercut(read);
+        var perDay = cache.VenturesPerDay(read, rows, 7, _ => 10);
+        sw.Restart();
+        var same = true;
+        for (var frame = 0; frame < 600; frame++)
+            same &= cache.Undercut(read) == undercut && ReferenceEquals(cache.VenturesPerDay(read, rows, 7, _ => 10), perDay)
+                    && ReferenceEquals(cache.Compared(read), cache.Compared(read));
+        var perFrame = sw.Elapsed.TotalMilliseconds / 600;
+        // The same answers as working each one out directly (as the app does), every character and scope.
+        var direct = MarketMath.Compare(listings, live.Markets, exclude).Count(x => x.Undercut);
+        var vendor = items.Take(150).ToDictionary(id => id, _ => 10.0);
+        var allMatch = perDay != null && Enumerable.Range(0, 60).All(ch => Universalis.Scopes.All(sc => Math.Abs(perDay[ch][sc]
+            - MarketMath.VentureGil(rows.Where(r => r.Cid == ch).Select(r => (r.ItemId, r.Quantity, r.HqQuantity)), live.Markets[worlds[ch % 5]], sc, vendor, exclude) / 7) < 1e-6));
+        // A new read (new prices in): worked out again (at once here), the answers from before shown meanwhile.
+        var now = new MarketCache(work => { work(); return Task.CompletedTask; });
+        now.VenturesPerDay(read, rows, 7, _ => 10);
+        var old = now.VenturesPerDay(read, rows, 7, _ => 10);
+        var newer = read with { Live = live with { } };
+        var meanwhile = now.VenturesPerDay(newer, rows, 7, _ => 10);
+        var renewed = now.VenturesPerDay(newer, rows, 7, _ => 10);
+        var again = old != null && ReferenceEquals(meanwhile, old) && renewed != null && !ReferenceEquals(renewed, old) && Math.Abs(renewed[3]["region"] - old[3]["region"]) < 1e-9
+                    && now.Undercut(newer) == direct && new MarketCache().Undercut(read with { Live = null }) == 0;
+        Check(same && again && undercut == direct && allMatch && perFrame < 0.5 && asking < 50,
+            $"market: worked out in the background once per read and kept ({asking:0} ms on the game's thread, {background:0} ms in the background, {perFrame * 1000:0.0} µs a frame after; {undercut} undercut, the same as working it out directly); a new read works it out again");
+    }
+
     // The Gil & Market page read through the database (stand-ins for the views with their PostgreSQL types), Live Market
     // Prices off: nothing is asked of Universalis.
     private static async Task MarketReadFromTheDatabase(NpgsqlConnection conn)
@@ -613,6 +664,7 @@ internal static class Program
         await PartsReadFromTheDatabase(conn);
         await MarketAgainstTheApp();
         await MarketAsksEachPlaceOnce();
+        MarketWorkedOutOncePerRead();
         await MarketReadFromTheDatabase(conn);
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

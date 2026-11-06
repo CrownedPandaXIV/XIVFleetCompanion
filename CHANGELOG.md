@@ -141,6 +141,9 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   database reads, so the Summary, Supplies, Salvage and every other page keep updating while they come in (the Gil &
   Market page says "Getting live prices from Universalis..." meanwhile). Each world, data center and region is asked
   once, only for the items listed or earned on its worlds, up to 4 requests at a time instead of one after another.
+- **No more slowdown with live prices on.** The window worked out every listing's rivals and every venture reward at
+  market prices again on each frame, which took most of a second and dropped the game to about 1 FPS. It's now worked
+  out once per read, in the background, and kept (a test times it: about 2 microseconds a frame after).
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

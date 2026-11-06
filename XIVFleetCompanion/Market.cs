@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace XIVFleetCompanion
 {
@@ -59,6 +61,130 @@ namespace XIVFleetCompanion
             var hqPrices = Universalis.ScopePrices(market, scope, vendor, exclude, hq: true);
             return items.Sum(i => (i.Quantity - i.HqQuantity) * (prices.TryGetValue(i.ItemId, out var p) ? p : 0)
                                   + i.HqQuantity * (hqPrices.TryGetValue(i.ItemId, out var h) ? h : 0));
+        }
+    }
+
+    /// <summary>
+    /// The market's working out, kept until the next read: the window draws 60 times a second, and pricing every listing
+    /// and venture reward each time took most of a second a frame. Each answer is worked out again only when a new read
+    /// (the database's, or Universalis's prices) is in, told apart by the read itself, and in the background (run), so the
+    /// game doesn't stop for it either: until it's done, the answers from the read before are shown.
+    /// </summary>
+    public sealed class MarketCache
+    {
+        private readonly Func<Action, Task> run;
+        private MarketRead? comparedFor;
+        private volatile List<ComparedListing> compared = new();
+        private volatile int undercut;
+        private readonly Dictionary<List<VentureIncomeRow>, (LiveMarket? Live, Dictionary<long, Dictionary<string, double>>? PerDay)> ventureMarket = new();
+        private readonly Dictionary<List<VentureIncomeRow>, List<FleetReader.VentureSummary>> ventureSummaries = new();
+        private int working;
+
+        /// <param name="run">Where the working out runs (the background by default; the tests run it at once).</param>
+        public MarketCache(Func<Action, Task>? run = null) => this.run = run ?? (a => Task.Run(a));
+
+        /// <summary>True while something is being worked out in the background.</summary>
+        public bool Working => Volatile.Read(ref working) > 0;
+
+        private void Background(Action work)
+        {
+            Interlocked.Increment(ref working);
+            run(() =>
+            {
+                try { work(); }
+                finally { Interlocked.Decrement(ref working); }
+            });
+        }
+
+        /// <summary>The listings compared with live prices (rivals none without them).</summary>
+        public List<ComparedListing> Compared(MarketRead m)
+        {
+            Refresh(m);
+            return compared;
+        }
+
+        /// <summary>How many listings someone else sells cheaper on the same world (0 without live prices).</summary>
+        public int Undercut(MarketRead m)
+        {
+            Refresh(m);
+            return undercut;
+        }
+
+        private void Refresh(MarketRead m)
+        {
+            if (ReferenceEquals(comparedFor, m)) return;
+            comparedFor = m;
+            if (m.Live is not { Error: null } live)
+            {
+                compared = m.Listings.Select(l => new ComparedListing(l, null, null, null)).ToList();
+                undercut = 0;
+                return;
+            }
+            Background(() =>
+            {
+                var result = MarketMath.Compare(m.Listings, live.Markets, live.Exclude);
+                var count = result.Count(x => x.Undercut);
+                lock (this)
+                {
+                    if (!ReferenceEquals(comparedFor, m)) return;
+                    compared = result;
+                    undercut = count;
+                }
+            });
+        }
+
+        /// <summary>The venture rewards at market prices per day for each character, by scope (null without live prices).
+        /// vendorOf: what a vendor pays for one (asked here, not in the background, as it reads the game's files).</summary>
+        public Dictionary<long, Dictionary<string, double>>? VenturesPerDay(MarketRead? m, List<VentureIncomeRow> rows, int windowDays, Func<int, double> vendorOf)
+        {
+            var live = m?.Live is { Error: null } l ? l : null;
+            lock (ventureMarket)
+            {
+                if (ventureMarket.TryGetValue(rows, out var kept) && ReferenceEquals(kept.Live, live)) return kept.PerDay;
+                var before = kept.PerDay;
+                if (ventureMarket.Count > 4) ventureMarket.Clear();
+                // Until it's worked out: the answers from before (none without live prices).
+                ventureMarket[rows] = (live, live == null ? null : before);
+                if (live == null) return null;
+                var vendor = rows.Select(v => v.ItemId).Distinct().ToDictionary(id => id, vendorOf);
+                Background(() =>
+                {
+                    var result = VentureMarket(rows, windowDays, live, vendor);
+                    lock (ventureMarket)
+                        if (ventureMarket.TryGetValue(rows, out var now) && ReferenceEquals(now.Live, live)) ventureMarket[rows] = (live, result);
+                });
+                return before;
+            }
+        }
+
+        // As MarketMath.VentureGil for each character, the cheapest prices worked out once per world, scope and quality
+        // (the same for every character there) rather than once per character.
+        private static Dictionary<long, Dictionary<string, double>> VentureMarket(List<VentureIncomeRow> rows, int windowDays, LiveMarket live, Dictionary<int, double> vendor)
+        {
+            var cheapest = new Dictionary<(string World, string Scope, bool Hq), Dictionary<int, double>>();
+            double Price(string world, WorldMarket market, string scope, bool hq, int id)
+            {
+                if (!cheapest.TryGetValue((world, scope, hq), out var prices))
+                    cheapest[(world, scope, hq)] = prices = Universalis.CheapestPrices(market, scope, live.Exclude, hq);
+                return prices.TryGetValue(id, out var p) ? p : vendor.TryGetValue(id, out var v) ? v : 0;
+            }
+            var result = new Dictionary<long, Dictionary<string, double>>();
+            foreach (var g in rows.GroupBy(v => v.Cid))
+            {
+                var world = g.First().World;
+                if (!live.Markets.TryGetValue(world, out var market)) continue;
+                result[g.Key] = Universalis.Scopes.ToDictionary(s => s, s =>
+                    g.Sum(i => (i.Quantity - i.HqQuantity) * Price(world, market, s, false, i.ItemId) + i.HqQuantity * Price(world, market, s, true, i.ItemId)) / Math.Max(1, windowDays));
+            }
+            return result;
+        }
+
+        /// <summary>FleetReader.SummarizeVentures, kept for the same rows.</summary>
+        public List<FleetReader.VentureSummary> VentureSummaries(List<VentureIncomeRow> rows, int windowDays, Func<int, double> vendorOf)
+        {
+            if (ventureSummaries.TryGetValue(rows, out var kept)) return kept;
+            if (ventureSummaries.Count > 4) ventureSummaries.Clear();
+            return ventureSummaries[rows] = FleetReader.SummarizeVentures(rows, windowDays, vendorOf);
         }
     }
 }
