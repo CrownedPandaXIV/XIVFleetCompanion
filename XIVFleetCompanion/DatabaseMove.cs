@@ -61,6 +61,51 @@ namespace XIVFleetCompanion
             return Next.Sync;
         }
 
+        /// <summary>From an open connection, follows the database to where its move note says it went (up to 3 moves, in
+        /// case two notes point at each other): openAt(host, port) connects there with the same database and login, and
+        /// moved(host, port) is told once it answers (to save it). Returns the connection to use. Throws WaitException
+        /// while a move is copying the database, and UnreachableException when the new address doesn't answer.</summary>
+        public static async Task<NpgsqlConnection> FollowAsync(NpgsqlConnection conn, Func<string, int, Task<NpgsqlConnection>> openAt, Action<string, int> moved)
+        {
+            NpgsqlConnection? current = conn;
+            try
+            {
+                for (var hop = 0; hop < 3; hop++)
+                {
+                    var note = await ReadAsync(current!);
+                    switch (Decide(note))
+                    {
+                        case Next.Sync:
+                            var ready = current!;
+                            current = null;
+                            return ready;
+                        case Next.Wait:
+                            throw new WaitException();
+                    }
+                    var host = note!.Host.Trim();
+                    NpgsqlConnection next;
+                    try
+                    {
+                        next = await openAt(host, note.Port);
+                    }
+                    catch (Exception ex) when (ex is NpgsqlException or TimeoutException or System.Net.Sockets.SocketException)
+                    {
+                        throw new UnreachableException($"{host}:{note.Port}", ex.Message);
+                    }
+                    moved(host, note.Port);
+                    await current!.DisposeAsync();
+                    current = next;
+                }
+                var last = current!;
+                current = null;
+                return last;
+            }
+            finally
+            {
+                if (current != null) await current.DisposeAsync();
+            }
+        }
+
         /// <summary>A move is copying the database: try again in a minute.</summary>
         public sealed class WaitException : InvalidOperationException
         {

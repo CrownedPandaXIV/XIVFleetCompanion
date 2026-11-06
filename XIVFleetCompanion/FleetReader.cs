@@ -164,11 +164,37 @@ namespace XIVFleetCompanion
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
         /// <param name="subGame">The sectors, ranks and parts from the game's own files, for the routes (asked on the
         /// calling thread; null when they can't be read).</param>
-        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null)
+        /// <param name="open">Opens the database for a read (null: none set up), following it when the app has moved it to
+        /// another PC (DatabaseMove), as a sync does, so a PC that only reads switches too; none: the connection string as it is.</param>
+        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null, Func<Task<NpgsqlConnection?>>? open = null)
         {
             this.connectionString = connectionString;
             this.subGame = subGame;
+            this.open = open;
         }
+        private readonly Func<Task<NpgsqlConnection?>>? open;
+
+        // The connection for one read: through `open` (which follows a moved database), else the connection string.
+        private async Task<NpgsqlConnection> OpenAsync(string cs)
+        {
+            if (open != null) return await open() ?? throw new InvalidOperationException("The database isn't set up yet (Settings tab).");
+            var conn = new NpgsqlConnection(cs);
+            try
+            {
+                await conn.OpenAsync();
+            }
+            catch
+            {
+                await conn.DisposeAsync();
+                throw;
+            }
+            return conn;
+        }
+
+        // Why a read couldn't reach the database, in plain words.
+        private static string ReachFailure(Exception ex) => ex is DatabaseMove.WaitException
+            ? "The database is being moved to another PC. The pages show what was read before until that's done."
+            : $"Could not reach the database: {ex.Message}";
         private readonly Func<SubGameData?>? subGame;
 
         /// <summary>
@@ -222,8 +248,7 @@ namespace XIVFleetCompanion
             {
                 try
                 {
-                    await using var conn = new NpgsqlConnection(cs);
-                    await conn.OpenAsync();
+                    await using var conn = await OpenAsync(cs);
                     if (subs)
                     {
                         Subs = await Read(conn, ReadSubs, Subs);
@@ -261,7 +286,7 @@ namespace XIVFleetCompanion
                 }
                 catch (Exception ex)
                 {
-                    var text = $"Could not reach the database: {ex.Message}";
+                    var text = ReachFailure(ex);
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
@@ -872,13 +897,12 @@ namespace XIVFleetCompanion
             {
                 try
                 {
-                    await using var conn = new NpgsqlConnection(cs);
-                    await conn.OpenAsync();
+                    await using var conn = await OpenAsync(cs);
                     await read(conn);
                 }
                 catch (Exception ex)
                 {
-                    failed($"Could not reach the database: {ex.Message}");
+                    failed(ReachFailure(ex));
                 }
                 finally
                 {

@@ -175,6 +175,11 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   page now remembers Look ahead, as the app does.
   Market prices look at the 100 cheapest listings of each item (as the app now does), and "only 1,639 of 2,277 for
   sale" says plainly what buying those costs and that the rest can't be bought there right now.
+  Craft first's market board prices have the same hover, for the ones still to make, as the app's.
+- **A PC that only reads follows a moved database.** When the app moves the database to another PC, the in-game pages
+  now follow it the same way syncing does, so a PC with syncing off switches by itself (it only needs the old database
+  PC to be on the first time it reads afterwards). While the move is copying, the pages say so and keep what they
+  read before.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

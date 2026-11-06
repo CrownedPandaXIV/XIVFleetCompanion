@@ -486,8 +486,8 @@ namespace XIVFleetCompanion
             foreach (var r in list.Craft.Concat(list.Gather).Concat(list.Crystals))
             {
                 var listed = market.GetValueOrDefault(r.ItemId);
-                // Craft first's rows have Make, not Short, so buying isn't worked out for them (as the app).
-                var wanted = list.Craft.Contains(r) ? 0 : (int)r.Short;
+                // What buying instead costs: a material's still short, an in-between item's still to make (Short holds Make there).
+                var wanted = (int)r.Short;
                 r.Market = listed;
                 r.Cheapest = costs.SourceOf(r.ItemId)?.How;
                 r.Buying = listed != null && wanted > 0 ? Buying(listed, wanted) : null;

@@ -97,7 +97,9 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
-        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame);
+        // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
+        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame,
+            () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection));
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckPage = new CheckWindow(this);
         SpeedTestPage = new SpeedTestWindow(this);

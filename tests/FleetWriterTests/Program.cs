@@ -1783,6 +1783,59 @@ internal static class Program
             "a moved note without an address is not followed");
         Check(new DatabaseMove.UnreachableException("100.64.1.9:5432", "timeout").Message.Contains("moved to 100.64.1.9:5432, but this PC can't reach it"),
             "an unreachable new address is said plainly");
+
+        // Following the note (syncs and, since the Shopping List stage, reads too): to a scratch database standing in for
+        // the new PC's, at the address in the note.
+        var here = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres");
+        await Exec(conn, "DROP DATABASE IF EXISTS fleet_moved_check");
+        await Exec(conn, "CREATE DATABASE fleet_moved_check");
+        async Task<NpgsqlConnection> OpenMoved(string host, int port)
+        {
+            var c = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(here.ConnectionString) { Host = host, Port = port, Database = "fleet_moved_check", Pooling = false }.ConnectionString);
+            await c.OpenAsync();
+            return c;
+        }
+        async Task<NpgsqlConnection> OpenHere()
+        {
+            // The tests' own schema, where the move table is.
+            var c = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(here.ConnectionString) { Pooling = false, SearchPath = Schema }.ConnectionString);
+            await c.OpenAsync();
+            return c;
+        }
+        await Exec(conn, "UPDATE companion_database_move SET state = 'moved', host = @h, port = @p".Replace("@h", $"'{here.Host}'").Replace("@p", here.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        var movedTo = new List<string>();
+        await using (var followed = await DatabaseMove.FollowAsync(await OpenHere(), OpenMoved, (h, p) => movedTo.Add($"{h}:{p}")))
+            Check(Show(await Rows(followed, "SELECT current_database()")) == "fleet_moved_check" && movedTo.SequenceEqual(new[] { $"{here.Host}:{here.Port}" }),
+                "a moved database is followed to its new address, which is saved once it answers (and the new one, with no note, is used)");
+        await Exec(conn, "UPDATE companion_database_move SET state = 'pausing', updated_at = now()");
+        Exception? waited = null;
+        try { await (await DatabaseMove.FollowAsync(await OpenHere(), OpenMoved, (_, _) => { })).DisposeAsync(); } catch (Exception ex) { waited = ex; }
+        Check(waited is DatabaseMove.WaitException, "while the app copies the database, nothing is opened (wait and try again)");
+        await Exec(conn, "UPDATE companion_database_move SET state = 'moved'");
+        Exception? unreachable = null;
+        var saved = false;
+        try { await (await DatabaseMove.FollowAsync(await OpenHere(), (_, _) => throw new NpgsqlException("connection refused"), (_, _) => saved = true)).DisposeAsync(); }
+        catch (Exception ex) { unreachable = ex; }
+        Check(unreachable is DatabaseMove.UnreachableException && !saved, "a new address that doesn't answer is said plainly and not saved");
+
+        // The in-game pages read through the same opening, so a PC that only reads (syncing off) switches too.
+        var opened = 0;
+        var reader = new FleetReader(() => here.ConnectionString, null, async () =>
+        {
+            opened++;
+            return await DatabaseMove.FollowAsync(await OpenHere(), OpenMoved, (_, _) => { });
+        });
+        reader.ReadIfDue(everything: true);
+        for (var w = 0; w < 200 && reader.Busy; w++) await Task.Delay(50);
+        Check(opened == 1 && reader.Subs.Error != null && !reader.Subs.Error.StartsWith("Could not reach"),
+            "reads open the database through the move-following opening (here the moved database, which has no fleet views yet): " + reader.Subs.Error);
+        await Exec(conn, "UPDATE companion_database_move SET state = 'pausing', updated_at = now()");
+        var pausedReader = new FleetReader(() => here.ConnectionString, null, async () => await DatabaseMove.FollowAsync(await OpenHere(), OpenMoved, (_, _) => { }));
+        pausedReader.ReadIfDue(everything: true);
+        for (var w = 0; w < 200 && pausedReader.Busy; w++) await Task.Delay(50);
+        Check(pausedReader.Subs.Error != null && pausedReader.Subs.Error.Contains("being moved to another PC"),
+            "while the database is being moved, the pages say so (and keep what they read before): " + pausedReader.Subs.Error);
+        await Exec(conn, "DROP DATABASE fleet_moved_check WITH (FORCE)");
         await Exec(conn, "DROP TABLE companion_database_move");
 
         // Why a sync didn't get through, from the errors Npgsql really throws.
