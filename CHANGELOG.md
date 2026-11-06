@@ -109,6 +109,15 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - **Every column can be resized, the last one too**: columns keep the width they're given (fitted to their contents at
   first) instead of all stretching to fill the window, so the room left over sits after the last column, and a table
   wider than the window scrolls sideways. Column widths saved before this start over once.
+- **Livelier Subs and Retainers.** Subs: each character is named once over its subs (while the table isn't sorted by a
+  column), a thin bar beside the rank shows how far to the next, and the dashes in builds are softer. Retainers: each
+  owner is named once, the class is in its role's colour (tanks blue, healers green, damage red, a base class such as
+  Gladiator or Conjurer a lighter shade; gatherers plain) with the level softer, Avg ilvl is green when the gear meets
+  the retainer's gear target and amber when it falls short (checked as the app does, from the game's files), and a
+  venture's countdown is followed by the time it's done.
+- FC points in aqua; ceruleum and repair kits that don't count toward the warnings (no sub built, or not synced) dim
+  rather than plain; Income's tables name each character with its world, as everywhere else; and salvage totals (the
+  Salvage page and the Summary) in gil's gold.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by
