@@ -353,10 +353,10 @@ internal static class Program
               && aki.KitsUsed == 4 && Math.Abs(aki.PerDay - 15451.4) < 1e-9 && !income.Characters[1].Enough && income.Characters[1].Cid == 18014498577484004 && income.Ventures.Count == 4,
             "batch 3: income read, with not enough history kept apart: " + string.Join(" | ", income.Characters));
         var prices = new Dictionary<int, double> { [5111] = 100, [6000] = 250, [6001] = 1000, [22500] = 3 };
-        var summary = FleetReader.SummarizeVentures(income.Ventures, income.WindowDays, id => prices[id]).Single();
-        Check(summary.Rewards == 3 && summary.Retainers == 2 && summary.Gil == 1000 + 8000 + 1000 + 1000 && Math.Abs(summary.PerDay - 11000 / 3.0) < 1e-9
-              && summary.Top.Select(t => t.ItemId).SequenceEqual(new[] { 22500, 5111, 6000 }),
-            "batch 3: venture rewards valued as the app (salvage at its fixed price), the three worth most, ties by item number: " + string.Join(",", summary.Top));
+        var ventureSummary = FleetReader.SummarizeVentures(income.Ventures, income.WindowDays, id => prices[id]).Single();
+        Check(ventureSummary.Rewards == 3 && ventureSummary.Retainers == 2 && ventureSummary.Gil == 1000 + 8000 + 1000 + 1000 && Math.Abs(ventureSummary.PerDay - 11000 / 3.0) < 1e-9
+              && ventureSummary.Top.Select(t => t.ItemId).SequenceEqual(new[] { 22500, 5111, 6000 }),
+            "batch 3: venture rewards valued as the app (salvage at its fixed price), the three worth most, ties by item number: " + string.Join(",", ventureSummary.Top));
         Check(FleetOrder.MatchesWords("Diadochos Bottoms of Healing", "diadochos  healing") && FleetOrder.MatchesWords("Diadochos Bottoms of Healing", "heal diad")
               && !FleetOrder.MatchesWords("Diadochos Bottoms of Casting", "diadochos healing") && FleetOrder.MatchesWords("Anything", "  ") && FleetOrder.MatchesWords(null, ""),
             "batch 3: searching word by word, in any order, ignoring case");
