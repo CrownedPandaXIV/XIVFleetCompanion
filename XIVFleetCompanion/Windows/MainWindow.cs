@@ -569,16 +569,18 @@ public partial class MainWindow : Window, IDisposable
         }, sub => sub.Character),
         new("account", "Account", sub => ImGui.TextUnformatted(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
         new("sub", "Sub", sub => ImGui.TextUnformatted(sub.SubName), sub => sub.SubName, Locked: true),
-        // The rank, with a thin bar for how far to the next.
+        // A thin bar for how far to the next rank, the rank right after it (both on the left, so stretching the column
+        // doesn't pull them apart; the bar's fixed width lines the numbers up).
         new("rank", "Rank", sub =>
         {
             if (sub.NextLevelExp > 0)
             {
                 TableCells.Bar((double)sub.CurrentExp / sub.NextLevelExp, 36 * ImGuiHelpers.GlobalScale);
                 Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
-                ImGui.SameLine();
             }
-            RightNumber(sub.Rank);
+            else ImGui.Dummy(new Vector2(36 * ImGuiHelpers.GlobalScale, ImGui.GetTextLineHeight()));
+            ImGui.SameLine();
+            ImGui.TextUnformatted(sub.Rank.ToString(System.Globalization.CultureInfo.CurrentCulture));
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => sub.Rank),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),

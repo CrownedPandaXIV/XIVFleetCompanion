@@ -352,9 +352,17 @@ public partial class MainWindow
 
     private FleetTable<FcRow> FcsTable => fcsTable ??= new FleetTable<FcRow>("fcs", plugin.Configuration, new List<FleetColumn<FcRow>>
     {
-        new("name", "FC", f => { if (f.Name.Length > 0) Tinted(Palette.Fc, f.Name); else Colored(Dim, "—"); }, f => f.Name, Locked: true),
+        // The FC's name, then its world softer (its members and leader are all on it).
+        new("name", "FC", f =>
+        {
+            if (f.Name.Length > 0) Tinted(Palette.Fc, f.Name); else Colored(Dim, "—");
+            if (GameNames.World(f.HomeWorld) is { Length: > 0 } world)
+            {
+                ImGui.SameLine(0, 6 * ImGuiHelpers.GlobalScale);
+                Colored(Dim, world);
+            }
+        }, f => f.Name, Locked: true),
         new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
-        new("world", "World", f => ImGui.TextUnformatted(GameNames.World(f.HomeWorld) is { Length: > 0 } w ? w : "—"), f => GameNames.World(f.HomeWorld)),
         new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
         new("points", "FC Points", f => RightNumber(f.Points, Palette.FcPoints), f => f.Points ?? 0, f => f.Points == null),
         new("members", "Members", f => RightNumber(f.Members), f => f.Members ?? 0, f => f.Members == null),
@@ -393,6 +401,6 @@ public partial class MainWindow
             ImGui.TextWrapped("No Free Companies yet. They appear once FC Tracker has seen them on a PC running the plugin.");
             return;
         }
-        FcsTable.Draw(fcs.Where(f => Matches(fcsFilter, f.Name, f.Leader, f.Account, f.House)).ToList());
+        FcsTable.Draw(fcs.Where(f => Matches(fcsFilter, f.Name, f.Leader, f.Account, f.House, GameNames.World(f.HomeWorld))).ToList());
     }
 }

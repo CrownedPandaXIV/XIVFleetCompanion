@@ -118,6 +118,8 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - FC points in aqua; ceruleum and repair kits that don't count toward the warnings (no sub built, or not synced) dim
   rather than plain; Income's tables name each character with its world, as everywhere else; and salvage totals (the
   Salvage page and the Summary) in gil's gold.
+- Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
+  all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by
