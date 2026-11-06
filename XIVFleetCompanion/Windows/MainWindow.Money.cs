@@ -10,8 +10,8 @@ namespace XIVFleetCompanion.Windows;
 
 // 2.x, the Salvage and Income pages, as the app's tabs: the salvage each character holds (fleet_salvage_view), and the
 // real net income from the subs plus the venture rewards over the Income window (fleet_income_view and
-// fleet_venture_income_view). Read every 5 minutes while one of them is shown. Fight Club's "expected" figures and Loot
-// per Voyage come later in 2.x, with routes; venture rewards are valued at what a vendor pays, from the game's files.
+// fleet_venture_income_view). Read every 5 minutes while one of them is shown. Expected: the subs' Current Gil/Day
+// (SubRoutes); Loot per Voyage comes later in 2.x; venture rewards are valued at what a vendor pays, from the game's files.
 public partial class MainWindow
 {
     private string salvageFilter = "";
@@ -98,7 +98,26 @@ public partial class MainWindow
             Hover($"{Number(c.KitsUsed)} repair kits used over {c.SpanDays:0.0} days");
         }, c => c.Enough ? c.KitPerDay : 0, c => !c.Enough),
         new("real", "Real net / day", c => { if (c.Enough) TableCells.Right(Gil(c.PerDay), c.PerDay > 0 ? Green : Red); }, c => c.Enough ? c.PerDay : 0, c => !c.Enough),
+        // Routes stage: what Fight Club says its subs' routes should make (their Current Gil/Day added up), and how much of
+        // that came in: amber under 90%, red under 75%, as the app.
+        new("expected", "Expected / day", c =>
+        {
+            var e = ExpectedOf(c.Cid);
+            if (e?.Expected is not double x) { Colored(Dim, "—"); Hover("None of its subs is on a route Fight Club lists."); return; }
+            TableCells.Right(Gil(x) + (e.Value.Unmatched > 0 ? " *" : ""), Palette.Gil);
+            if (e.Value.Unmatched > 0)
+                Hover($"{e.Value.Unmatched} of {c.Subs} sub{(c.Subs == 1 ? " is" : "s are")} on a route Fight Club doesn't list, so {(e.Value.Unmatched == 1 ? "it is" : "they are")} left out of expected.");
+        }, c => ExpectedOf(c.Cid)?.Expected ?? double.MinValue, c => ExpectedOf(c.Cid)?.Expected == null),
+        new("share", "Of expected", c =>
+        {
+            if (Share(c) is not double sh) return;
+            var text = $"{SubRoutes.Round(sh * 100):0}%";
+            if (sh < 0.75) TableCells.Right(text, Red); else if (sh < 0.9) TableCells.Right(text, Amber); else TableCells.Right(text);
+        }, c => Share(c) ?? double.MinValue, c => Share(c) == null),
     }, c => c.Account, "characters");
+
+    // Real net a day against expected (null without enough history or nothing expected).
+    private double? Share(IncomeRow c) => c.Enough && ExpectedOf(c.Cid)?.Expected is double e && e > 0 ? c.PerDay / e : null;
 
     private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration, VentureColumns(false), v => v.Account, "characters");
     private FleetTable<FleetReader.VentureSummary> VenturesLiveTable => venturesLiveTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncomeLive", plugin.Configuration, VentureColumns(true), v => v.Account, "characters");
@@ -148,7 +167,20 @@ public partial class MainWindow
         ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted). " +
                           (income.KitCost > 0 ? $"Repairs: repair kits used at {Gil(income.KitCost)} gil each." : "Repairs: set the repair kit cost in the app's Settings to count them.") +
                           (notEnough > 0 ? $" {notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history." : "") +
-                          " Fight Club's expected figures come later in 2.x.");
+                          " Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current Gil/Day).");
+        // As the app's Against expected and Below expected tiles.
+        var compared = counted.Where(c => Share(c) != null).ToList();
+        if (compared.Count > 0)
+        {
+            var real = compared.Sum(c => c.PerDay);
+            var expected = compared.Sum(c => ExpectedOf(c.Cid)!.Value.Expected!.Value);
+            var share = real / expected;
+            var line = $"Against expected: {SubRoutes.Round(share * 100):0}% of {Gil(expected)} gil a day ({compared.Count} character{(compared.Count == 1 ? "" : "s")} compared: " +
+                       $"{(real - expected >= 0 ? "+" : "−")}{Gil(Math.Abs(real - expected))} gil a day)";
+            if (share < 0.75) Colored(Red, line); else if (share < 0.9) Colored(Amber, line); else ImGui.TextUnformatted(line);
+            var below = compared.Count(c => Share(c) < 0.9);
+            if (below > 0) Colored(Amber, $"{below} character{(below == 1 ? " is" : "s are")} below expected (amber under 90%, red under 75%).");
+        }
         IncomeTable.DrawControls();
         var rows = income.Characters.Where(c => Matches(incomeFilter, c.Character, c.World, c.Account)).ToList();
         if (rows.Count == 0) { ImGui.TextUnformatted(income.Characters.Count == 0 ? "No characters with subs built yet." : "Nothing matches."); return; }

@@ -144,6 +144,20 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - **No more slowdown with live prices on.** The window worked out every listing's rivals and every venture reward at
   market prices again on each frame, which took most of a second and dropped the game to about 1 FPS. It's now worked
   out once per read, in the background, and kept (a test times it: about 2 microseconds a frame after).
+- **Stage 8: routes.** As the app's Subs tab, worked out by the plugin itself (from the new fleet_route_* views and the
+  game's own sea map data):
+  - The Subs page gains **Next Rank** (when it ranks up, "≈" when worked out from game data alone, how on hover),
+    **Next Build** (its next build from the Sub Rules or Fight Club, green when it can switch now), **Current Route**
+    (with the map's number), **Current Gil/Day** and **Target Gil/Day** in gold, and **Target Route** (green when it's on
+    it, amber when it isn't). Speed and Range can be added with Columns.
+  - A **Route Optimization** page: subs from rank 85 not on Fight Club's best route for their rank, biggest gain first,
+    with a count beside it in the sidebar and a line on the Summary.
+  - **Income** gains Fight Club's **Expected / day** and **Of expected** (amber under 90%, red under 75%), and the fleet's
+    total against expected.
+  - **Look ahead** on the Parts page (3, 7 or 14 days): the parts of each sub's next build due by then, after what's
+    needed now, with when each is due.
+  The app's tests write made-up fleets and the app's answers, and the plugin's tests check every sub's route, gil a day,
+  dates, next build and Look ahead come out the same.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

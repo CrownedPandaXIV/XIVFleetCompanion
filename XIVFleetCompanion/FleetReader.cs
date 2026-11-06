@@ -9,7 +9,7 @@ namespace XIVFleetCompanion
 {
     /// <summary>One built sub, from fleet_subs_view.</summary>
     public sealed record SubRow(string Character, string World, string Account, int SortIndex, string SubName, int Slot,
-        int Rank, string Build, long ReturnTime, long CurrentExp, long NextLevelExp);
+        int Rank, string Build, long ReturnTime, long CurrentExp, long NextLevelExp, long Cid = 0);
 
     /// <summary>One character with subs, from fleet_supplies_view. PerDay null: not enough history yet; 0: none used.</summary>
     public sealed record SupplyRow(string Character, string World, string Account, int SortIndex, DateTime? LastSynced,
@@ -91,7 +91,8 @@ namespace XIVFleetCompanion
     public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
 
     /// <summary>The Parts page's read: every part needed (PartsPlanner, from the fleet_parts_* views).</summary>
-    public sealed record PartsRead(List<PartNeed> Needs);
+    /// <summary>Inputs: what they were worked out from, for Look ahead (worked out again with the builds coming up).</summary>
+    public sealed record PartsRead(List<PartNeed> Needs, PartsInputs? Inputs = null);
 
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
@@ -340,13 +341,13 @@ namespace XIVFleetCompanion
         {
             var list = new List<SubRow>();
             await using var cmd = new NpgsqlCommand(
-                @"SELECT character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
+                @"SELECT cid, character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
                   FROM fleet_subs_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, character_name, slot NULLS LAST, sub_name", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new SubRow(Text(r, "character_name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
                     Text(r, "sub_name"), Int(r, "slot", 9), Int(r, "rank"), Text(r, "build"), Long(r, "return_time"),
-                    Long(r, "current_exp"), Long(r, "next_level_exp")));
+                    Long(r, "current_exp"), Long(r, "next_level_exp"), Long(r, "cid")));
             return list;
         }
 
@@ -597,7 +598,11 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>
-        public static async Task<PartsRead> ReadParts(NpgsqlConnection conn) => new(PartsPlanner.Plan(await ReadPartsInputs(conn)));
+        public static async Task<PartsRead> ReadParts(NpgsqlConnection conn)
+        {
+            var inputs = await ReadPartsInputs(conn);
+            return new(PartsPlanner.Plan(inputs), inputs);
+        }
 
         public static async Task<PartsInputs> ReadPartsInputs(NpgsqlConnection conn)
         {

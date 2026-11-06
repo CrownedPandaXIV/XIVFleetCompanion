@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -112,6 +112,7 @@ public partial class MainWindow : Window, IDisposable
         {
             case Tab.Summary: DrawSummary(); break;
             case Tab.Subs: DrawSubs(); break;
+            case Tab.Routes: DrawRoutes(); break;
             case Tab.Supplies: DrawSupplies(); break;
             case Tab.Parts: DrawParts(); break;
             case Tab.Roster: DrawRoster(); break;
@@ -194,6 +195,9 @@ public partial class MainWindow : Window, IDisposable
                     Entry(Tab.Summary, FontAwesomeIcon.ClipboardList, "Summary", folded, attention > 0 ? attention.ToString() : null, attention > 0 ? p.Warn : p.Dim,
                         attention > 0 ? $"{attention} thing{(attention == 1 ? "" : "s")} need{(attention == 1 ? "s" : "")} attention" : "Nothing needs you");
                     Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
+                    var toSwitch = reader.Routes.Data != null ? Suboptimal().Count : 0;
+                    Entry(Tab.Routes, FontAwesomeIcon.Route, "Route Optimization", folded, toSwitch > 0 ? $"{toSwitch} to switch" : null, p.Warn,
+                        toSwitch > 0 ? $"{toSwitch} sub{(toSwitch == 1 ? " isn't" : "s aren't")} on the best route for {(toSwitch == 1 ? "its" : "their")} rank" : "Subs not on Fight Club's best route for their rank");
                     Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
                     Entry(Tab.Parts, FontAwesomeIcon.Wrench, "Parts", folded, readyForParts > 0 ? $"{readyForParts} ready" : null, p.Good,
                         readyForParts > 0 ? PartsPlanner.ReadyText(readyList) : "What each sub's next build needs");
@@ -521,6 +525,16 @@ public partial class MainWindow : Window, IDisposable
             if (inPort > 0) ImGui.TextUnformatted($"{inPort} in port (not sent out)");
         }
         ReadLine(reader.Subs, FleetReader.SubsEvery);
+        // As the app's Route Optimizations Possible tile.
+        if (reader.Routes.Data != null)
+        {
+            var switchable = Suboptimal();
+            if (switchable.Count > 0)
+                Colored(Amber, $"{switchable.Count} route optimization{(switchable.Count == 1 ? "" : "s")} possible" +
+                               (switchable.Sum(x => x.Gain > 0 ? x.Gain!.Value : 0) is var more && more > 0 ? $", about {Gil(more)} more gil a day" : "") + " (Route Optimization page)");
+            else ImGui.TextUnformatted("Every sub from rank 85 is on its Target Route");
+        }
+        else if (reader.Routes.Error is { } routesError) Colored(Amber, $"Routes: {routesError}");
 
         Heading("Retainers");
         var counts = reader.RetainerCounts.Data;
@@ -636,6 +650,29 @@ public partial class MainWindow : Window, IDisposable
             else if (status == "In port") Colored(Dim, status);
             else ImGui.TextUnformatted(status);
         }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
+        // Routes stage: when it ranks up and changes build, its route and gil a day (Fight Club's, after repair kits).
+        new("nextRank", "Next Rank", sub => NextRankCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt ?? double.MaxValue,
+            sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt == null),
+        new("nextBuild", "Next Build", sub => NextBuildCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At ?? double.MaxValue,
+            sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At == null),
+        new("speed", "Speed", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Speed is double v) RightNumber((long)v); else Colored(Dim, "—"); },
+            sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1, Hidden: true),
+        new("range", "Range", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Range is double v) RightNumber((long)v); else Colored(Dim, "—"); },
+            sub => RouteOf(sub.Cid, sub.SubName)?.Range ?? -1, Hidden: true),
+        new("route", "Current Route", sub => { if (RouteOf(sub.Cid, sub.SubName) is { } r) RouteCell(r.CurrentRoute, r.CurrentMap); else Colored(Dim, "—"); },
+            sub => RouteOf(sub.Cid, sub.SubName)?.CurrentRoute ?? ""),
+        new("gilDay", "Current Gil/Day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay, NoCurrentGil),
+            sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay == null),
+        // The best route for its rank, in amber when it isn't on it.
+        new("targetRoute", "Target Route", sub =>
+        {
+            var r = RouteOf(sub.Cid, sub.SubName);
+            if (r == null || r.TargetRoute.Length == 0) { Colored(Dim, "—"); return; }
+            if (r.Suboptimal) { Colored(Amber, r.TargetRoute); Hover("Not on this route now: see Route Optimization."); }
+            else Colored(Green, r.TargetRoute);
+        }, sub => RouteOf(sub.Cid, sub.SubName)?.TargetRoute ?? ""),
+        new("targetGilDay", "Target Gil/Day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
+            sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
 
     // "W-S-U-C" with the dashes softer, so the four parts stand out.

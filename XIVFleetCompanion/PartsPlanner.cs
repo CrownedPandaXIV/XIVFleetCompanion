@@ -33,8 +33,10 @@ namespace XIVFleetCompanion
     /// reuse ("Submersible-1's old Bow (once it is upgraded)", RecycledFrom then names the sub); null when it must be crafted.
     /// </summary>
     public sealed record PartNeed(long Cid, string Character, string World, string Account, int? SortIndex, string SubName, int Rank, string Slot,
-        string NeededClass, bool NeededModified, string? SpareLocation, string? RecycledFrom)
+        string NeededClass, bool NeededModified, string? SpareLocation, string? RecycledFrom, double? DueAt = null)
     {
+        /// <summary>Look ahead: a part of a build coming up (due at DueAt, milliseconds; at or before now when it can switch already).</summary>
+        public bool Ahead => DueAt != null;
         public bool ToCraft => SpareLocation == null;
         /// <summary>A sub not built yet: its first build, in an open slot (or a new workshop's first sub).</summary>
         public bool IsNew => Rank == 0;
@@ -49,7 +51,8 @@ namespace XIVFleetCompanion
     /// covered by a spare (the character's own, then its retainers', then its FC chest's, which its tracked members share
     /// and never get twice), else by the part another of its subs gives up when upgraded, else crafted.
     /// The app's tests write made-up fleets and its answers (tests/db/parts-fixture.js) that the plugin's tests check
-    /// this against. Look ahead (builds coming up) comes later in 2.x, with the rank-up forecasts.
+    /// this against. Look ahead: with `upcoming` (each sub's next build due within the days chosen, SubRoutes.Upcoming), also
+    /// that build's parts, after what's needed now, soonest first (checked in the routes fixture).
     /// </summary>
     public static class PartsPlanner
     {
@@ -186,15 +189,16 @@ namespace XIVFleetCompanion
             public int Quantity;
         }
 
-        private sealed record Need(string SubName, int Rank, string Slot, string Letter, string? Current)
+        private sealed record Need(string SubName, int Rank, string Slot, string Letter, string? Current, double? DueAt = null)
         {
+            public bool Ahead => DueAt != null;
             public string Class => Decode(Letter)?.Class ?? (Letter.EndsWith('+') ? Letter[..^1] : Letter);
             public bool Modified => Letter.EndsWith('+');
             public (string Class, bool Modified)? Freed => Current == null ? null : Decode(Current);
         }
 
         /// <summary>Every part needed, character by character (in the order of their ids), each character's highest rank first.</summary>
-        public static List<PartNeed> Plan(PartsInputs input)
+        public static List<PartNeed> Plan(PartsInputs input, IReadOnlyDictionary<(long Cid, int Slot), (int Rank, string[] Parts, double DueAt)>? upcoming = null)
         {
             var characters = input.Characters.OrderBy(c => c.Cid).ToList();
             var rules = input.Rules.OrderBy(r => r.Id).ToList();
@@ -232,6 +236,7 @@ namespace XIVFleetCompanion
             {
                 var bySlot = subs.TryGetValue(character.Cid, out var found) ? found : new Dictionary<int, PartsSub>();
                 var list = new List<Need>();
+                var ahead = new List<Need>();
                 for (var slot = 1; slot <= 4; slot++)
                 {
                     if (!bySlot.TryGetValue(slot, out var sub))
@@ -243,33 +248,47 @@ namespace XIVFleetCompanion
                     }
                     var current = new[] { PartLetter(sub.Part1), PartLetter(sub.Part2), PartLetter(sub.Part3), PartLetter(sub.Part4) };
                     var target = TargetBuild(sub.Rank, slot, character.Cid, sub.CraftEnabled, rules, routes);
+                    // What the slot has once today's needs are met: the target build, or what's fitted where it says nothing.
+                    var settled = new string[4];
                     for (var i = 0; i < 4; i++)
                     {
                         var letter = target?[i] ?? "";
+                        settled[i] = letter.Length > 0 ? letter : current[i];
                         if (letter.Length > 0 && current[i] != letter) list.Add(new Need(sub.SubName, sub.Rank, Slots[i], letter, current[i]));
                     }
+                    // Look ahead: its next build, when that's due within the days chosen.
+                    if (upcoming != null && upcoming.TryGetValue((character.Cid, slot), out var next))
+                        for (var i = 0; i < 4; i++)
+                        {
+                            var letter = i < next.Parts.Length ? next.Parts[i] ?? "" : "";
+                            if (letter.Length > 0 && settled[i] != letter) ahead.Add(new Need(sub.SubName, next.Rank, Slots[i], letter, settled[i], next.DueAt));
+                        }
                 }
                 // A Free Company house but no workshop yet: its first sub's parts.
                 if (character.NumSubSlots == 0 && bySlot.Count == 0 && character.HasHouse)
                     foreach (var key in Slots) list.Add(new Need("Submersible-1", 0, key, "S", null));
-                needs.Add((character, list.OrderByDescending(n => n.Rank).ToList()));
+                needs.Add((character, list.OrderByDescending(n => n.Rank).Concat(ahead.OrderBy(n => n.DueAt).ThenByDescending(n => n.Rank)).ToList()));
             }
 
-            // Spares first, across every character in turn; then, for each character, the parts its upgrades free up.
-            var spares = needs.Select(x => x.Needs.Select(n =>
+            // Spares first: to what's needed now, across every character in turn, then to the builds coming up, soonest
+            // first (so a shared FC chest serves the sub that needs it today); then, for each character, the parts its
+            // upgrades free up.
+            var spares = needs.Select(x => new string?[x.Needs.Count]).ToList();
+            var order = needs.SelectMany((x, c) => x.Needs.Select((n, i) => (C: c, I: i, Need: n))).ToList();
+            foreach (var (c, i, n) in order.Where(o => !o.Need.Ahead).Concat(order.Where(o => o.Need.Ahead).OrderBy(o => o.Need.DueAt)))
             {
-                var stack = pools[x.Character.Cid].FirstOrDefault(s => s.Quantity > 0 && s.Class == n.Class && s.Slot == n.Slot && s.Modified == n.Modified);
-                if (stack == null) return null;
+                var stack = pools[needs[c].Character.Cid].FirstOrDefault(s => s.Quantity > 0 && s.Class == n.Class && s.Slot == n.Slot && s.Modified == n.Modified);
+                if (stack == null) continue;
                 stack.Quantity -= 1;
-                return stack.Location;
-            }).ToList()).ToList();
+                spares[c][i] = stack.Location;
+            }
 
             var result = new List<PartNeed>();
             for (var c = 0; c < needs.Count; c++)
             {
                 var (character, list) = needs[c];
                 var freed = list.Select((n, index) => (Need: n, Index: index, Part: n.Freed)).Where(x => x.Part != null)
-                    .Select(x => new FreedPart(x.Part!.Value.Class, x.Need.Slot, x.Part!.Value.Modified, x.Need.SubName)).ToList();
+                    .Select(x => new FreedPart(x.Part!.Value.Class, x.Need.Slot, x.Part!.Value.Modified, x.Need.SubName) { Ahead = x.Need.Ahead, Index = x.Index }).ToList();
                 for (var i = 0; i < list.Count; i++)
                 {
                     var n = list[i];
@@ -277,7 +296,10 @@ namespace XIVFleetCompanion
                     string? recycled = null;
                     if (location == null)
                     {
-                        var part = freed.FirstOrDefault(f => !f.Used && f.SubName != n.SubName && f.Class == n.Class && f.Slot == n.Slot && f.Modified == n.Modified);
+                        // A part freed by a build coming up only comes off later: it can only go to a need coming up after it.
+                        var index = i;
+                        var part = freed.FirstOrDefault(f => !f.Used && f.SubName != n.SubName && (!f.Ahead || (n.Ahead && f.Index < index))
+                                                             && f.Class == n.Class && f.Slot == n.Slot && f.Modified == n.Modified);
                         if (part != null)
                         {
                             part.Used = true;
@@ -286,7 +308,7 @@ namespace XIVFleetCompanion
                         }
                     }
                     result.Add(new PartNeed(character.Cid, character.Name, character.World, character.Account, character.SortIndex, n.SubName, n.Rank, n.Slot,
-                        n.Class, n.Modified, location, recycled));
+                        n.Class, n.Modified, location, recycled, n.DueAt));
                 }
             }
             return result;
@@ -300,6 +322,8 @@ namespace XIVFleetCompanion
             public bool Modified { get; }
             public string SubName { get; }
             public bool Used { get; set; }
+            public bool Ahead { get; init; }
+            public int Index { get; init; }
         }
 
         /// <summary>The Summary's "Subs ready for new parts": each sub with parts needed, in Roster order, with them: built

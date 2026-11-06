@@ -408,7 +408,32 @@ internal static class Program
                 .OrderBy(e => long.Parse(e.GetProperty("cid").GetString()!, System.Globalization.CultureInfo.InvariantCulture))
                 .ThenBy(e => e.GetProperty("sub_name").GetString(), StringComparer.Ordinal).Select(AppRouteLine).ToList();
             var first = Enumerable.Range(0, Math.Max(mine.Count, app.Count)).FirstOrDefault(k => k >= mine.Count || k >= app.Count || mine[k] != app[k], -1);
-            Check(first < 0, $"routes: the same as the app's Subs tab, {c.GetProperty("name").GetString()} ({app.Count} subs: {plan.Count(s => s.TargetRoute.Length > 0)} with a Target Route, "
+            // Look ahead on the Parts page (14 days): what's needed now, then the parts of the next builds due by then.
+            var i = c.GetProperty("inputs");
+            static string? PS(System.Text.Json.JsonElement e, string k) => e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.Null ? null
+                : e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.String ? e.GetProperty(k).GetString() : e.GetProperty(k).GetRawText();
+            static int? PI(System.Text.Json.JsonElement e, string k) => PS(e, k) is { } t ? (int)double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+            static long? PL(System.Text.Json.JsonElement e, string k) => PS(e, k) is { } t ? long.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+            static double? PD(System.Text.Json.JsonElement e, string k) => PS(e, k) is { } t ? double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+            static bool PB(System.Text.Json.JsonElement e, string k) => e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.True;
+            var partsInput = new PartsInputs(input.Characters,
+                i.GetProperty("partsSubs").EnumerateArray().Select(e => new PartsSub(PL(e, "cid")!.Value, PS(e, "sub_name") ?? "", PI(e, "slot"), PI(e, "rank") ?? 0,
+                    PI(e, "part1"), PI(e, "part2"), PI(e, "part3"), PI(e, "part4"), PB(e, "craft_enabled"))).ToList(),
+                input.Rules,
+                i.GetProperty("partsFightClub").EnumerateArray().Select(e => new PartsFightClubRoute(PL(e, "id")!.Value, PS(e, "route") ?? "", PD(e, "hours"), PS(e, "repair_times"),
+                    PD(e, "gil_sub_day"), PS(e, "rec_build_notes"), PD(e, "repair_kit_cost") ?? 0)).ToList(),
+                i.GetProperty("spares").EnumerateArray().Select(e => new PartsSpare(PL(e, "cid"), PS(e, "fc_id"), PB(e, "is_retainer"), PL(e, "retainer_id"), PS(e, "retainer_name"),
+                    PI(e, "sorted_container") ?? 0, PI(e, "sorted_slot_index") ?? 0, PI(e, "item_id") ?? 0, PI(e, "quantity") ?? 0)).ToList());
+            var now = c.GetProperty("now").GetDouble();
+            var ahead = PartsPlanner.Plan(partsInput, SubRoutes.Upcoming(plan, now, 14));
+            var mineParts = ahead.Select(n => string.Join(" | ", n.Cid, n.SubName, n.Rank, n.Slot, n.NeededClass, n.NeededModified, n.SpareLocation, n.RecycledFrom, N(n.DueAt))).ToList();
+            var appParts = c.GetProperty("expectedParts").EnumerateArray().Select(e => string.Join(" | ", PS(e, "cid"), PS(e, "sub_name"), PI(e, "rank"), PS(e, "slot"),
+                PS(e, "needed_class"), PB(e, "needed_modified"), PS(e, "spare_location"), PS(e, "recycled_from"), N(PD(e, "due_at")))).ToList();
+            var badPart = Enumerable.Range(0, Math.Max(mineParts.Count, appParts.Count)).FirstOrDefault(k => k >= mineParts.Count || k >= appParts.Count || mineParts[k] != appParts[k], -1);
+            Check(badPart < 0 && PartsPlanner.Plan(partsInput).Count == ahead.Count(n => !n.Ahead),
+                $"routes: Look ahead on the Parts page (14 days) the same as the app's, {c.GetProperty("name").GetString()} ({appParts.Count} parts, {ahead.Count(n => n.Ahead)} for builds coming up)"
+                + (badPart < 0 ? "" : $"\n   part {badPart + 1}:\n   plugin [{(badPart < mineParts.Count ? mineParts[badPart] : "none")}]\n   app    [{(badPart < appParts.Count ? appParts[badPart] : "none")}]"));
+            Check(first < 0, $"routes: the same as the app's Subs tab, {c.GetProperty("name").GetString()} ({app.Count} subs:{plan.Count(s => s.TargetRoute.Length > 0)} with a Target Route, "
                 + $"{plan.Count(s => s.CurrentGilDay != null)} a Current Gil/Day, {plan.Count(s => s.RankUp.NextRankAt != null)} a Next Rank date, {plan.Count(s => s.RankUp.NextBuild != null)} a Next Build)"
                 + (first < 0 ? "" : $"\n   sub {first + 1}:\n   plugin [{(first < mine.Count ? mine[first] : "none")}]\n   app    [{(first < app.Count ? app[first] : "none")}]"));
         }
@@ -589,7 +614,7 @@ internal static class Program
               1::int AS low_ceruleum, 0::int AS low_repair_kits, 2.98::float8 AS soonest_runs_out_days;");
         var subs = await FleetReader.ReadSubs(conn);
         Check(subs.Count == 2 && subs[0].SubName == "Port" && subs[0].Slot == 1 && subs[0].NextLevelExp == 0
-              && subs[1] == new SubRow("Aki", "Maduin", "Main", 2, "Back", 2, 90, "S+-U+-C-U", 1700000000, 50, 200),
+              && subs[1] == new SubRow("Aki", "Maduin", "Main", 2, "Back", 2, 90, "S+-U+-C-U", 1700000000, 50, 200, 1),
             "fleet views: subs read in slot order, with nulls as 0: " + string.Join(" | ", subs));
         var supplies = await FleetReader.ReadSupplies(conn);
         var s = supplies.Single();

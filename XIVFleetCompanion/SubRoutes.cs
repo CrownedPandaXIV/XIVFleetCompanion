@@ -358,6 +358,22 @@ namespace XIVFleetCompanion
             return reached;
         }
 
+        /// <summary>Look ahead on the Parts page (ipc/parts.js upcomingBuilds): each sub's next build due within `aheadDays`, by
+        /// character and slot; one it can switch to already is due now.</summary>
+        public static Dictionary<(long Cid, int Slot), (int Rank, string[] Parts, double DueAt)> Upcoming(IEnumerable<SubRoute> subs, double now, int aheadDays)
+        {
+            var until = now + aheadDays * Day;
+            var output = new Dictionary<(long, int), (int, string[], double)>();
+            foreach (var s in subs)
+            {
+                if (s.RankUp.NextBuild is not { } next || s.Slot is not int slot || slot == 0) continue;
+                double? dueAt = next.Rank <= s.Rank ? now : next.At;
+                if (dueAt is not double due || due == 0 || due > until) continue;
+                output[(s.Cid, slot)] = (next.Rank, next.Parts, due);
+            }
+            return output;
+        }
+
         // ---- ipc/subs.js loadSubmarines and addRankUps ----
 
         /// <summary>Every built sub's route answers, as the app's Subs tab, at `now` (milliseconds since 1970).</summary>
