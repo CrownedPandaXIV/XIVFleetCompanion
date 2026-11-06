@@ -50,15 +50,16 @@ public partial class MainWindow
 
     private static void RightNumber(long? value, Vector4? color = null) => TableCells.Right(Number(value), color);
 
-    // Large gil as "5.86M" (the full amount on hover).
-    private static void GilCell(long? gil)
+    // Gil in gold, large amounts as "5.86M" (the full amount on hover).
+    private void GilCell(long? gil)
     {
         if (gil is long g && Math.Abs(g) >= 1_000_000)
         {
-            TableCells.Right((g / 1_000_000.0).ToString("0.00", CultureInfo.CurrentCulture) + "M");
+            TableCells.Right((g / 1_000_000.0).ToString("0.00", CultureInfo.CurrentCulture) + "M", Palette.Gil);
             Hover($"{Number(g)} gil");
         }
-        else RightNumber(gil);
+        else if (gil == null) Colored(Dim, "—");
+        else RightNumber(gil, Palette.Gil);
     }
 
     // A supply against its warning: red under half of it, amber under it, green at or above it. Not coloured when it
@@ -96,11 +97,11 @@ public partial class MainWindow
         new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("fc", "FC", c =>
         {
-            if (c.FcName == null) Colored(Dim, "—"); else ImGui.TextUnformatted(c.FcName);
+            if (c.FcName == null) Colored(Dim, "—"); else Tinted(Palette.Fc, c.FcName);
             if (c.FcPoints.HasValue) Hover($"{c.FcPoints.Value:N0} FC points");
         }, c => c.FcName ?? "", c => c.FcName == null),
         new("fcPoints", "FC Points", c => RightNumber(c.FcPoints), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
-        new("house", "House", c => { if (c.House == null) Colored(Dim, "—"); else ImGui.TextUnformatted(c.House); }, c => c.House ?? "", c => c.House == null),
+        new("house", "House", c => { if (c.House == null) Colored(Dim, "—"); else Tinted(Palette.Address, c.House); }, c => c.House ?? "", c => c.House == null),
         new("gil", "Gil", c => GilCell(c.Gil), c => c.Gil),
         new("ceruleum", "Ceruleum", c =>
         {
@@ -312,7 +313,7 @@ public partial class MainWindow
 
     private FleetTable<FcRow> FcsTable => fcsTable ??= new FleetTable<FcRow>("fcs", plugin.Configuration, new List<FleetColumn<FcRow>>
     {
-        new("name", "FC", f => ImGui.TextUnformatted(f.Name.Length > 0 ? f.Name : "—"), f => f.Name, Locked: true),
+        new("name", "FC", f => { if (f.Name.Length > 0) Tinted(Palette.Fc, f.Name); else Colored(Dim, "—"); }, f => f.Name, Locked: true),
         new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
         new("world", "World", f => ImGui.TextUnformatted(GameNames.World(f.HomeWorld) is { Length: > 0 } w ? w : "—"), f => GameNames.World(f.HomeWorld)),
         new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
@@ -320,7 +321,7 @@ public partial class MainWindow
         new("members", "Members", f => RightNumber(f.Members), f => f.Members ?? 0, f => f.Members == null),
         new("house", "House", f =>
         {
-            if (f.HasHouse) { ImGui.TextUnformatted(f.House ?? "—"); return; }
+            if (f.HasHouse) { if (f.House != null) Tinted(Palette.Address, f.House); else Colored(Dim, "—"); return; }
             var text = f.Eligibility ?? "—";
             if (text == "Eligible") Colored(Green, text); else ImGui.TextUnformatted(text);
             if (f.EligibleAt.HasValue) Hover($"Can bid on a house from {f.EligibleAt.Value:g} (30 days after it was founded), at rank 6 or higher.");

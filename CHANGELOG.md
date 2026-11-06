@@ -102,6 +102,13 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   full amount on hover), the world softer after each name, a band for each account with how many it has (and, on the
   Roster, which setup syncs it, so Synced by is hidden by default; Columns brings it back), a little more room per row
   and stronger stripes.
+- **Gil in gold, house addresses in blue and Free Company names in lavender** (Roster, Retainers, Free Companies,
+  Salvage). The warning colour is now orange rather than gold, so it's never mistaken for gil. With colour blind status
+  colours these three stay plain, so the only colours there are the ones that mean something. The app uses the same
+  colours.
+- **Every column can be resized, the last one too**: columns keep the width they're given (fitted to their contents at
+  first) instead of all stretching to fill the window, so the room left over sits after the last column, and a table
+  wider than the window scrolls sideways. Column widths saved before this start over once.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by

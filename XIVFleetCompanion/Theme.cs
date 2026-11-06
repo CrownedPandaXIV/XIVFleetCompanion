@@ -15,8 +15,14 @@ namespace XIVFleetCompanion
         HighContrast,
     }
 
-    /// <summary>The colors that carry meaning: fine or done, needs a look, urgent, and less important text.</summary>
-    public sealed record StatusColors(Vector4 Good, Vector4 Warn, Vector4 Danger, Vector4 Dim);
+    /// <summary>
+    /// The colors that carry meaning: fine or done, needs a look, urgent, and less important text; then the colors that
+    /// only say what a thing is: gil (gold), a house's address (blue) and a Free Company's name (lavender). Those three
+    /// are null (plain text) with colour blind status colors, so the only colors left there are the ones that mean
+    /// something. The app uses the same colors (renderer/index.html).
+    /// </summary>
+    public sealed record StatusColors(Vector4 Good, Vector4 Warn, Vector4 Danger, Vector4 Dim,
+        Vector4? Gil = null, Vector4? Address = null, Vector4? Fc = null);
 
     public static class Theme
     {
@@ -33,9 +39,10 @@ namespace XIVFleetCompanion
             if (colourBlind) return new StatusColors(Hex(0x56B4E9), Hex(0xF0E442), Hex(0xFF7A3D), dim);
             return theme switch
             {
-                ThemeChoice.HighContrast => new StatusColors(Hex(0x3DFF8A), Hex(0xFFD400), Hex(0xFF4D4D), dim),
-                ThemeChoice.Dalamud => new StatusColors(new Vector4(0.55f, 0.85f, 0.55f, 1f), new Vector4(1f, 0.75f, 0.3f, 1f), new Vector4(1f, 0.45f, 0.45f, 1f), dim),
-                _ => new StatusColors(Hex(0x6FBF82), Hex(0xE0B96A), Hex(0xE57373), dim),
+                // The warning is orange rather than gold, so it is never mistaken for gil.
+                ThemeChoice.HighContrast => new StatusColors(Hex(0x3DFF8A), Hex(0xFF9F1A), Hex(0xFF4D4D), dim, Hex(0xFFE066), Hex(0x7FD4FF), Hex(0xD0BCFF)),
+                ThemeChoice.Dalamud => new StatusColors(new Vector4(0.55f, 0.85f, 0.55f, 1f), Hex(0xE8A04C), new Vector4(1f, 0.45f, 0.45f, 1f), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0)),
+                _ => new StatusColors(Hex(0x6FBF82), Hex(0xE8A04C), Hex(0xE57373), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0)),
             };
         }
 

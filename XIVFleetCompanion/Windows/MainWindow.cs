@@ -409,6 +409,12 @@ public partial class MainWindow : Window, IDisposable
     private Vector4 Green => Palette.Good;
     private Vector4 Dim => Palette.Dim;
 
+    // Text in a color that says what it is (gil, an address, an FC's name), or plain when the look has none.
+    private static void Tinted(Vector4? color, string text)
+    {
+        if (color is Vector4 c) Colored(c, text); else ImGui.TextUnformatted(text);
+    }
+
     private static void Colored(Vector4 color, string text)
     {
         using (ImRaii.PushColor(ImGuiCol.Text, color))

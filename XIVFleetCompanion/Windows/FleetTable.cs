@@ -26,8 +26,11 @@ public sealed record FleetColumn<T>(string Key, string Label, Action<T> Draw, Fu
 /// </summary>
 public sealed class FleetTable<T>
 {
-    private const ImGuiTableFlags Flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
-        | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable | ImGuiTableFlags.SortTristate;
+    // Each column keeps the width it is given (fitted to its contents at first), rather than all of them stretching to
+    // fill the window: so the last column's right edge can be dragged too, the room left over sits after it, and a
+    // table wider than the window scrolls sideways.
+    private const ImGuiTableFlags Flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX
+        | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable | ImGuiTableFlags.SortTristate;
 
     private readonly string id;
     private readonly Configuration config;
@@ -174,10 +177,11 @@ public sealed class FleetTable<T>
     {
         var shown = Shown();
         if (shown.Count == 0) return;
-        // A table of its own for each choice of columns, so ImGui's saved widths always fit the columns shown.
+        // A table of its own for each choice of columns, so ImGui's saved widths always fit the columns shown ("|w":
+        // widths saved before columns kept their own width were shares of the window, which don't carry over).
         // A little more room in each row, so long tables read easily.
         using var padding = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(ImGui.GetStyle().CellPadding.X + 2, ImGui.GetStyle().CellPadding.Y + 2) );
-        using var table = ImRaii.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}", shown.Count, Flags);
+        using var table = ImRaii.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}|w", shown.Count, Flags);
         if (!table) return;
         ImGui.TableSetupScrollFreeze(1, 1);
         foreach (var c in shown) ImGui.TableSetupColumn(c.Label, c.SortKey == null ? ImGuiTableColumnFlags.NoSort : ImGuiTableColumnFlags.None);
