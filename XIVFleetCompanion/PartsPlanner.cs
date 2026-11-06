@@ -36,6 +36,8 @@ namespace XIVFleetCompanion
         string NeededClass, bool NeededModified, string? SpareLocation, string? RecycledFrom)
     {
         public bool ToCraft => SpareLocation == null;
+        /// <summary>A sub not built yet: its first build, in an open slot (or a new workshop's first sub).</summary>
+        public bool IsNew => Rank == 0;
         public string Needed => NeededModified ? $"Modified {NeededClass}" : NeededClass;
     }
 
@@ -300,11 +302,23 @@ namespace XIVFleetCompanion
             public bool Used { get; set; }
         }
 
-        /// <summary>The Summary's "Subs ready for new parts": each built sub with parts needed, in Roster order, with them.</summary>
+        /// <summary>The Summary's "Subs ready for new parts": each sub with parts needed, in Roster order, with them: built
+        /// subs whose rank calls for a different build, and new subs to build in an open slot (rank 0; IsNew).</summary>
         public static List<(PartNeed Sub, List<PartNeed> Parts)> SubsReady(IEnumerable<PartNeed> needs) =>
-            needs.Where(n => n.Rank > 0).GroupBy(n => (n.Cid, n.SubName))
+            needs.GroupBy(n => (n.Cid, n.SubName))
                 .Select(g => (Sub: g.First(), Parts: g.ToList()))
                 .OrderBy(x => x.Sub.SortIndex ?? 1_000_000_000).ThenBy(x => x.Sub.SubName, StringComparer.CurrentCulture).ToList();
+
+        /// <summary>"7 subs are ready for new parts, 1 new sub to build" (built subs and new ones counted apart); "" with none.</summary>
+        public static string ReadyText(IReadOnlyCollection<(PartNeed Sub, List<PartNeed> Parts)> ready)
+        {
+            var built = ready.Count(x => !x.Sub.IsNew);
+            var fresh = ready.Count - built;
+            var parts = new List<string>();
+            if (built > 0) parts.Add($"{built} sub{(built == 1 ? " is" : "s are")} ready for new parts");
+            if (fresh > 0) parts.Add($"{fresh} new sub{(fresh == 1 ? "" : "s")} to build");
+            return string.Join(", ", parts);
+        }
 
         /// <summary>The Parts page's summary: how many of each part still need crafting, by slot (hull, stern, bow, bridge) then most first.</summary>
         public static List<(string Slot, string Needed, int Count)> ToCraft(IEnumerable<PartNeed> needs) =>

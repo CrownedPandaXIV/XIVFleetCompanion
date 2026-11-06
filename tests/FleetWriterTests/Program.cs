@@ -190,9 +190,11 @@ internal static class Program
                 var plan = PartsPlanner.Plan(input);
                 var ready = PartsPlanner.SubsReady(plan);
                 var craft = PartsPlanner.ToCraft(plan);
-                Check(ready.Count == 3 && ready.All(x => x.Sub.Rank > 0) && ready[0].Sub.Character == "Bex" && craft.Sum(x => x.Count) == plan.Count(n => n.ToCraft)
+                Check(ready.Count == 8 && ready.Count(x => !x.Sub.IsNew) == 3 && ready[0].Sub.Character == "Bex"
+                      && PartsPlanner.ReadyText(ready) == "3 subs are ready for new parts, 5 new subs to build" && ready.Where(x => x.Sub.IsNew).All(x => x.Parts.Count == 4)
+                      && craft.Sum(x => x.Count) == plan.Count(n => n.ToCraft)
                       && craft.Select(x => x.Slot).Distinct().SequenceEqual(new[] { "Hull", "Stern", "Bow", "Bridge" }),
-                    "batch 4: subs ready for new parts (built subs only, in Roster order) and the parts still to craft by slot: "
+                    "batch 4: subs ready for new parts and new subs to build (in Roster order, counted apart) and the parts still to craft by slot: "
                     + string.Join(", ", ready.Select(x => $"{x.Sub.Character} {x.Sub.SubName}")) + " / " + string.Join(", ", craft.Select(x => $"{x.Slot} {x.Needed} {x.Count}")));
             }
         Check(first < 0, $"batch 4: parts the same as the app's, {c.GetProperty("name").GetString()} ({app.Count} parts)"

@@ -126,6 +126,9 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   each needs; the sidebar, the Summary's count and the info bar ("2 need parts") count them too. Worked out in the
   plugin from the app's views, the same way as the app (its tests write made-up fleets and the app's answers, which the
   plugin's tests check against). Sub Rules and Craft? are set in the app; Look ahead comes later in 2.x.
+- **New subs to build count as ready for parts too**: a sub not built yet in an open slot is counted and listed with
+  the subs ready for new parts ("7 subs are ready for new parts, 1 new sub to build") on the Summary, the Parts page,
+  the sidebar and the info bar, with its four parts on the Summary.
 - **Stage 7: market prices.** A **Gil & Market** page, as the app's tab: the fleet's gil (characters and retainers)
   and gil per account, what's up for sale, and the listings unsold for a while (the app's days setting), oldest first.
   With **Live Market Prices** on in the app's Settings, the plugin asks Universalis itself (only item numbers and

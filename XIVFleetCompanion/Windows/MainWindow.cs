@@ -170,7 +170,8 @@ public partial class MainWindow : Window, IDisposable
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
         var setupsToCheck = alerts?.Count(a => a.Kind == "autoretainer") ?? 0;
-        var readyForParts = reader.Parts.Data is { } partsRead ? PartsPlanner.SubsReady(partsRead.Needs).Count : 0;
+        var readyList = reader.Parts.Data is { } partsRead ? PartsPlanner.SubsReady(partsRead.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var readyForParts = readyList.Count;
         attention += readyForParts;
 
         foreach (var group in Groups)
@@ -195,7 +196,7 @@ public partial class MainWindow : Window, IDisposable
                     Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
                     Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
                     Entry(Tab.Parts, FontAwesomeIcon.Wrench, "Parts", folded, readyForParts > 0 ? $"{readyForParts} ready" : null, p.Good,
-                        readyForParts > 0 ? $"{readyForParts} sub{(readyForParts == 1 ? " is" : "s are")} ready for new parts" : "What each sub's next build needs");
+                        readyForParts > 0 ? PartsPlanner.ReadyText(readyList) : "What each sub's next build needs");
                     Entry(Tab.Roster, FontAwesomeIcon.Users, "Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
                         notSynced > 0 ? $"{notSynced} character{(notSynced == 1 ? "" : "s")} no longer synced" : null);
                     Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
@@ -489,7 +490,7 @@ public partial class MainWindow : Window, IDisposable
         var alerts = reader.Alerts.Data;
         if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs tab)");
         var ready = reader.Parts.Data is { } partsNow ? PartsPlanner.SubsReady(partsNow.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
-        if (ready.Count > 0) Colored(Green, $"{ready.Count} sub{(ready.Count == 1 ? " is" : "s are")} ready for new parts (Parts tab)");
+        if (ready.Count > 0) Colored(Green, $"{PartsPlanner.ReadyText(ready)} (Parts tab)");
         if (alerts != null)
         {
             foreach (var alert in alerts)
@@ -578,10 +579,10 @@ public partial class MainWindow : Window, IDisposable
             var craft = partsData.Needs.Count(n => n.ToCraft);
             if (craft > 0) Colored(Amber, $"{craft} part{(craft == 1 ? "" : "s")} need crafting (Parts tab)");
             else ImGui.TextUnformatted("No parts need crafting");
-            if (ready.Count == 0) ImGui.TextUnformatted("No sub has reached the rank of its next build");
+            if (ready.Count == 0) ImGui.TextUnformatted("No sub has reached the rank of its next build, and no new sub to build");
             foreach (var (sub, subParts) in ready.Take(10))
             {
-                ImGui.TextUnformatted($"{sub.Character} · {sub.SubName} (rank {sub.Rank}):");
+                ImGui.TextUnformatted($"{sub.Character} · {sub.SubName} ({(sub.IsNew ? "new" : $"rank {sub.Rank}")}):");
                 ImGui.SameLine();
                 Colored(Dim, string.Join(", ", subParts.Select(x => $"{x.Slot} {x.Needed} ({(x.ToCraft ? "to craft" : x.RecycledFrom != null ? "reuse" : "spare")})")));
             }

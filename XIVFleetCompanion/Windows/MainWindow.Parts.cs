@@ -63,10 +63,10 @@ public partial class MainWindow
         if (parts == null) return;
         var needs = parts.Needs;
         var toCraft = needs.Count(n => n.ToCraft);
-        var ready = PartsPlanner.SubsReady(needs).Count;
+        var ready = PartsPlanner.SubsReady(needs);
         Heading(needs.Count == 0 ? "Every sub has the build it should have." :
             $"{needs.Count} part{(needs.Count == 1 ? "" : "s")} needed, {toCraft} to craft");
-        if (ready > 0) Colored(Green, $"{ready} sub{(ready == 1 ? " is" : "s are")} ready for new parts (their rank calls for a different build)");
+        if (ready.Count > 0) Colored(Green, PartsPlanner.ReadyText(ready));
         Colored(Dim, "From each sub's Sub Rules, or Fight Club's best build for a sub ticked Craft? from rank 85 (both set in the app). Spares in bags, " +
                      "retainers and the FC chest are used first, then the parts other subs give up when upgraded.");
 

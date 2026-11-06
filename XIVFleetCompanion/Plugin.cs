@@ -241,11 +241,11 @@ public sealed class Plugin : IDalamudPlugin
 
         var back = FleetReader.SubsBack(Fleet.Subs.Data, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         var alerts = Fleet.Alerts.Data;
-        var ready = Fleet.Parts.Data is { } parts ? PartsPlanner.SubsReady(parts.Needs).Count : 0;
-        var text = FleetReader.InfoBarText(back, alerts, ready);
+        var readySubs = Fleet.Parts.Data is { } parts ? PartsPlanner.SubsReady(parts.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var text = FleetReader.InfoBarText(back, alerts, readySubs.Count);
         var lines = new List<string>();
         if (back > 0) lines.Add($"{back} sub{(back == 1 ? " is" : "s are")} back and waiting");
-        if (ready > 0) lines.Add($"{ready} sub{(ready == 1 ? " is" : "s are")} ready for new parts");
+        if (readySubs.Count > 0) lines.Add(PartsPlanner.ReadyText(readySubs));
         if (alerts != null)
         {
             foreach (var alert in alerts.Take(8)) lines.Add($"{alert.Subject}: {alert.Detail}");
