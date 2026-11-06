@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Roster, Retainers, Fcs, Inventory, Salvage, Income, Pcs, Check, SpeedTest, Status, Settings }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Pcs, Check, SpeedTest, Status, Settings }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -113,6 +113,7 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Summary: DrawSummary(); break;
             case Tab.Subs: DrawSubs(); break;
             case Tab.Supplies: DrawSupplies(); break;
+            case Tab.Parts: DrawParts(); break;
             case Tab.Roster: DrawRoster(); break;
             case Tab.Retainers: DrawRetainers(); break;
             case Tab.Fcs: DrawFcs(); break;
@@ -168,6 +169,8 @@ public partial class MainWindow : Window, IDisposable
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
         var setupsToCheck = alerts?.Count(a => a.Kind == "autoretainer") ?? 0;
+        var readyForParts = reader.Parts.Data is { } partsRead ? PartsPlanner.SubsReady(partsRead.Needs).Count : 0;
+        attention += readyForParts;
 
         foreach (var group in Groups)
         {
@@ -190,6 +193,8 @@ public partial class MainWindow : Window, IDisposable
                         attention > 0 ? $"{attention} thing{(attention == 1 ? "" : "s")} need{(attention == 1 ? "s" : "")} attention" : "Nothing needs you");
                     Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
                     Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
+                    Entry(Tab.Parts, FontAwesomeIcon.Wrench, "Parts", folded, readyForParts > 0 ? $"{readyForParts} ready" : null, p.Good,
+                        readyForParts > 0 ? $"{readyForParts} sub{(readyForParts == 1 ? " is" : "s are")} ready for new parts" : "What each sub's next build needs");
                     Entry(Tab.Roster, FontAwesomeIcon.Users, "Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
                         notSynced > 0 ? $"{notSynced} character{(notSynced == 1 ? "" : "s")} no longer synced" : null);
                     Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
@@ -479,6 +484,8 @@ public partial class MainWindow : Window, IDisposable
         var back = FleetReader.SubsBack(reader.Subs.Data, now);
         var alerts = reader.Alerts.Data;
         if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs tab)");
+        var ready = reader.Parts.Data is { } partsNow ? PartsPlanner.SubsReady(partsNow.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        if (ready.Count > 0) Colored(Green, $"{ready.Count} sub{(ready.Count == 1 ? " is" : "s are")} ready for new parts (Parts tab)");
         if (alerts != null)
         {
             foreach (var alert in alerts)
@@ -486,7 +493,7 @@ public partial class MainWindow : Window, IDisposable
                 using (ImRaii.PushColor(ImGuiCol.Text, alert.Level == "danger" ? Red : Amber))
                     ImGui.TextWrapped($"{alert.Subject}: {alert.Detail}");
             }
-            if (back == 0 && alerts.Count == 0) ImGui.TextUnformatted("Nothing needs you right now.");
+            if (back == 0 && ready.Count == 0 && alerts.Count == 0) ImGui.TextUnformatted("Nothing needs you right now.");
         }
         else if (reader.Alerts.Error == null) ImGui.TextUnformatted("Reading...");
         if (reader.Alerts.Error != null)
@@ -546,6 +553,26 @@ public partial class MainWindow : Window, IDisposable
             }
         }
         ReadLine(reader.Summary, FleetReader.SuppliesEvery);
+
+        // As the app's Summary: Parts That Need Crafting, and Subs Ready for New Parts with what each needs.
+        Heading("Parts");
+        var partsData = reader.Parts.Data;
+        if (partsData != null)
+        {
+            var craft = partsData.Needs.Count(n => n.ToCraft);
+            if (craft > 0) Colored(Amber, $"{craft} part{(craft == 1 ? "" : "s")} need crafting (Parts tab)");
+            else ImGui.TextUnformatted("No parts need crafting");
+            if (ready.Count == 0) ImGui.TextUnformatted("No sub has reached the rank of its next build");
+            foreach (var (sub, subParts) in ready.Take(10))
+            {
+                ImGui.TextUnformatted($"{sub.Character} · {sub.SubName} (rank {sub.Rank}):");
+                ImGui.SameLine();
+                Colored(Dim, string.Join(", ", subParts.Select(x => $"{x.Slot} {x.Needed} ({(x.ToCraft ? "to craft" : x.RecycledFrom != null ? "reuse" : "spare")})")));
+            }
+            if (ready.Count > 10) Colored(Dim, $"...and {ready.Count - 10} more (Parts tab)");
+        }
+        else if (reader.Parts.Error == null) ImGui.TextUnformatted("Reading...");
+        ReadLine(reader.Parts, FleetReader.PartsEvery);
 
         // As the app's Summary: the fleet-wide salvage total (the Salvage page has each character's).
         Heading("Salvage");

@@ -106,7 +106,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, roster, retainers, fcs, inventory, salvage, income, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
+            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, parts, roster, retainers, fcs, inventory, salvage, income, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
 
         AttachInfoBar();
@@ -241,9 +241,11 @@ public sealed class Plugin : IDalamudPlugin
 
         var back = FleetReader.SubsBack(Fleet.Subs.Data, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         var alerts = Fleet.Alerts.Data;
-        var text = FleetReader.InfoBarText(back, alerts);
+        var ready = Fleet.Parts.Data is { } parts ? PartsPlanner.SubsReady(parts.Needs).Count : 0;
+        var text = FleetReader.InfoBarText(back, alerts, ready);
         var lines = new List<string>();
         if (back > 0) lines.Add($"{back} sub{(back == 1 ? " is" : "s are")} back and waiting");
+        if (ready > 0) lines.Add($"{ready} sub{(ready == 1 ? " is" : "s are")} ready for new parts");
         if (alerts != null)
         {
             foreach (var alert in alerts.Take(8)) lines.Add($"{alert.Subject}: {alert.Detail}");

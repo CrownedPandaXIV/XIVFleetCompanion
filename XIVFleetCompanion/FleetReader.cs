@@ -87,6 +87,9 @@ namespace XIVFleetCompanion
     /// <summary>The Income page's read: each character's income, the venture rewards, the window (days) and repair kit cost.</summary>
     public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
 
+    /// <summary>The Parts page's read: every part needed (PartsPlanner, from the fleet_parts_* views).</summary>
+    public sealed record PartsRead(List<PartNeed> Needs);
+
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
 
@@ -104,6 +107,9 @@ namespace XIVFleetCompanion
         public static readonly TimeSpan ListsEvery = TimeSpan.FromMinutes(1);
         /// <summary>Salvage and Income: every 5 minutes while one of them is shown (Income takes the database a moment).</summary>
         public static readonly TimeSpan MoneyEvery = TimeSpan.FromMinutes(5);
+        /// <summary>Parts: every 5 minutes whenever the fleet is shown (the Summary, the sidebar and the info bar count
+        /// the subs ready for new parts).</summary>
+        public static readonly TimeSpan PartsEvery = TimeSpan.FromMinutes(5);
         public const string MissingViewsText =
             "The database doesn't have the fleet views yet. Update the XIV Fleet Companion app to 1.8.0 or later and open it once; it adds them.";
 
@@ -113,6 +119,7 @@ namespace XIVFleetCompanion
         private DateTime suppliesAsked = DateTime.MinValue;
         private DateTime listsAsked = DateTime.MinValue;
         private DateTime moneyAsked = DateTime.MinValue;
+        private DateTime partsAsked = DateTime.MinValue;
 
         public FleetRead<List<SubRow>> Subs { get; private set; } = new(null, null, null);
         public FleetRead<List<SupplyRow>> Supplies { get; private set; } = new(null, null, null);
@@ -127,6 +134,7 @@ namespace XIVFleetCompanion
         public FleetRead<IncomeRead> Income { get; private set; } = new(null, null, null);
         /// <summary>The venture rewards alone (quick), for the Summary's venture income: read with the supplies.</summary>
         public FleetRead<VenturesRead> Ventures { get; private set; } = new(null, null, null);
+        public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
         public bool Busy => busy;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
@@ -146,7 +154,8 @@ namespace XIVFleetCompanion
             var supplies = everything || (withSupplies && now - suppliesAsked >= SuppliesEvery);
             var lists = everything || (withLists && now - listsAsked >= ListsEvery);
             var money = everything || (withMoney && now - moneyAsked >= MoneyEvery);
-            if (!subs && !supplies && !lists && !money) return;
+            var parts = everything || now - partsAsked >= PartsEvery;
+            if (!subs && !supplies && !lists && !money && !parts) return;
             var cs = connectionString();
             if (cs == null)
             {
@@ -163,6 +172,7 @@ namespace XIVFleetCompanion
                 Salvage = Salvage with { Error = notSetUp };
                 Income = Income with { Error = notSetUp };
                 Ventures = Ventures with { Error = notSetUp };
+                Parts = Parts with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -170,6 +180,7 @@ namespace XIVFleetCompanion
             if (supplies) suppliesAsked = now;
             if (lists) listsAsked = now;
             if (money) moneyAsked = now;
+            if (parts) partsAsked = now;
             Task.Run(async () =>
             {
                 try
@@ -202,6 +213,7 @@ namespace XIVFleetCompanion
                         Salvage = await Read(conn, ReadSalvage, Salvage);
                         Income = await Read(conn, ReadIncome, Income);
                     }
+                    if (parts) Parts = await Read(conn, ReadParts, Parts);
                 }
                 catch (Exception ex)
                 {
@@ -210,6 +222,7 @@ namespace XIVFleetCompanion
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
+                    if (parts) Parts = Parts with { Error = text };
                 }
                 finally
                 {
@@ -411,6 +424,44 @@ namespace XIVFleetCompanion
             while (await r.ReadAsync())
                 list.Add(new ItemTotalRow(Int(r, "item_id"), BoolOrNull(r, "hq") == true, Long(r, "total"), Has(r, "equipped") ? Long(r, "equipped") : 0));
             return list;
+        }
+
+        /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>
+        public static async Task<PartsRead> ReadParts(NpgsqlConnection conn) => new(PartsPlanner.Plan(await ReadPartsInputs(conn)));
+
+        public static async Task<PartsInputs> ReadPartsInputs(NpgsqlConnection conn)
+        {
+            var characters = new List<PartsCharacter>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_characters_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    characters.Add(new PartsCharacter(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), IntOrNull(r, "sort_index"),
+                        TextOrNull(r, "fc_id"), Int(r, "num_sub_slots"), BoolOrNull(r, "has_house") == true));
+            var subs = new List<PartsSub>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_subs_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    subs.Add(new PartsSub(Long(r, "cid"), Text(r, "sub_name"), IntOrNull(r, "slot"), Int(r, "rank"),
+                        IntOrNull(r, "part1"), IntOrNull(r, "part2"), IntOrNull(r, "part3"), IntOrNull(r, "part4"), BoolOrNull(r, "craft_enabled") == true));
+            var rules = new List<PartsRule>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_rules_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    rules.Add(new PartsRule(Long(r, "id"), Int(r, "rank"), DecimalOrNull(r, "cid_override")?.ToString("0", CultureInfo.InvariantCulture),
+                        TextOrNull(r, "sub_filter"), TextOrNull(r, "hull"), TextOrNull(r, "stern"), TextOrNull(r, "bow"), TextOrNull(r, "bridge")));
+            var routes = new List<PartsFightClubRoute>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_fight_club_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    routes.Add(new PartsFightClubRoute(Long(r, "id"), Text(r, "route"), Double(r, "hours"), TextOrNull(r, "repair_times"), Double(r, "gil_sub_day"),
+                        TextOrNull(r, "rec_build_notes"), Double(r, "repair_kit_cost") ?? 0));
+            var spares = new List<PartsSpare>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_spares_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    spares.Add(new PartsSpare(LongOrNull(r, "cid"), TextOrNull(r, "fc_id"), BoolOrNull(r, "is_retainer") == true, LongOrNull(r, "retainer_id"),
+                        TextOrNull(r, "retainer_name"), Int(r, "sorted_container"), Int(r, "sorted_slot_index"), Int(r, "item_id"), Int(r, "quantity")));
+            return new PartsInputs(characters, subs, rules, routes, spares);
         }
 
         public static async Task<List<SalvageRow>> ReadSalvage(NpgsqlConnection conn)
@@ -655,13 +706,15 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>
-        /// The info bar line: "Fleet" when nothing needs you, else what does, for example "Fleet: 4 back · 1 low · 2 to
-        /// check" (subs back and waiting; characters low on supplies; anything else that needs attention).
+        /// The info bar line: "Fleet" when nothing needs you, else what does, for example "Fleet: 4 back · 2 need parts · 1
+        /// low · 2 to check" (subs back and waiting; subs ready for new parts; characters low on supplies; anything else
+        /// that needs attention).
         /// </summary>
-        public static string InfoBarText(int subsBack, IReadOnlyCollection<AlertRow>? alerts)
+        public static string InfoBarText(int subsBack, IReadOnlyCollection<AlertRow>? alerts, int subsReadyForParts = 0)
         {
             var parts = new List<string>();
             if (subsBack > 0) parts.Add($"{subsBack} back");
+            if (subsReadyForParts > 0) parts.Add($"{subsReadyForParts} need parts");
             if (alerts != null)
             {
                 var low = alerts.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count();

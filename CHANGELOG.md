@@ -118,6 +118,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - FC points in aqua; ceruleum and repair kits that don't count toward the warnings (no sub built, or not synced) dim
   rather than plain; Income's tables name each character with its world, as everywhere else; and salvage totals (the
   Salvage page and the Summary) in gil's gold.
+- **Stage 6 part 4: Parts**, as the app's Parts tab. **Detail**: every part a sub needs for the build it should have at
+  its rank (its Sub Rules, or Fight Club's best build after repair kits for a sub ticked Craft? from rank 85), a new
+  workshop's first sub and every unlocked empty slot, and where each comes from: a spare in bags, a retainer or the FC
+  chest (a shared chest never promises one part twice), the part another sub gives up when upgraded, or crafting.
+  **To craft**: how many of each part. The Summary shows the parts to craft and the subs ready for new parts with what
+  each needs; the sidebar, the Summary's count and the info bar ("2 need parts") count them too. Worked out in the
+  plugin from the app's views, the same way as the app (its tests write made-up fleets and the app's answers, which the
+  plugin's tests check against). Sub Rules and Craft? are set in the app; Look ahead comes later in 2.x.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

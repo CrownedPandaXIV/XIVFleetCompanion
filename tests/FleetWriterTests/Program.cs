@@ -15,6 +15,100 @@ internal static class Program
     private static int failures;
     private static int passes;
 
+    // Batch 4: the Parts page read through the database, as in the game: the first made-up fleet's view rows put in
+    // stand-ins for the fleet_parts_* views, with the PostgreSQL types the app's views give (ids numeric, booleans), and
+    // the answers the app's.
+    private static async Task PartsReadFromTheDatabase(NpgsqlConnection conn)
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "parts-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var first = doc.RootElement.GetProperty("cases")[0];
+        var tables = new (string View, string Key, string Columns)[]
+        {
+            ("fleet_parts_characters_view", "characters", "cid numeric, name text, world text, account_label text, sort_index int, fc_id text, num_sub_slots int, has_house boolean"),
+            ("fleet_parts_subs_view", "subs", "cid numeric, sub_name text, slot int, rank int, part1 int, part2 int, part3 int, part4 int, craft_enabled boolean"),
+            ("fleet_parts_rules_view", "rules", "id int, rank int, cid_override numeric, sub_filter text, hull text, stern text, bow text, bridge text"),
+            ("fleet_parts_fight_club_view", "fightClub", "id int, route text, hours numeric, repair_times text, gil_sub_day numeric, rec_build_notes text, repair_kit_cost numeric"),
+            ("fleet_parts_spares_view", "spares", "cid numeric, fc_id text, is_retainer boolean, retainer_id numeric, retainer_name text, sorted_container int, sorted_slot_index int, item_id int, quantity int"),
+        };
+        foreach (var (view, key, columns) in tables)
+        {
+            await Exec(conn, $"DROP TABLE IF EXISTS {view}; CREATE TABLE {view} ({columns})");
+            var names = columns.Split(", ").Select(c => c.Split(' ')[0]).ToList();
+            foreach (var row in first.GetProperty("inputs").GetProperty(key).EnumerateArray())
+            {
+                await using var cmd = new NpgsqlCommand($"INSERT INTO {view} ({string.Join(", ", names)}) VALUES ({string.Join(", ", names.Select((n, i) => $"CAST(@p{i} AS {columns.Split(", ")[i].Split(' ')[1]})"))})", conn);
+                for (var i = 0; i < names.Count; i++)
+                {
+                    var v = row.GetProperty(names[i]);
+                    cmd.Parameters.AddWithValue($"p{i}", v.ValueKind switch
+                    {
+                        System.Text.Json.JsonValueKind.Null => DBNull.Value,
+                        System.Text.Json.JsonValueKind.True => "true",
+                        System.Text.Json.JsonValueKind.False => "false",
+                        System.Text.Json.JsonValueKind.String => v.GetString()!,
+                        _ => v.GetRawText(),
+                    });
+                }
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        var read = await FleetReader.ReadParts(conn);
+        var expected = first.GetProperty("expected").EnumerateArray().Select(e => $"{e.GetProperty("sub_name").GetString()} {e.GetProperty("slot").GetString()} {e.GetProperty("needed_class").GetString()} {(e.GetProperty("spare_location").ValueKind == System.Text.Json.JsonValueKind.Null ? "craft" : e.GetProperty("spare_location").GetString())}").ToList();
+        var mine = read.Needs.Select(n => $"{n.SubName} {n.Slot} {n.NeededClass} {n.SpareLocation ?? "craft"}").ToList();
+        Check(mine.SequenceEqual(expected) && read.Needs.Count > 0 && read.Needs[0].Character == "Aki",
+            $"batch 4: the Parts page reads the database's views and gets the app's answers ({mine.Count} parts)");
+        await Exec(conn, string.Join("; ", tables.Select(t => $"DROP TABLE {t.View}")));
+    }
+
+    // Batch 4: the Parts page's working out (PartsPlanner) against the app's own answers for the same made-up fleets
+    // (written by the app's tests/db/parts-fixture.js from its fleet_parts_* views and computePartsNeeded).
+    private static void PartsAgainstTheApp()
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "parts-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        static string? S(System.Text.Json.JsonElement e, string k) => e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.Null ? null
+            : e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.String ? e.GetProperty(k).GetString() : e.GetProperty(k).GetRawText();
+        static long L(System.Text.Json.JsonElement e, string k) => long.Parse(S(e, k)!, System.Globalization.CultureInfo.InvariantCulture);
+        static long? LN(System.Text.Json.JsonElement e, string k) => S(e, k) is { } t ? long.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+        static int? IN(System.Text.Json.JsonElement e, string k) => S(e, k) is { } t ? (int)double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+        static double? DN(System.Text.Json.JsonElement e, string k) => S(e, k) is { } t ? double.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : null;
+        static bool B(System.Text.Json.JsonElement e, string k) => e.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.True;
+        foreach (var c in doc.RootElement.GetProperty("cases").EnumerateArray())
+        {
+            var i = c.GetProperty("inputs");
+            var input = new PartsInputs(
+                i.GetProperty("characters").EnumerateArray().Select(e => new PartsCharacter(L(e, "cid"), S(e, "name") ?? "", S(e, "world") ?? "", S(e, "account_label") ?? "",
+                    IN(e, "sort_index"), S(e, "fc_id"), IN(e, "num_sub_slots") ?? 0, B(e, "has_house"))).ToList(),
+                i.GetProperty("subs").EnumerateArray().Select(e => new PartsSub(L(e, "cid"), S(e, "sub_name") ?? "", IN(e, "slot"), IN(e, "rank") ?? 0,
+                    IN(e, "part1"), IN(e, "part2"), IN(e, "part3"), IN(e, "part4"), B(e, "craft_enabled"))).ToList(),
+                i.GetProperty("rules").EnumerateArray().Select(e => new PartsRule(L(e, "id"), IN(e, "rank") ?? 0, S(e, "cid_override"), S(e, "sub_filter"),
+                    S(e, "hull"), S(e, "stern"), S(e, "bow"), S(e, "bridge"))).ToList(),
+                i.GetProperty("fightClub").EnumerateArray().Select(e => new PartsFightClubRoute(L(e, "id"), S(e, "route") ?? "", DN(e, "hours"), S(e, "repair_times"),
+                    DN(e, "gil_sub_day"), S(e, "rec_build_notes"), DN(e, "repair_kit_cost") ?? 0)).ToList(),
+                i.GetProperty("spares").EnumerateArray().Select(e => new PartsSpare(LN(e, "cid"), S(e, "fc_id"), B(e, "is_retainer"), LN(e, "retainer_id"), S(e, "retainer_name"),
+                    IN(e, "sorted_container") ?? 0, IN(e, "sorted_slot_index") ?? 0, IN(e, "item_id") ?? 0, IN(e, "quantity") ?? 0)).ToList());
+            var mine = PartsPlanner.Plan(input).Select(n => string.Join(" | ", n.Cid, n.Character, n.World, n.Account, n.SortIndex, n.SubName, n.Rank, n.Slot,
+                n.NeededClass, n.NeededModified, n.SpareLocation, n.RecycledFrom)).ToList();
+            var app = c.GetProperty("expected").EnumerateArray().Select(e => string.Join(" | ", L(e, "cid"), S(e, "character_name") ?? "", S(e, "world") ?? "",
+                S(e, "account_label") ?? "", IN(e, "sort_index"), S(e, "sub_name"), IN(e, "rank"), S(e, "slot"), S(e, "needed_class"), B(e, "needed_modified"),
+                S(e, "spare_location"), S(e, "recycled_from"))).ToList();
+            var first = Enumerable.Range(0, Math.Max(mine.Count, app.Count)).FirstOrDefault(k => k >= mine.Count || k >= app.Count || mine[k] != app[k], -1);
+            if (c.GetProperty("name").GetString()!.StartsWith("rules by rank", StringComparison.Ordinal))
+            {
+                var plan = PartsPlanner.Plan(input);
+                var ready = PartsPlanner.SubsReady(plan);
+                var craft = PartsPlanner.ToCraft(plan);
+                Check(ready.Count == 3 && ready.All(x => x.Sub.Rank > 0) && ready[0].Sub.Character == "Bex" && craft.Sum(x => x.Count) == plan.Count(n => n.ToCraft)
+                      && craft.Select(x => x.Slot).Distinct().SequenceEqual(new[] { "Hull", "Stern", "Bow", "Bridge" }),
+                    "batch 4: subs ready for new parts (built subs only, in Roster order) and the parts still to craft by slot: "
+                    + string.Join(", ", ready.Select(x => $"{x.Sub.Character} {x.Sub.SubName}")) + " / " + string.Join(", ", craft.Select(x => $"{x.Slot} {x.Needed} {x.Count}")));
+            }
+        Check(first < 0, $"batch 4: parts the same as the app's, {c.GetProperty("name").GetString()} ({app.Count} parts)"
+                + (first < 0 ? "" : $": part {first + 1}: plugin [{(first < mine.Count ? mine[first] : "none")}], app [{(first < app.Count ? app[first] : "none")}]"));
+        }
+    }
+
     private static void Check(bool ok, string what)
     {
         if (ok) passes++; else failures++;
@@ -173,6 +267,7 @@ internal static class Program
         Check(FleetReader.InfoBarText(0, new List<AlertRow>()) == "Fleet" && FleetReader.InfoBarText(0, null) == "Fleet"
               && FleetReader.InfoBarText(4, null) == "Fleet: 4 back"
               && FleetReader.InfoBarText(4, alerts) == "Fleet: 4 back · 2 low · 2 to check"
+              && FleetReader.InfoBarText(4, alerts, 3) == "Fleet: 4 back · 3 need parts · 2 low · 2 to check"
               && FleetReader.InfoBarText(0, alerts.Take(2).ToList()) == "Fleet: 1 low · 1 to check",
             "info bar: Fleet alone when nothing needs you, else subs back, characters low (each once) and the rest: " + FleetReader.InfoBarText(4, alerts));
         Check(FleetReader.SubsBack(subs, 1700000001) == 1 && FleetReader.SubsBack(subs, 1699999999) == 0 && FleetReader.SubsBack(null, 1) == 0,
@@ -382,6 +477,8 @@ internal static class Program
         Check(FleetReader.FinishClock(laterToday, noonToday) == noonToday.AddHours(3).ToString("t", culture)
               && FleetReader.FinishClock(tomorrowAt, noonToday) == $"{noonToday.AddDays(1).ToString("ddd", culture)} {noonToday.AddDays(1).ToString("t", culture)}",
             "retainers: when a venture is done, with the day when it's not today");
+        PartsAgainstTheApp();
+        await PartsReadFromTheDatabase(conn);
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);
