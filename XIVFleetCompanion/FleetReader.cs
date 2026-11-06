@@ -141,11 +141,15 @@ namespace XIVFleetCompanion
         public FleetRead<List<FcRow>> Fcs { get; private set; } = new(null, null, null);
         public FleetRead<List<SalvageRow>> Salvage { get; private set; } = new(null, null, null);
         public FleetRead<IncomeRead> Income { get; private set; } = new(null, null, null);
+        /// <summary>Loot per Voyage's sector rows over the Income window (fleet_voyage_loot_view): read with Income.</summary>
+        public FleetRead<List<VoyageLootRow>> Loot { get; private set; } = new(null, null, null);
         /// <summary>The venture rewards alone (quick), for the Summary's venture income: read with the supplies.</summary>
         public FleetRead<VenturesRead> Ventures { get; private set; } = new(null, null, null);
         public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
         /// <summary>Routes, gil a day and rank-up dates: read with Parts (the Subs page, Route Optimization, the Summary, Income's expected).</summary>
         public FleetRead<RoutesRead> Routes { get; private set; } = new(null, null, null);
+        /// <summary>How close the Next Rank dates came (the Subs page's forecast line): read with the routes.</summary>
+        public FleetRead<ForecastAccuracy> Forecasts { get; private set; } = new(null, null, null);
         public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
         public bool Busy => busy;
         private volatile bool askingUniversalis;
@@ -194,6 +198,7 @@ namespace XIVFleetCompanion
                 Fcs = Fcs with { Error = notSetUp };
                 Salvage = Salvage with { Error = notSetUp };
                 Income = Income with { Error = notSetUp };
+                Loot = Loot with { Error = notSetUp };
                 Ventures = Ventures with { Error = notSetUp };
                 Parts = Parts with { Error = notSetUp };
                 Routes = Routes with { Error = notSetUp };
@@ -239,11 +244,13 @@ namespace XIVFleetCompanion
                     {
                         Salvage = await Read(conn, ReadSalvage, Salvage);
                         Income = await Read(conn, ReadIncome, Income);
+                        Loot = await Read(conn, ReadLoot, Loot);
                     }
                     if (parts)
                     {
                         Parts = await Read(conn, ReadParts, Parts);
                         Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
+                        Forecasts = await Read(conn, ReadForecasts, Forecasts);
                     }
                     if (market) await ReadMarketNow(conn);
                 }
@@ -253,7 +260,7 @@ namespace XIVFleetCompanion
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
-                    if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
+                    if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; Loot = Loot with { Error = text }; }
                     if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; }
                     if (market) Market = Market with { Error = text };
                 }
@@ -535,7 +542,20 @@ namespace XIVFleetCompanion
                 while (await r.ReadAsync())
                     if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
             var ventures = (await ReadVentures(conn)).Rows;
-            return (read, new MarketAsk(exclude, listings.Select(l => (l.World, l.ItemId)).Concat(ventures.Select(v => ((string?)v.World, v.ItemId))).ToList()));
+            // Loot per Voyage's items, on the world of each voyage's Free Company (an FC is on one world). A database
+            // whose app has no Loot view yet just leaves them out.
+            var loot = new List<(string? World, int ItemId)>();
+            try
+            {
+                await using var cmd = new NpgsqlCommand(
+                    @"SELECT DISTINCT ch.world, x.item FROM (SELECT fc_id, primary_item AS item FROM fleet_voyage_loot_view
+                        UNION SELECT fc_id, additional_item FROM fleet_voyage_loot_view) x
+                      JOIN fleet_parts_characters_view ch ON ch.fc_id = x.fc_id WHERE x.item IS NOT NULL AND x.item <> 0", conn);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) loot.Add((TextOrNull(r, "world"), Int(r, "item")));
+            }
+            catch (PostgresException ex) when (ex.SqlState == "42P01") { }
+            return (read, new MarketAsk(exclude, listings.Select(l => (l.World, l.ItemId)).Concat(ventures.Select(v => ((string?)v.World, v.ItemId))).Concat(loot).ToList()));
         }
 
         /// <summary>Universalis's listings for what the database says to ask (MarketAsk); why not, when it doesn't answer.</summary>
@@ -595,6 +615,43 @@ namespace XIVFleetCompanion
                 while (await r.ReadAsync())
                     voyages.Add(new VoyageSector(Text(r, "fc_id"), Long(r, "sub_register"), TextOrNull(r, "sub_name"), Ms(r, "returned_at"), Int(r, "sector"), IntOrNull(r, "leg")));
             return new RoutesInputs(parts.Characters, subs, parts.Rules, fightClub, history, voyages);
+        }
+
+        /// <summary>How close the Next Rank dates the app saved came to the real rank-ups (fleet_rankup_forecast_view,
+        /// fleet_rankup_history_view and fleet_voyage_returns_view, app 1.8.0 and later), worked out here (ForecastMath).</summary>
+        public static async Task<ForecastAccuracy> ReadForecasts(NpgsqlConnection conn)
+        {
+            var saved = new List<SavedForecast>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_rankup_forecast_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    saved.Add(new SavedForecast(Long(r, "cid"), Int(r, "slot"), Int(r, "rank"), Ms(r, "made_at"), Ms(r, "predicted_at"), TextOrNull(r, "sub_name"),
+                        TextOrNull(r, "fc_id"), TextOrNull(r, "character_name")));
+            var history = new List<SubHistoryPoint>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_rankup_history_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    history.Add(new SubHistoryPoint(Long(r, "cid"), Text(r, "metric"), Ms(r, "recorded_at"), Double(r, "value") ?? 0));
+            var returns = new List<VoyageReturn>();
+            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_voyage_returns_view", conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    returns.Add(new VoyageReturn(Text(r, "fc_id"), Text(r, "sub_name"), Ms(r, "returned_at")));
+            return ForecastMath.Check(saved, history, returns);
+        }
+
+        /// <summary>Loot per Voyage: every sector of every voyage Submarine Tracker recorded over the Income window
+        /// (fleet_voyage_loot_view, app 1.8.0 and later), worked out on the Income page (LootMath).</summary>
+        public static async Task<List<VoyageLootRow>> ReadLoot(NpgsqlConnection conn)
+        {
+            var rows = new List<VoyageLootRow>();
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_voyage_loot_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                rows.Add(new VoyageLootRow(Text(r, "fc_id"), Long(r, "sub_register"), Ms(r, "returned_at"), Int(r, "sector"), TextOrNull(r, "sub_name"),
+                    IntOrNull(r, "primary_item"), IntOrNull(r, "primary_count"), IntOrNull(r, "additional_item"), IntOrNull(r, "additional_count"),
+                    IntOrNull(r, "leg"), Int(r, "window_days", 7)));
+            return rows;
         }
 
         /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>

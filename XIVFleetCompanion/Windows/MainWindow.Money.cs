@@ -11,7 +11,8 @@ namespace XIVFleetCompanion.Windows;
 // 2.x, the Salvage and Income pages, as the app's tabs: the salvage each character holds (fleet_salvage_view), and the
 // real net income from the subs plus the venture rewards over the Income window (fleet_income_view and
 // fleet_venture_income_view). Read every 5 minutes while one of them is shown. Expected: the subs' Current Gil/Day
-// (SubRoutes); Loot per Voyage comes later in 2.x; venture rewards are valued at what a vendor pays, from the game's files.
+// (SubRoutes); Loot per Voyage (LootMath) from fleet_voyage_loot_view; items are valued at what a vendor pays, from the
+// game's files (salvage at its fixed price), and with live prices at the market too.
 public partial class MainWindow
 {
     private string salvageFilter = "";
@@ -152,6 +153,10 @@ public partial class MainWindow
         {
             if (tab) DrawSubIncome(income);
         }
+        using (var tab = ImRaii.TabItem("Loot per voyage"))
+        {
+            if (tab) DrawLoot(income);
+        }
         using (var tab = ImRaii.TabItem("Retainer ventures"))
         {
             if (tab) DrawVentureIncome(income);
@@ -185,6 +190,106 @@ public partial class MainWindow
         var rows = income.Characters.Where(c => Matches(incomeFilter, c.Character, c.World, c.Account)).ToList();
         if (rows.Count == 0) { ImGui.TextUnformatted(income.Characters.Count == 0 ? "No characters with subs built yet." : "Nothing matches."); return; }
         IncomeTable.Draw(rows);
+    }
+
+    // Loot per Voyage, worked out in the background once per read (of the loot, the routes or the characters).
+    private LootRead? lootRead;
+    private (object? Rows, object? Routes, object? Parts) lootFor;
+    private volatile bool lootWorking;
+    private Dictionary<int, string> lootLetters = new();
+    private FleetTable<LootSub>? lootSubsTable;
+    private FleetTable<LootSub>? lootSubsLiveTable;
+    private FleetTable<LootRoute>? lootRoutesTable;
+    private FleetTable<LootRoute>? lootRoutesLiveTable;
+    private Dictionary<string, LootMarket>? lootMarket;
+
+    private LootRead? LootSummary(IncomeRead income)
+    {
+        var rows = reader.Loot.Data;
+        if (rows == null) return null;
+        var routes = reader.Routes.Data;
+        var parts = reader.Parts.Data;
+        if ((!ReferenceEquals(rows, lootFor.Rows) || !ReferenceEquals(routes, lootFor.Routes) || !ReferenceEquals(parts, lootFor.Parts)) && !lootWorking)
+        {
+            lootFor = (rows, routes, parts);
+            lootWorking = true;
+            // Asked here, on the game's thread: the vendor prices and the sectors' letters come from the game's files.
+            var prices = rows.SelectMany(r => new[] { r.PrimaryItem, r.AdditionalItem }).OfType<int>().Distinct().ToDictionary(id => id, id => ListingVendor(id));
+            lootLetters = GameNames.SubGame()?.Sectors.Where(x => x.Location.Length > 0).GroupBy(x => x.Id).ToDictionary(g => g.Key, g => g.First().Location) ?? new();
+            var letters = lootLetters;
+            var characters = parts?.Inputs?.Characters ?? new List<PartsCharacter>();
+            var subs = routes?.Subs ?? new List<SubRoute>();
+            var days = rows.Count > 0 ? rows[0].WindowDays : income.WindowDays;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try { lootRead = LootMath.Summary(rows, days, id => prices.GetValueOrDefault(id), letters, characters, subs); }
+                catch (Exception ex) { Plugin.Log.Warning(ex, "Could not work out Loot per Voyage"); }
+                finally { lootWorking = false; }
+            });
+        }
+        return lootRead;
+    }
+
+    private (double Gil, int Voyages, double PerVoyage, double PerDay)? LootSubMarket(LootSub s, string scope) =>
+        lootMarket != null && lootMarket.TryGetValue(scope, out var m) && m.Subs.TryGetValue(s.Key, out var v) ? v : null;
+    private (double Gil, int Voyages, double PerVoyage)? LootRouteMarket(LootRoute r, string scope) =>
+        lootMarket != null && lootMarket.TryGetValue(scope, out var m) && m.Routes.TryGetValue(r.Route, out var v) ? v : null;
+    private static string ScopeLabel(string scope) => scope == "world" ? "World" : scope == "dc" ? "DC" : "Region";
+
+    private List<FleetColumn<LootSub>> LootSubColumns(bool live) => new List<FleetColumn<LootSub>>
+        {
+            new("character", "Character", s => { if (s.Character != null) CharacterCell(s.Character, s.World ?? ""); else Colored(Dim, "—"); }, s => s.Character ?? "", Locked: true),
+            new("account", "Account", s => ImGui.TextUnformatted(string.IsNullOrEmpty(s.Account) ? "—" : s.Account), s => s.Account ?? "", Hidden: true),
+            new("sub", "Sub", s => ImGui.TextUnformatted(s.SubName ?? "—"), s => s.SubName ?? ""),
+            new("route", "Route", s => { ImGui.TextUnformatted(s.Route); Hover("The route it ran most often"); }, s => s.Route),
+            new("voyages", "Voyages", s => RightNumber(s.Voyages), s => s.Voyages),
+            new("perVoyage", "Vendor gil / voyage", s => GilCell((long)SubRoutes.Round(s.PerVoyage)), s => s.PerVoyage),
+            new("perDay", "Vendor value / day", s => TableCells.Right(Gil(s.PerDay), Green), s => s.PerDay),
+            new("expected", "Expected / day", s => GilDayCell(s.ExpectedPerDay, "No sub of this name on its character's Subs page matches Fight Club's routes."),
+                s => s.ExpectedPerDay ?? double.MinValue, s => s.ExpectedPerDay == null),
+        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootSub>($"market{scope}", $"Market / day ({ScopeLabel(scope)})",
+            s => { if (LootSubMarket(s, scope) is { } m) TableCells.Right(Gil(m.PerDay), Green); else Colored(Dim, "—"); },
+            s => LootSubMarket(s, scope)?.PerDay ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootSub>>()).ToList();
+
+    private List<FleetColumn<LootRoute>> LootRouteColumns(bool live) => new List<FleetColumn<LootRoute>>
+        {
+            new("route", "Route", r => ImGui.TextUnformatted(r.Route), r => r.Route, Locked: true),
+            new("subs", "Subs", r => RightNumber(r.Subs), r => r.Subs),
+            new("voyages", "Voyages", r => RightNumber(r.Voyages), r => r.Voyages),
+            new("perVoyage", "Vendor gil / voyage", r => GilCell((long)SubRoutes.Round(r.PerVoyage)), r => r.PerVoyage),
+        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootRoute>($"market{scope}", $"Market / voyage ({ScopeLabel(scope)})",
+            r => { if (LootRouteMarket(r, scope) is { } m) GilCell((long)SubRoutes.Round(m.PerVoyage)); else Colored(Dim, "—"); },
+            r => LootRouteMarket(r, scope)?.PerVoyage ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootRoute>>()).ToList();
+
+    private void DrawLoot(IncomeRead income)
+    {
+        if (reader.Loot.Error is { } error) { Colored(Amber, $"Loot per Voyage: {error}"); return; }
+        var loot = LootSummary(income);
+        if (loot == null) { ImGui.TextUnformatted("Working out..."); return; }
+        lootMarket = marketCache.LootMarketFor(reader.Market.Data, loot, lootLetters, id => ListingVendor(id));
+        var live = lootMarket != null;
+        Heading($"Loot per Voyage: {Gil(loot.PerDay)} gil a day");
+        Colored(Dim, $"What each voyage really brought back over the last {loot.WindowDays} days, from Submarine Tracker (items at what a vendor pays; salvage at the " +
+                     $"Salvage page's prices). {Number(loot.VoyageCount)} voyage{(loot.VoyageCount == 1 ? "" : "s")}, {Gil(loot.Gil)} gil, {Number(loot.Salvage)} pieces of salvage.");
+        if (live) Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(sc => $"{Gil(lootMarket![sc].PerDay)} a day ({ScopeLabel(sc)})")) + ", from Universalis.");
+        else if (reader.Market.Data?.Settings.LivePrices == true && marketCache.Working) Colored(Dim, "Working out market prices...");
+        if (loot.Subs.Count == 0)
+        {
+            ImGui.TextUnformatted("No voyages recorded in this time. Submarine Tracker records a voyage when its loot is collected on a PC running it.");
+            return;
+        }
+        var subTable = live ? lootSubsLiveTable ??= new FleetTable<LootSub>("lootSubsLive", plugin.Configuration, LootSubColumns(true), s => s.Account ?? "", "subs")
+                            : lootSubsTable ??= new FleetTable<LootSub>("lootSubs", plugin.Configuration, LootSubColumns(false), s => s.Account ?? "", "subs");
+        subTable.DrawControls();
+        var subs = loot.Subs.Where(s => Matches(incomeFilter, s.Character, s.World, s.Account, s.SubName, s.Route)).ToList();
+        if (subs.Count == 0) ImGui.TextUnformatted("Nothing matches.");
+        else subTable.Draw(FleetOrder.Roster(subs, s => s.SortIndex ?? int.MaxValue, s => s.Character ?? ""));
+        Heading("By route");
+        Colored(Dim, "Each route's voyages, best gil a voyage first.");
+        var routeTable = live ? lootRoutesLiveTable ??= new FleetTable<LootRoute>("lootRoutesLive", plugin.Configuration, LootRouteColumns(true))
+                              : lootRoutesTable ??= new FleetTable<LootRoute>("lootRoutes", plugin.Configuration, LootRouteColumns(false));
+        routeTable.DrawControls();
+        routeTable.Draw(loot.Routes.Where(r => Matches(incomeFilter, r.Route)).ToList());
     }
 
     private void DrawVentureIncome(IncomeRead income)

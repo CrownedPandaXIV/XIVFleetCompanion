@@ -152,6 +152,34 @@ public partial class MainWindow
         else { Colored(Dim, "—"); Hover(why); }
     }
 
+    // "3 hours", "40 minutes", "2.5 days": how far a Next Rank date was off, as the app.
+    private static string OffText(double ms)
+    {
+        var minutes = SubRoutes.Round(Math.Abs(ms) / 60000);
+        if (minutes < 60) return $"{minutes:0} minute{(minutes == 1 ? "" : "s")}";
+        var hours = minutes / 60;
+        if (hours < 48)
+        {
+            var shown = hours < 10 ? SubRoutes.Round(hours * 10) / 10 : SubRoutes.Round(hours);
+            return $"{shown.ToString("0.#", CultureInfo.CurrentCulture)} hour{(shown == 1 ? "" : "s")}";
+        }
+        return $"{(SubRoutes.Round(hours / 24 * 10) / 10).ToString("0.#", CultureInfo.CurrentCulture)} days";
+    }
+
+    // The Subs page's forecast line, as the app's: how close the Next Rank dates (worked out a day or more before) came
+    // to the real rank-ups, each recent one on hover. The app saves the dates every hour while it's open.
+    private void ForecastLine()
+    {
+        if (reader.Forecasts.Data is not { } a) return;
+        Colored(Dim, "Next Rank forecasts: " + (a.Count > 0 && a.AverageOff is double off
+            ? $"within {OffText(off)} on average over the last {a.Count} rank-up{(a.Count == 1 ? "" : "s")}" : "no rank-ups to check yet"));
+        string When(double ms) => DateTime.UnixEpoch.AddMilliseconds(ms).ToLocalTime().ToString("MMM d HH:mm", CultureInfo.CurrentCulture);
+        var lines = a.Checks.Select(c => $"{c.SubName}{(c.Character.Length > 0 ? $" ({c.Character})" : "")} rank {c.Rank}: said {When(c.PredictedAt)}, ranked up {When(c.At)}, " +
+            $"{(Math.Abs(c.Off) < 60000 ? "on time" : $"{OffText(c.Off)} {(c.Off > 0 ? "late" : "early")}")}; worked out {OffText(c.At - c.MadeAt)} before").ToList();
+        Hover("The app saves each sub's Next Rank date every hour while it's open. The average counts dates worked out a day or more before the rank-up, " +
+              "early or late; a rank-up counts from when its voyage came back." + (lines.Count > 0 ? "\n\nRecent rank-ups:\n" + string.Join("\n", lines) : ""));
+    }
+
     private const string NoCurrentGil = "Its route isn't in Fight Club, or its rank is below the route's builds.";
     private const string NoTargetGil = "Fight Club recommends routes from rank 85 (and needs importing in the app's Settings).";
 

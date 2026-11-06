@@ -179,6 +179,45 @@ namespace XIVFleetCompanion
             return result;
         }
 
+        private readonly object lootLock = new();
+        private LootRead? lootFor;
+        private LiveMarket? lootLive;
+        private Dictionary<string, LootMarket>? lootResult;
+
+        /// <summary>Loot per Voyage at market prices by scope ("world", "dc", "region"): each voyage's loot at the cheapest
+        /// listing on its sub's world, data center and region, items not on the market board at what a vendor pays
+        /// (vendorOf, asked here). Null without live prices; worked out in the background once per read.</summary>
+        public Dictionary<string, LootMarket>? LootMarketFor(MarketRead? m, LootRead loot, IReadOnlyDictionary<int, string> letters, Func<int, double> vendorOf)
+        {
+            var live = m?.Live is { Error: null } l ? l : null;
+            lock (lootLock)
+            {
+                if (ReferenceEquals(lootFor, loot) && ReferenceEquals(lootLive, live)) return lootResult;
+                var before = lootResult;
+                lootFor = loot;
+                lootLive = live;
+                if (live == null) { lootResult = null; return null; }
+                var vendor = loot.Voyages.SelectMany(v => v.Items.Keys).Distinct().ToDictionary(id => id, vendorOf);
+                var worldOf = loot.Subs.Where(s => s.World != null).GroupBy(s => s.Key).ToDictionary(g => g.Key, g => g.First().World!);
+                Background(() =>
+                {
+                    var result = Universalis.Scopes.ToDictionary(scope => scope, scope =>
+                    {
+                        var prices = new Dictionary<string, IReadOnlyDictionary<int, double>?>();
+                        IReadOnlyDictionary<int, double>? PricesOn(string world)
+                        {
+                            if (prices.TryGetValue(world, out var known)) return known;
+                            return prices[world] = live.Markets.TryGetValue(world, out var market) ? Universalis.ScopePrices(market, scope, vendor, live.Exclude) : null;
+                        }
+                        return LootMath.Market(loot.Voyages, worldOf, PricesOn, letters, loot.WindowDays);
+                    });
+                    lock (lootLock)
+                        if (ReferenceEquals(lootFor, loot) && ReferenceEquals(lootLive, live)) lootResult = result;
+                });
+                return before;
+            }
+        }
+
         /// <summary>FleetReader.SummarizeVentures, kept for the same rows.</summary>
         public List<FleetReader.VentureSummary> VentureSummaries(List<VentureIncomeRow> rows, int windowDays, Func<int, double> vendorOf)
         {

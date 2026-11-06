@@ -25,6 +25,7 @@
     <Compile Include="..\..\XIVFleetCompanion\Universalis.cs" Link="Universalis.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Market.cs" Link="Market.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubRoutes.cs" Link="SubRoutes.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Loot.cs" Link="Loot.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- Made-up fleets and the app's Parts answers (the app's tests/db/parts-fixture.js), for PartsPlanner. -->

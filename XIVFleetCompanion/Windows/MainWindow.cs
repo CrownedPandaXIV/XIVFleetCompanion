@@ -699,6 +699,7 @@ public partial class MainWindow : Window, IDisposable
         SubsTable.DrawControls();
         FilterBox(ref subsFilter, "subs");
         ReadLine(reader.Subs, FleetReader.SubsEvery);
+        ForecastLine();
         var subs = reader.Subs.Data;
         if (subs == null) return;
         // In the app's order: account, the Roster's character order, then slot.

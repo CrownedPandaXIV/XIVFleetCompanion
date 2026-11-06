@@ -433,6 +433,90 @@ internal static class Program
             Check(badPart < 0 && PartsPlanner.Plan(partsInput).Count == ahead.Count(n => !n.Ahead),
                 $"routes: Look ahead on the Parts page (14 days) the same as the app's, {c.GetProperty("name").GetString()} ({appParts.Count} parts, {ahead.Count(n => n.Ahead)} for builds coming up)"
                 + (badPart < 0 ? "" : $"\n   part {badPart + 1}:\n   plugin [{(badPart < mineParts.Count ? mineParts[badPart] : "none")}]\n   app    [{(badPart < appParts.Count ? appParts[badPart] : "none")}]"));
+            // Loot per Voyage on the Income page, at vendor prices and at (made-up) market prices.
+            var expectedLoot = c.GetProperty("expectedLoot");
+            var lootRows = i.GetProperty("loot").EnumerateArray().Select(e => new VoyageLootRow(PS(e, "fc_id") ?? "", PL(e, "sub_register") ?? 0, PD(e, "returned_at") ?? 0,
+                PI(e, "sector") ?? 0, PS(e, "sub_name"), PI(e, "primary_item"), PI(e, "primary_count"), PI(e, "additional_item"), PI(e, "additional_count"), PI(e, "leg"),
+                PI(e, "window_days") ?? 7)).ToList();
+            var itemPrices = doc.RootElement.GetProperty("itemPrices").EnumerateObject().ToDictionary(p => int.Parse(p.Name, System.Globalization.CultureInfo.InvariantCulture), p => p.Value.GetDouble());
+            double LootPrice(int id) => id >= 22500 && id <= 22507 ? new[] { 8000, 9000, 10000, 13000, 27000, 28500, 30000, 34500 }[id - 22500] : itemPrices.GetValueOrDefault(id);
+            var letters = game.Sectors.Where(s => s.Location.Length > 0).ToDictionary(s => s.Id, s => s.Location);
+            var windowDays = expectedLoot.GetProperty("windowDays").GetInt32();
+            var loot = LootMath.Summary(lootRows, windowDays, LootPrice, letters, input.Characters, plan);
+            static string G(double v) => v.ToString("G9", System.Globalization.CultureInfo.InvariantCulture);
+            var mineLoot = new List<string> { $"totals {loot.VoyageCount} {G(loot.Gil)} {G(loot.PerDay)}" }
+                .Concat(loot.Subs.OrderBy(s => s.Key, StringComparer.Ordinal).Select(s => $"sub {s.Key} {s.SubName} {s.Voyages} {G(s.Gil)} {G(s.PerVoyage)} {G(s.PerDay)} {s.Route} {G(s.LastAt)} {s.Character} {s.World} {N(s.ExpectedPerDay)}"))
+                .Concat(loot.Routes.OrderBy(r => r.Route, StringComparer.Ordinal).Select(r => $"route {r.Route} {r.Voyages} {r.Subs} {G(r.Gil)} {G(r.PerVoyage)}")).ToList();
+            var t = expectedLoot.GetProperty("totals");
+            var appLoot = new List<string> { $"totals {t.GetProperty("voyages").GetInt32()} {G(t.GetProperty("gil").GetDouble())} {G(t.GetProperty("perDay").GetDouble())}" }
+                .Concat(expectedLoot.GetProperty("subs").EnumerateArray().OrderBy(e => $"{PS(e, "fcId")}|{PS(e, "register")}", StringComparer.Ordinal)
+                    .Select(e => $"sub {PS(e, "fcId")}|{PS(e, "register")} {PS(e, "subName")} {PI(e, "voyages")} {G(PD(e, "gil")!.Value)} {G(PD(e, "perVoyage")!.Value)} {G(PD(e, "perDay")!.Value)} "
+                        + $"{PS(e, "route")} {G(PD(e, "lastAt")!.Value)} {PS(e, "character")} {PS(e, "world")} {N(PD(e, "expectedPerDay"))}"))
+                .Concat(expectedLoot.GetProperty("routes").EnumerateArray().OrderBy(e => PS(e, "route"), StringComparer.Ordinal)
+                    .Select(e => $"route {PS(e, "route")} {PI(e, "voyages")} {PI(e, "subs")} {G(PD(e, "gil")!.Value)} {G(PD(e, "perVoyage")!.Value)}")).ToList();
+            // Market prices: made up the same way as the fixture (by world, scope and item).
+            static double? FakePrice(string world, string scope, int id)
+            {
+                var h = 7;
+                foreach (var ch in $"{world}|{scope}|{id}") h = (h * 31 + ch) % 100003;
+                return h % 5 == 0 ? null : 100 + h % 9000;
+            }
+            var lootItems = lootRows.SelectMany(r => new[] { r.PrimaryItem, r.AdditionalItem }).OfType<int>().Where(x => x != 0).Distinct().ToList();
+            var worldOf = loot.Subs.Where(s => s.World != null).ToDictionary(s => s.Key, s => s.World!);
+            foreach (var scope in Universalis.Scopes)
+            {
+                var m = LootMath.Market(loot.Voyages, worldOf, w => lootItems.Select(id => (id, p: FakePrice(w, scope, id))).Where(x => x.p != null).ToDictionary(x => x.id, x => x.p!.Value),
+                    letters, windowDays);
+                mineLoot.Add($"market {scope} {m.Voyages} {G(m.Gil)} {G(m.PerDay)}");
+                mineLoot.AddRange(m.Subs.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"market {scope} sub {kv.Key} {kv.Value.Voyages} {G(kv.Value.Gil)} {G(kv.Value.PerVoyage)} {G(kv.Value.PerDay)}"));
+                mineLoot.AddRange(m.Routes.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"market {scope} route {kv.Key} {kv.Value.Voyages} {G(kv.Value.Gil)} {G(kv.Value.PerVoyage)}"));
+                var am = expectedLoot.GetProperty("market").GetProperty(scope);
+                var at = am.GetProperty("totals");
+                appLoot.Add($"market {scope} {at.GetProperty("voyages").GetInt32()} {G(at.GetProperty("gil").GetDouble())} {G(at.GetProperty("perDay").GetDouble())}");
+                appLoot.AddRange(am.GetProperty("subs").EnumerateArray().OrderBy(e => PS(e, "key"), StringComparer.Ordinal)
+                    .Select(e => $"market {scope} sub {PS(e, "key")} {PI(e, "voyages")} {G(PD(e, "gil")!.Value)} {G(PD(e, "perVoyage")!.Value)} {G(PD(e, "perDay")!.Value)}"));
+                appLoot.AddRange(am.GetProperty("routes").EnumerateArray().OrderBy(e => PS(e, "route"), StringComparer.Ordinal)
+                    .Select(e => $"market {scope} route {PS(e, "route")} {PI(e, "voyages")} {G(PD(e, "gil")!.Value)} {G(PD(e, "perVoyage")!.Value)}"));
+            }
+            // The window's background working out (MarketCache) gives the same as working it out directly, from live
+            // listings made up the same way; none without live prices.
+            var liveMarkets = worldOf.Values.Distinct().ToDictionary(w => w, w => new WorldMarket(new MarketPlaceNames(w, "Dynamis", "NA"),
+                Universalis.Scopes.ToDictionary(sc => sc, sc => lootItems.Where(id => FakePrice(w, sc, id) != null)
+                    .ToDictionary(id => id, id => new List<MarketListing> { new(FakePrice(w, sc, id)!.Value, 1, false, "Seller", null) })), null));
+            var liveRead = new MarketRead(new MarketSettings(7, true), new List<MarketAccountRow>(), new List<ListingRow>(), new LiveMarket(liveMarkets, new HashSet<string>(), null));
+            var cacheNow = new MarketCache(work => { work(); return Task.CompletedTask; });
+            cacheNow.LootMarketFor(liveRead, loot, letters, LootPrice);
+            var cached = cacheNow.LootMarketFor(liveRead, loot, letters, LootPrice);
+            var vendorAll = loot.Voyages.SelectMany(v => v.Items.Keys).Distinct().ToDictionary(id => id, LootPrice);
+            var sameAsDirect = cached != null && Universalis.Scopes.All(sc =>
+            {
+                var direct = LootMath.Market(loot.Voyages, worldOf, w => Universalis.ScopePrices(liveMarkets[w], sc, vendorAll, new HashSet<string>()), letters, windowDays);
+                return Math.Abs(direct.Gil - cached[sc].Gil) < 1e-6 && direct.Voyages == cached[sc].Voyages && direct.Subs.Count == cached[sc].Subs.Count;
+            });
+            Check(sameAsDirect && new MarketCache().LootMarketFor(liveRead with { Live = null }, loot, letters, LootPrice) == null,
+                $"routes: Loot per Voyage at market prices worked out in the background the same as directly, {c.GetProperty("name").GetString()}");
+            var badLoot = Enumerable.Range(0, Math.Max(mineLoot.Count, appLoot.Count)).FirstOrDefault(k => k >= mineLoot.Count || k >= appLoot.Count || mineLoot[k] != appLoot[k], -1);
+            Check(badLoot < 0 && loot.Subs.Count > 0, $"routes: Loot per Voyage the same as the app's, at vendor and market prices, {c.GetProperty("name").GetString()} "
+                + $"({loot.VoyageCount} voyages over {windowDays} days, {loot.Subs.Count} subs, {loot.Routes.Count} routes, {loot.Subs.Count(s => s.ExpectedPerDay != null)} with expected)"
+                + (badLoot < 0 ? "" : $"\n   line {badLoot + 1}:\n   plugin [{(badLoot < mineLoot.Count ? mineLoot[badLoot] : "none")}]\n   app    [{(badLoot < appLoot.Count ? appLoot[badLoot] : "none")}]"));
+            // How close the Next Rank dates came (the Subs page's forecast line).
+            var saved = i.GetProperty("forecasts").EnumerateArray().Select(e => new SavedForecast(PL(e, "cid") ?? 0, PI(e, "slot") ?? 0, PI(e, "rank") ?? 0,
+                PD(e, "made_at") ?? 0, PD(e, "predicted_at") ?? 0, PS(e, "sub_name"), PS(e, "fc_id"), PS(e, "character_name"))).ToList();
+            var rankHistory = i.GetProperty("rankHistory").EnumerateArray().Select(e => new SubHistoryPoint(PL(e, "cid") ?? 0, PS(e, "metric") ?? "", PD(e, "recorded_at") ?? 0, PD(e, "value") ?? 0)).ToList();
+            var returns = i.GetProperty("returns").EnumerateArray().Select(e => new VoyageReturn(PS(e, "fc_id") ?? "", PS(e, "sub_name") ?? "", PD(e, "returned_at") ?? 0)).ToList();
+            var accuracy = ForecastMath.Check(saved, rankHistory, returns);
+            var appAcc = c.GetProperty("expectedAccuracy");
+            static string CheckLine(string? sub, string character, int rank, double at, double predicted, double made, double off) =>
+                $"{sub} {character} {rank} {Math.Round(at)} {Math.Round(predicted)} {Math.Round(made)} {Math.Round(off)}";
+            var mineAcc = new[] { $"{accuracy.Count} {N(accuracy.AverageOff is double ao ? Math.Round(ao) : null)}" }
+                .Concat(accuracy.Checks.Select(x => CheckLine(x.SubName, x.Character, x.Rank, x.At, x.PredictedAt, x.MadeAt, x.Off)).OrderBy(x => x, StringComparer.Ordinal)).ToList();
+            var appAccLines = new[] { $"{appAcc.GetProperty("count").GetInt32()} {N(PD(appAcc, "averageOff") is double aao ? Math.Round(aao) : null)}" }
+                .Concat(appAcc.GetProperty("checks").EnumerateArray().Select(e => CheckLine(PS(e, "subName"), PS(e, "characterName") ?? "", PI(e, "rank") ?? 0, PD(e, "at") ?? 0,
+                    PD(e, "predictedAt") ?? 0, PD(e, "madeAt") ?? 0, PD(e, "off") ?? 0)).OrderBy(x => x, StringComparer.Ordinal)).ToList();
+            var badAcc = Enumerable.Range(0, Math.Max(mineAcc.Count, appAccLines.Count)).FirstOrDefault(k => k >= mineAcc.Count || k >= appAccLines.Count || mineAcc[k] != appAccLines[k], -1);
+            Check(badAcc < 0 && accuracy.Count > 0, $"routes: how close the Next Rank dates came, the same as the app's, {c.GetProperty("name").GetString()} ({accuracy.Count} rank-ups, "
+                + $"{(accuracy.AverageOff ?? 0) / 3600000:0.0}h off on average)"
+                + (badAcc < 0 ? "" : $"\n   line {badAcc + 1}:\n   plugin [{(badAcc < mineAcc.Count ? mineAcc[badAcc] : "none")}]\n   app    [{(badAcc < appAccLines.Count ? appAccLines[badAcc] : "none")}]"));
             Check(first < 0, $"routes: the same as the app's Subs tab, {c.GetProperty("name").GetString()} ({app.Count} subs:{plan.Count(s => s.TargetRoute.Length > 0)} with a Target Route, "
                 + $"{plan.Count(s => s.CurrentGilDay != null)} a Current Gil/Day, {plan.Count(s => s.RankUp.NextRankAt != null)} a Next Rank date, {plan.Count(s => s.RankUp.NextBuild != null)} a Next Build)"
                 + (first < 0 ? "" : $"\n   sub {first + 1}:\n   plugin [{(first < mine.Count ? mine[first] : "none")}]\n   app    [{(first < app.Count ? app[first] : "none")}]"));

@@ -67,6 +67,90 @@ namespace XIVFleetCompanion
         public double? Gain => TargetGilDay is double t && CurrentGilDay is double c ? t - c : null;
     }
 
+    /// <summary>A Next Rank date the app saved (fleet_rankup_forecast_view; times in milliseconds), with the character's
+    /// name and Free Company.</summary>
+    public sealed record SavedForecast(long Cid, int Slot, int Rank, double MadeAt, double PredictedAt, string? SubName, string? FcId, string? Character);
+
+    /// <summary>When a voyage came back (fleet_voyage_returns_view), by FC and sub name.</summary>
+    public sealed record VoyageReturn(string FcId, string SubName, double At);
+
+    /// <summary>One rank-up against the date saved for it (Off &gt; 0: later than said).</summary>
+    public sealed record ForecastCheck(string? SubName, string Character, int Rank, double At, double PredictedAt, double MadeAt, double Off);
+
+    /// <summary>The Subs page's forecast line: how far off the dates worked out a day or more before were on average
+    /// (milliseconds, early or late), over the last 20 such rank-ups, and the last 20 rank-ups of all, newest first.</summary>
+    public sealed record ForecastAccuracy(int Count, double? AverageOff, List<ForecastCheck> Checks);
+
+    /// <summary>How close the Next Rank dates came, as the app's (subs/forecast-accuracy.js, ipc/subs.js loadForecastAccuracy).</summary>
+    public static class ForecastMath
+    {
+        private const double Day = 24 * 3600 * 1000;
+        private const double Ahead = Day;
+        private const int KeepDays = 30;
+        private const int Recent = 20;
+
+        /// <summary>When each rank was reached: from the voyage collected just before it was recorded, else when it was recorded.</summary>
+        public static List<(int Rank, double At)> RankUps(IEnumerable<(double At, double Value)> points, IReadOnlyList<double> returns)
+        {
+            var sorted = points.OrderBy(p => p.At).ToList();
+            var output = new List<(int, double)>();
+            for (var i = 1; i < sorted.Count; i++)
+            {
+                var before = sorted[i - 1].Value;
+                var after = sorted[i].Value;
+                if (after < before) { output = new List<(int, double)>(); continue; }
+                if (after == before) continue;
+                var back = returns.Where(t => t > sorted[i - 1].At && t <= sorted[i].At).ToList();
+                var at = back.Count > 0 ? back.Max() : sorted[i].At;
+                for (var rank = (int)before + 1; rank <= after; rank++) output.Add((rank, at));
+            }
+            return output;
+        }
+
+        public static List<(int Rank, double At, double PredictedAt, double MadeAt, double Off)> CheckSub(List<(int Rank, double MadeAt, double PredictedAt)> predictions,
+            List<(int Rank, double At)> ups)
+        {
+            var output = new List<(int, double, double, double, double)>();
+            foreach (var up in ups)
+            {
+                var before = predictions.Where(p => p.Rank == up.Rank && p.MadeAt < up.At && p.MadeAt >= up.At - KeepDays * Day).ToList();
+                if (before.Count == 0) continue;
+                var dayAhead = before.Where(p => up.At - p.MadeAt >= Ahead).ToList();
+                var pick = dayAhead.Count > 0 ? dayAhead.Aggregate((a, b) => b.MadeAt > a.MadeAt ? b : a) : before.Aggregate((a, b) => b.MadeAt < a.MadeAt ? b : a);
+                output.Add((up.Rank, up.At, pick.PredictedAt, pick.MadeAt, up.At - pick.PredictedAt));
+            }
+            return output;
+        }
+
+        public static ForecastAccuracy Summarize(List<ForecastCheck> checks)
+        {
+            var newest = checks.OrderByDescending(c => c.At).ToList();
+            var counted = newest.Where(c => c.At - c.MadeAt >= Ahead).Take(Recent).ToList();
+            return new ForecastAccuracy(counted.Count, counted.Count > 0 ? counted.Average(c => Math.Abs(c.Off)) : null, newest.Take(Recent).ToList());
+        }
+
+        /// <summary>Every sub slot's saved dates against its rank-ups (the slot's recorded rank, sub_rank:N in history).</summary>
+        public static ForecastAccuracy Check(List<SavedForecast> saved, List<SubHistoryPoint> history, List<VoyageReturn> returns)
+        {
+            var points = history.GroupBy(h => (h.Cid, h.Metric)).ToDictionary(g => g.Key, g => g.Select(p => (p.At, p.Value)).ToList());
+            var backAt = returns.GroupBy(r => $"{r.FcId}|{r.SubName}").ToDictionary(g => g.Key, g => g.Select(r => r.At).ToList());
+            var checks = new List<ForecastCheck>();
+            foreach (var sub in saved.GroupBy(f => (f.Cid, f.Slot)))
+            {
+                // Its name as last saved (a sub can be renamed).
+                string? name = null;
+                double latest = 0;
+                foreach (var f in sub) if (f.MadeAt >= latest) { latest = f.MadeAt; name = f.SubName; }
+                var first = sub.First();
+                var ups = RankUps(points.GetValueOrDefault((sub.Key.Cid, $"sub_rank:{sub.Key.Slot}")) ?? new List<(double, double)>(),
+                    first.FcId != null ? backAt.GetValueOrDefault($"{first.FcId}|{name}") ?? new List<double>() : new List<double>());
+                foreach (var c in CheckSub(sub.Select(f => (f.Rank, f.MadeAt, f.PredictedAt)).ToList(), ups))
+                    checks.Add(new ForecastCheck(name, first.Character ?? "", c.Rank, c.At, c.PredictedAt, c.MadeAt, c.Off));
+            }
+            return Summarize(checks);
+        }
+    }
+
     public static class SubRoutes
     {
         private const double Hour = 3600 * 1000;

@@ -158,6 +158,11 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
     needed now, with when each is due.
   The app's tests write made-up fleets and the app's answers, and the plugin's tests check every sub's route, gil a day,
   dates, next build and Look ahead come out the same.
+- **Loot per Voyage** on the Income page, as the app's: what each voyage really brought back over the Income window, from
+  Submarine Tracker, per sub (with its route, voyages, gil a voyage and a day, and Fight Club's expected) and per route;
+  with live prices, at the market on the sub's world, data center and region too (worked out in the background).
+- **Next Rank forecasts** on the Subs page: how close the dates the app saved came to the real rank-ups, each recent one
+  on hover. Both are checked against the app's answers for the same made-up fleets.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
