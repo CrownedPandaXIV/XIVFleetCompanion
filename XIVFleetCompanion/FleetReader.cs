@@ -877,6 +877,168 @@ namespace XIVFleetCompanion
             return new ShoppingRead(held, progress, exclude, live, worlds.Select(kv => (kv.Key, kv.Value)).ToList());
         }
 
+        // --- The Trends page's reads (2.x Trends stage): what's recorded and whose, every 5 minutes while charts are shown;
+        // and each chart, in the background, one at a time, kept for 5 minutes (the page asks again each minute, as its span
+        // moves on). While a chart is read again, whoever asked keeps showing the last one it had. ---
+
+        public static readonly TimeSpan TrendsEvery = TimeSpan.FromMinutes(5);
+        public FleetRead<TrendsMeta> Trends { get; private set; } = new(null, null, null);
+        private readonly object trendLock = new();
+        private readonly Dictionary<string, (DateTime At, TrendResult? Result, string? Error)> trendCache = new();
+        private readonly List<(string Key, TrendRequest Request)> trendQueue = new();
+        private readonly Dictionary<string, string> trendWanted = new();
+        private readonly Dictionary<string, (TrendResult? Result, string? Error)> trendShown = new();
+        private bool trendWorking;
+
+        public void ReadTrendsIfDue(bool force = false)
+        {
+            if (!force && Trends.At.HasValue && DateTime.Now - Trends.At.Value < TrendsEvery) return;
+            RunInventoryRead(async conn => Trends = await Read(conn, ReadTrendsMeta, Trends), text => Trends = Trends with { Error = text });
+        }
+
+        /// <summary>Forgets the charts read, so each is read again (Refresh).</summary>
+        public void ForgetTrends()
+        {
+            lock (trendLock) trendCache.Clear();
+            ReadTrendsIfDue(force: true);
+        }
+
+        /// <summary>A chart for whoever asks (slot: "trends", "tile:gil" and so on): the one read for this request, else (while
+        /// it's read) the last one that slot had; Loading while it's being read.</summary>
+        public (TrendResult? Result, string? Error, bool Loading) Trend(string slot, TrendRequest request)
+        {
+            var key = request.Key;
+            lock (trendLock)
+            {
+                trendWanted[slot] = key;
+                if (trendCache.TryGetValue(key, out var hit))
+                {
+                    trendShown[slot] = (hit.Result, hit.Error);
+                    if (DateTime.UtcNow - hit.At < TrendsEvery) return (hit.Result, hit.Error, false);
+                }
+                if (!trendQueue.Any(q => q.Key == key)) trendQueue.Add((key, request));
+                if (!trendWorking) StartTrendWorker();
+                var shown = trendShown.TryGetValue(slot, out var last) ? last : (null, null);
+                return (shown.Result, shown.Error, true);
+            }
+        }
+
+        // Reads the charts asked for, one after another on one connection. Called holding trendLock.
+        private void StartTrendWorker()
+        {
+            var cs = connectionString();
+            if (cs == null)
+            {
+                foreach (var (key, _) in trendQueue) Finished(key, null, "The database isn't set up yet (Settings tab).");
+                trendQueue.Clear();
+                return;
+            }
+            trendWorking = true;
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await using var conn = await OpenAsync(cs);
+                    while (true)
+                    {
+                        (string Key, TrendRequest Request) job;
+                        lock (trendLock)
+                        {
+                            if (trendQueue.Count == 0) break;
+                            job = trendQueue[0];
+                            trendQueue.RemoveAt(0);
+                        }
+                        TrendResult? result = null;
+                        string? error = null;
+                        try
+                        {
+                            result = await ReadSeries(conn, job.Request);
+                        }
+                        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+                        {
+                            error = "The database has no recorded history yet.";
+                        }
+                        catch (PostgresException ex)
+                        {
+                            error = ex.MessageText;
+                        }
+                        lock (trendLock) Finished(job.Key, result, error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lock (trendLock)
+                    {
+                        foreach (var (key, _) in trendQueue) Finished(key, null, ReachFailure(ex));
+                        trendQueue.Clear();
+                    }
+                }
+                finally
+                {
+                    lock (trendLock) trendWorking = false;
+                }
+            });
+        }
+
+        // A chart has been read: kept (the oldest dropped past 100), and shown to whoever asked for it. Called holding trendLock.
+        private void Finished(string key, TrendResult? result, string? error)
+        {
+            trendCache[key] = (DateTime.UtcNow, result, error);
+            if (trendCache.Count > 100) trendCache.Remove(trendCache.OrderBy(kv => kv.Value.At).First().Key);
+            foreach (var (slot, wanted) in trendWanted)
+                if (wanted == key) trendShown[slot] = (result, error);
+        }
+
+        /// <summary>One chart (db/metric-series.js runSeries, in one go).</summary>
+        public static async Task<TrendResult> ReadSeries(NpgsqlConnection conn, TrendRequest r)
+        {
+            await using var cmd = new NpgsqlCommand(TrendsMath.SeriesSql, conn);
+            var at = (double ms) => DateTime.SpecifyKind(DateTime.UnixEpoch.AddTicks((long)Math.Round(ms * TimeSpan.TicksPerMillisecond)), DateTimeKind.Utc);
+            cmd.Parameters.Add(new NpgsqlParameter { Value = at(r.From) });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = at(r.To) });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = r.Points - 1 });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = r.Parts.Select(p => p.Metric).ToArray() });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = r.Parts.Select(p => p.SubjectType).ToArray() });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = r.Parts.Select(p => (decimal)p.Weight).ToArray() });
+            cmd.Parameters.Add(r.SubjectIds == null
+                ? new NpgsqlParameter { Value = DBNull.Value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Numeric }
+                : new NpgsqlParameter { Value = r.SubjectIds.Select(id => decimal.Parse(id, CultureInfo.InvariantCulture)).ToArray() });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = r.Split });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = 0 });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = r.Points - 1 });
+            var rows = new List<(int, string?, double?)>();
+            await using (var reader = await cmd.ExecuteReaderAsync())
+                while (await reader.ReadAsync())
+                    rows.Add((Int(reader, "i"), DecimalOrNull(reader, "subject_id")?.ToString(CultureInfo.InvariantCulture), Double(reader, "value")));
+            return TrendsMath.Shape(rows, r);
+        }
+
+        /// <summary>What's recorded and whose (ipc/trends.js get-metric-catalog and get-metric-subjects).</summary>
+        public static async Task<TrendsMeta> ReadTrendsMeta(NpgsqlConnection conn)
+        {
+            static double? Ms(NpgsqlDataReader r, string col)
+            {
+                var i = r.GetOrdinal(col);
+                return r.IsDBNull(i) ? null : (DateTime.SpecifyKind(r.GetFieldValue<DateTime>(i), DateTimeKind.Utc) - DateTime.UnixEpoch).TotalMilliseconds;
+            }
+            var catalog = new List<TrendCatalogRow>();
+            await using (var cmd = new NpgsqlCommand(TrendsMath.CatalogSql, conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    catalog.Add(new TrendCatalogRow(Text(r, "metric"), Text(r, "subject_type"), Int(r, "subjects"), Ms(r, "first_recorded"), Ms(r, "last_recorded")));
+            var characters = new List<TrendCharacter>();
+            await using (var cmd = new NpgsqlCommand(TrendsMath.CharactersSql, conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    characters.Add(new TrendCharacter(Decimal(r, "cid").ToString(CultureInfo.InvariantCulture), Text(r, "name"), TextOrNull(r, "world"), TextOrNull(r, "account_label"), IntOrNull(r, "sort_index")));
+            var fcs = new List<TrendFc>();
+            await using (var cmd = new NpgsqlCommand(TrendsMath.FcsSql, conn))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    fcs.Add(new TrendFc(Decimal(r, "fc_id").ToString(CultureInfo.InvariantCulture), TextOrNull(r, "fc_name"), TextOrNull(r, "fc_master")));
+            return new TrendsMeta(catalog, characters, fcs);
+        }
+
         public void ReadHeldItemsIfDue(bool force = false)
         {
             if (!force && HeldItems.At.HasValue && DateTime.Now - HeldItems.At.Value < ListsEvery) return;

@@ -86,6 +86,7 @@ public partial class MainWindow
         {
             CharacterCell(c.Character, c.World);
             Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}");
+            TrendButton("character", c.Cid.ToString(System.Globalization.CultureInfo.InvariantCulture), c.Character);
             if (c.BehindMinutes is int behind)
             {
                 ImGui.SameLine();
@@ -154,6 +155,7 @@ public partial class MainWindow
         RosterTable.DrawControls();
         FilterBox(ref rosterFilter, "roster");
         ReadLine(reader.Roster, FleetReader.ListsEvery);
+        TrendCardSection("Gil, whole fleet", "gil");
         var roster = reader.Roster.Data;
         if (roster == null) return;
         RosterTable.Draw(roster.Where(c => Matches(rosterFilter, c.Character, c.World, c.Account, c.FcName)).ToList());
@@ -361,6 +363,7 @@ public partial class MainWindow
                 ImGui.SameLine(0, 6 * ImGuiHelpers.GlobalScale);
                 Colored(Dim, world);
             }
+            TrendButton("fc", f.FcId.ToString(System.Globalization.CultureInfo.InvariantCulture), f.Name.Length > 0 ? f.Name : "Free Company");
         }, f => f.Name, Locked: true),
         new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
         new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
@@ -394,6 +397,7 @@ public partial class MainWindow
         FcsTable.DrawControls();
         FilterBox(ref fcsFilter, "fcs");
         ReadLine(reader.Fcs, FleetReader.ListsEvery);
+        TrendCardSection("FC points, all Free Companies (total)", "fc_points");
         var fcs = reader.Fcs.Data;
         if (fcs == null) return;
         if (fcs.Count == 0)

@@ -180,6 +180,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   now follow it the same way syncing does, so a PC with syncing off switches by itself (it only needs the old database
   PC to be on the first time it reads afterwards). While the move is copying, the pages say so and keep what they
   read before.
+- **Trends**, as the app's Trends tab: any recorded value (gil, ceruleum, repair kits, retainers, subs, sub slots, FC
+  points, salvage value and items) for the whole fleet, or up to 8 characters or Free Companies side by side, over 24
+  hours to all time. Hover for the values at any time, drag across to zoom in, or show it as a table. Under the chart,
+  each line's value now, its change over the span (and its share), a day on average, and its lowest and highest. Also
+  the Summary's trend tiles for the last 30 days, a chart at the top of the Roster, Salvage and Free Companies pages
+  (folded away until opened, remembered), and each character's or Free Company's own trends from the chart button
+  beside its name. Read in the background with the same chart query as the app, and checked against the app's answers
+  for a made-up history.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

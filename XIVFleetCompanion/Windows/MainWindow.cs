@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -122,6 +122,7 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Salvage: DrawSalvage(); break;
             case Tab.Income: DrawIncome(); break;
             case Tab.Market: DrawMarket(); break;
+            case Tab.Trends: DrawTrends(); break;
             case Tab.Pcs: DrawPcs(); break;
             case Tab.Check: plugin.CheckPage.DrawPage(); break;
             case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
@@ -213,6 +214,7 @@ public partial class MainWindow : Window, IDisposable
                     var undercutNow = reader.Market.Data is { Live: { Error: null } } marketNow ? marketCache.Undercut(marketNow) : 0;
                     Entry(Tab.Market, FontAwesomeIcon.Store, "Gil & Market", folded, undercutNow > 0 ? $"{undercutNow} undercut" : null, p.Warn,
                         undercutNow > 0 ? $"{undercutNow} listing{(undercutNow == 1 ? " is" : "s are")} undercut on its world" : "Gil per account, and listings unsold for a while");
+                    Entry(Tab.Trends, FontAwesomeIcon.ChartLine, "Trends", folded, null, p.Dim, "Gil, supplies, FC points and salvage over time");
                     break;
                 case "Tools":
                     Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);
@@ -611,6 +613,9 @@ public partial class MainWindow : Window, IDisposable
         if (salvage != null) GilLine("Fleet-Wide Salvage Total:", salvage.Sum(x => x.Gil));
         else if (reader.Salvage.Error == null) ImGui.TextUnformatted("Reading...");
         ReadLine(reader.Salvage, FleetReader.SuppliesEvery);
+
+        // As the app's Summary: a small trend line for each fleet-wide value (Trends page).
+        DrawTrendTiles();
     }
 
     private FleetTable<SubRow>? subsTable;

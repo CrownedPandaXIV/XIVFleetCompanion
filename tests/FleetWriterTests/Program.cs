@@ -273,6 +273,132 @@ internal static class Program
         await Exec(conn, "DROP TABLE fleet_shopping_held_view, fleet_shopping_progress_view, fleet_market_settings_view, fleet_retainers_view, fleet_parts_characters_view");
     }
 
+    // The Trends page: a made-up recorded history (in a schema of its own, with the app's tables) read with the plugin's
+    // chart query, against the app's own answers for the same requests (tests/db/trends-fixture.js).
+    private static async Task TrendsAgainstTheApp(NpgsqlConnection conn)
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "trends-fixture.json");
+        using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var root = doc.RootElement;
+        await Exec(conn, @"DROP SCHEMA IF EXISTS trends_check CASCADE; CREATE SCHEMA trends_check;
+            CREATE TABLE trends_check.companion_metric_history (recorded_at timestamptz NOT NULL, subject_type text NOT NULL, subject_id numeric NOT NULL,
+                metric text NOT NULL, value numeric NOT NULL, label text);
+            CREATE INDEX ON trends_check.companion_metric_history (subject_type, subject_id, metric, recorded_at DESC);
+            CREATE TABLE trends_check.companion_metric_latest (subject_type text NOT NULL, subject_id numeric NOT NULL, metric text NOT NULL, value numeric NOT NULL,
+                recorded_at timestamptz NOT NULL, label text, PRIMARY KEY (subject_type, subject_id, metric));
+            CREATE TABLE trends_check.companion_character_current (cid numeric PRIMARY KEY, name text, world text, account_label text, gil bigint, ceruleum int,
+                repair_kits int, retainer_count int, submarine_count int, num_sub_slots int, fc_id numeric, first_seen_at timestamptz, last_synced_at timestamptz);
+            CREATE TABLE trends_check.character_sort_order (cid numeric PRIMARY KEY, sort_index int);
+            CREATE TABLE trends_check.companion_character_housing (cid numeric PRIMARY KEY, fc_id numeric, fc_name text, fc_master text, updated_at timestamptz);");
+        var times = new HashSet<string> { "recorded_at", "first_seen_at", "last_synced_at", "updated_at" };
+        foreach (var table in root.GetProperty("tables").EnumerateObject())
+            foreach (var row in table.Value.EnumerateArray())
+            {
+                var cols = row.EnumerateObject().ToList();
+                await using var cmd = new NpgsqlCommand($"INSERT INTO trends_check.{table.Name} ({string.Join(", ", cols.Select(c => c.Name))}) VALUES ("
+                    + string.Join(", ", cols.Select((c, i) => times.Contains(c.Name) ? $"to_timestamp(CAST(@p{i} AS float8) / 1000)" : $"@p{i}")) + ")", conn);
+                for (var i = 0; i < cols.Count; i++)
+                {
+                    var v = cols[i].Value;
+                    object value = v.ValueKind switch
+                    {
+                        JsonValueKind.Null => DBNull.Value,
+                        JsonValueKind.String when cols[i].Name is "cid" or "fc_id" or "subject_id" => decimal.Parse(v.GetString()!, System.Globalization.CultureInfo.InvariantCulture),
+                        JsonValueKind.String => v.GetString()!,
+                        _ when times.Contains(cols[i].Name) => v.GetDouble(),
+                        _ when cols[i].Name is "value" => v.GetDecimal(),
+                        _ => v.GetInt64(),
+                    };
+                    cmd.Parameters.AddWithValue($"p{i}", value);
+                }
+                await cmd.ExecuteNonQueryAsync();
+            }
+        var builder = new NpgsqlConnectionStringBuilder(conn.ConnectionString) { SearchPath = "trends_check" };
+        if (Environment.GetEnvironmentVariable("FLEET_TEST_DB") is { } given) builder = new NpgsqlConnectionStringBuilder(given) { SearchPath = "trends_check" };
+        await using var trends = new NpgsqlConnection(builder.ConnectionString);
+        await trends.OpenAsync();
+
+        // What's recorded, and the characters and Free Companies to pick from.
+        var meta = await FleetReader.ReadTrendsMeta(trends);
+        var appCatalog = root.GetProperty("catalog").GetProperty("rows").EnumerateArray()
+            .Select(r => $"{r.GetProperty("metric").GetString()} {r.GetProperty("subjectType").GetString()} {r.GetProperty("subjects").GetInt32()} {r.GetProperty("firstRecorded").GetDouble()} {r.GetProperty("lastRecorded").GetDouble()}").ToList();
+        var myCatalog = meta.Catalog.Select(r => $"{r.Metric} {r.SubjectType} {r.Subjects} {r.FirstRecorded} {r.LastRecorded}").ToList();
+        Check(myCatalog.SequenceEqual(appCatalog), $"trends: what's recorded, as the app's catalog ({appCatalog.Count} values)"
+            + (myCatalog.SequenceEqual(appCatalog) ? "" : $"\n   plugin {string.Join("; ", myCatalog.Take(3))}\n   app    {string.Join("; ", appCatalog.Take(3))}"));
+        static string? S(JsonElement e, string k) => e.GetProperty(k).ValueKind == JsonValueKind.Null ? null : e.GetProperty(k).ValueKind == JsonValueKind.String ? e.GetProperty(k).GetString() : e.GetProperty(k).GetRawText();
+        var subjects = root.GetProperty("subjects");
+        var appChars = subjects.GetProperty("characters").EnumerateArray().Select(c => $"{S(c, "id")} {S(c, "name")} {S(c, "world")} {S(c, "accountLabel")} {S(c, "sortIndex")}").ToList();
+        var myChars = meta.Characters.Select(c => $"{c.Id} {c.Name} {c.World} {c.Account} {c.SortIndex}").ToList();
+        var appFcs = subjects.GetProperty("fcs").EnumerateArray().Select(f => $"{S(f, "id")} {S(f, "name")} {S(f, "leader")}").ToList();
+        var myFcs = meta.Fcs.Select(f => $"{f.Id} {f.Name} {f.Leader}").ToList();
+        Check(myChars.SequenceEqual(appChars) && myFcs.SequenceEqual(appFcs), $"trends: the characters (in Roster order) and Free Companies to pick from, as the app's ({myChars.Count} and {myFcs.Count})"
+            + (myChars.SequenceEqual(appChars) && myFcs.SequenceEqual(appFcs) ? "" : $"\n   plugin {string.Join("; ", myChars)} | {string.Join("; ", myFcs)}\n   app    {string.Join("; ", appChars)} | {string.Join("; ", appFcs)}"));
+
+        // Every chart the fixture asked the app for, asked the same way here.
+        foreach (var asked in root.GetProperty("series").EnumerateArray())
+        {
+            var name = asked.GetProperty("name").GetString();
+            var q = asked.GetProperty("request");
+            var parts = q.GetProperty("parts").EnumerateArray().Select(p => new TrendPart(p.GetProperty("metric").GetString()!, p.GetProperty("subjectType").GetString()!,
+                p.TryGetProperty("weight", out var w) ? w.GetDouble() : 1)).ToList();
+            var ids = q.TryGetProperty("subjectIds", out var given2) ? given2.EnumerateArray().Select(x => x.GetString()!).ToList() : null;
+            var (request, error) = TrendsMath.Check(DateTimeOffset.Parse(q.GetProperty("from").GetString()!, System.Globalization.CultureInfo.InvariantCulture).ToUnixTimeMilliseconds(),
+                DateTimeOffset.Parse(q.GetProperty("to").GetString()!, System.Globalization.CultureInfo.InvariantCulture).ToUnixTimeMilliseconds(), q.GetProperty("points").GetInt32(), parts, ids);
+            var answer = asked.GetProperty("answer");
+            if (!answer.GetProperty("success").GetBoolean())
+            {
+                Check(request == null && error == answer.GetProperty("error").GetString(), $"trends: refused as the app refuses it, {name}: {error}");
+                continue;
+            }
+            var result = await FleetReader.ReadSeries(trends, request!);
+            var app = answer.GetProperty("timestamps").EnumerateArray().Select(t => t.GetDouble()).ToList();
+            var bad = !result.Timestamps.SequenceEqual(app) ? $"times: plugin {result.Timestamps.FirstOrDefault()}..{result.Timestamps.LastOrDefault()}, app {app.FirstOrDefault()}..{app.LastOrDefault()}" : null;
+            var appSeries = answer.GetProperty("series").EnumerateArray().ToList();
+            if (bad == null && appSeries.Count != result.Series.Count) bad = $"{result.Series.Count} lines, app {appSeries.Count}";
+            for (var k = 0; bad == null && k < appSeries.Count; k++)
+            {
+                var a = appSeries[k];
+                var mine = result.Series[k];
+                if (S(a, "subjectId") != mine.SubjectId) { bad = $"line {k}: plugin {mine.SubjectId}, app {S(a, "subjectId")}"; break; }
+                var values = a.GetProperty("values").EnumerateArray().Select(v => v.ValueKind == JsonValueKind.Null ? (double?)null : v.GetDouble()).ToList();
+                var at = Enumerable.Range(0, values.Count).FirstOrDefault(i => values[i] != mine.Values[i], -1);
+                if (values.Count != mine.Values.Count || at >= 0) bad = $"line {k} point {at}: plugin {mine.Values.ElementAtOrDefault(at)}, app {values.ElementAtOrDefault(at)}";
+            }
+            Check(bad == null, $"trends: the chart the same as the app's, {name} ({result.Series.Sum(s => s.Values.Count(v => v != null))} values)" + (bad == null ? "" : $"\n   {bad}"));
+        }
+        await Exec(conn, "DROP SCHEMA trends_check CASCADE");
+    }
+
+    // The Trends page's own working out: the numbers under a chart, the axis and the short numbers.
+    private static void TrendsMathChecks()
+    {
+        var day = TrendsMath.Day;
+        var stats = TrendsMath.Stats(new double?[] { null, 100, 150, null, 90, 130 }, new double[] { 0, day, 2 * day, 3 * day, 4 * day, 5 * day });
+        Check(stats == new TrendStats(130, 100, 30, 30, 7.5, 90, 150),
+            "trends: under a chart, now, at the start (its first recorded point), the change and its share, a day on average (30 over 4 days), lowest and highest: " + stats);
+        var flat = TrendsMath.Stats(new double?[] { 0, 0, 5 }, new double[] { 0, day / 2, day });
+        Check(flat.Percent == null && flat.PerDay == 5 && flat.Change == 5, "trends: from nothing, no share of the start is given (it would be infinite)");
+        var none = TrendsMath.Stats(new double?[] { null, null }, new double[] { 0, day });
+        var one = TrendsMath.Stats(new double?[] { null, 7 }, new double[] { 0, day });
+        Check(none.Current == null && one.PerDay == null && one.Change == 0, "trends: nothing recorded gives nothing; one point gives no rate a day");
+        Check(TrendsMath.Compact(1_250_000) == "1.25M" && TrendsMath.Compact(-980_400) == "-980.4K" && TrendsMath.Compact(12.345) == "12.35" && TrendsMath.Compact(3e9) == "3B"
+              && TrendsMath.Full(1234567.5) == "1,234,568" && TrendsMath.Full(null) == "—",
+            "trends: short numbers for the axis and whole numbers with separators, as the app's");
+        var ticks = TrendsMath.NiceTicks(-3, 104);
+        Check(ticks.SequenceEqual(new double[] { 0, 25, 50, 75, 100 }) && TrendsMath.NiceTicks(5, 5).Count == 1,
+            "trends: the axis has round values (0, 25, 50, 75, 100 for -3 to 104): " + string.Join(",", ticks));
+        Check(TrendsMath.Range(new double?[] { 100, null, 200 }) == (92, 208) && TrendsMath.Range(new double?[] { 5, 5 }) == (4, 6) && TrendsMath.Range(new double?[] { null }) == (0, 1),
+            "trends: the chart's range has room above and below (8%), as the app's");
+        var (rounded, _) = TrendsMath.Check(90_061_234, 90_061_234 + 3600_000, 50, new() { new TrendPart("gil", "character") }, null);
+        var (exact, _) = TrendsMath.Check(90_061_234, 90_061_234 + 600_000, 50, new() { new TrendPart("gil", "character") }, null);
+        Check(rounded!.From == 90_060_000 && rounded.To == 93_720_000 && exact!.From == 90_061_234,
+            "trends: spans of half an hour or more go to whole minutes (the end rounded up); a 10-minute zoom stays exact");
+        Check(TrendsMath.Check(0, 1, 50, new() { new TrendPart("gil; drop", "character") }, null).Error == "Invalid metric name."
+              && TrendsMath.Check(0, 1, 50, new() { new TrendPart("gil", "retainer") }, null).Error == "Invalid subject type."
+              && TrendsMath.Check(0, 1, 50, new() { new TrendPart("gil", "character") }, new() { "12a" }).Error == "Invalid subject id.",
+            "trends: a request the app would refuse is refused the same way");
+    }
+
     private static async Task RoutesReadFromTheDatabase(NpgsqlConnection conn)
     {
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
@@ -1118,6 +1244,8 @@ internal static class Program
         MarketWorkedOutOncePerRead();
         await MarketReadFromTheDatabase(conn);
         await ShoppingReadFromTheDatabase(conn);
+        await TrendsAgainstTheApp(conn);
+        TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);

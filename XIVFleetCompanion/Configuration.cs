@@ -31,6 +31,10 @@ public class Configuration : IPluginConfiguration
     // The Parts page's Shopping List: buy from vendors what they sell (instead of crafting or gathering it), show items
     // already held in full, and where market board prices are from ("dc:Dynamis"; none saved: the data center with the
     // most characters).
+    // The Trends page: the value and span last chosen, and which page charts (Roster, Salvage, Free Companies) are open.
+    public string? TrendsMetric { get; set; } = null;
+    public string? TrendsRange { get; set; } = null;
+    public Dictionary<string, bool> TrendCardsOpen { get; set; } = new();
     // The Parts page's Look ahead (0, 3, 7 or 14 days), kept as the app keeps its own.
     public int PartsAheadDays { get; set; } = 0;
     public bool ShoppingBuyFromVendors { get; set; } = false;

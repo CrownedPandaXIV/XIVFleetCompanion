@@ -50,7 +50,11 @@ public partial class MainWindow
 
     private FleetTable<SalvageRow> SalvageTable => salvageTable ??= new FleetTable<SalvageRow>("salvage", plugin.Configuration, new List<FleetColumn<SalvageRow>>
     {
-        new("character", "Character", s => CharacterCell(s.Character, s.World), s => s.Character, Locked: true),
+        new("character", "Character", s =>
+        {
+            CharacterCell(s.Character, s.World);
+            TrendButton("character", s.Cid.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Character);
+        }, s => s.Character, Locked: true),
         new("account", "Account", s => ImGui.TextUnformatted(s.Account.Length > 0 ? s.Account : "—"), s => s.Account, Hidden: true),
         new("standard", "Standard Salvage", s => { RightNumber(s.Standard); SalvageBreakdown(s, true); }, s => s.Standard),
         new("extravagant", "Extravagant Salvage", s => { RightNumber(s.Extravagant); SalvageBreakdown(s, false); }, s => s.Extravagant),
@@ -65,6 +69,7 @@ public partial class MainWindow
         SalvageTable.DrawControls();
         FilterBox(ref salvageFilter, "salvage");
         ReadLine(reader.Salvage, FleetReader.MoneyEvery);
+        TrendCardSection("Salvage value, whole fleet (gil)", "salvage_value");
         var salvage = reader.Salvage.Data;
         if (salvage == null) return;
         var rows = salvage.Where(s => Matches(salvageFilter, s.Character, s.World, s.Account)).ToList();
