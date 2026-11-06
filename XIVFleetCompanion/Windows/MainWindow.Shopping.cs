@@ -75,6 +75,13 @@ public partial class MainWindow
         });
     }
 
+    // A note in the softer colour, wrapped to the window.
+    private void Note(string text)
+    {
+        using (ImRaii.PushColor(ImGuiCol.Text, Dim))
+            ImGui.TextWrapped(text);
+    }
+
     // ---- Cells ----
 
     private static string HeldText(List<HeldPlace> places) =>
@@ -257,12 +264,12 @@ public partial class MainWindow
             Tinted(Palette.Gil, total);
         }
         ImGui.Separator();
-        if (note != null) Colored(Dim, note);
+        if (note != null) Note(note);
         if (visible.Count == 0) ImGui.TextUnformatted(rows.Count > 0 ? "Everything here is already held." : "Nothing.");
         else
         {
             table.DrawControls();
-            table.Draw(visible);
+            table.Draw(visible, fitRows: true);
         }
         if (rows.Count > visible.Count) Colored(Dim, $"{rows.Count - visible.Count} more already held in full.");
     }
@@ -272,8 +279,10 @@ public partial class MainWindow
     {
         var config = plugin.Configuration;
         ImGui.SameLine(0, ImGui.CalcTextSize("    ").X);
+        ImGui.TextUnformatted("Prices from");
+        ImGui.SameLine();
         ImGui.SetNextItemWidth(200 * Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("Prices from##shoppingScope", market.Label ?? "—"))
+        using (var combo = ImRaii.Combo("##shoppingScope", market.Label ?? "—"))
         {
             if (combo)
                 foreach (var (kind, label) in new[] { ("world", "World"), ("dc", "Data center"), ("region", "Region") })
@@ -309,14 +318,14 @@ public partial class MainWindow
             if (few > 0) bits.Add($"{few} with too few listed");
             return bits.Count > 0 ? $" ({string.Join(", ", bits)})" : "";
         }
-        Colored(Dim, $"Market board prices from {market.Label}: the cheapest listing of each, leaving out your own retainers'. Totals go up the listings from the cheapest, as buying them would.");
+        Note($"Market board prices from {market.Label}: the cheapest listing of each, leaving out your own retainers'. Totals go up the listings from the cheapest, as buying them would.");
         if (list.Totals is { } t)
         {
             GilLine("Buying the parts not made yet:", t.Parts, Missing(t.PartsUnlisted, t.PartsTooFew));
             GilLine("Buying every material still short:", t.Materials, Missing(t.MaterialsUnlisted, t.MaterialsTooFew));
         }
         if (market.Stale is { } stale)
-            Colored(Dim, $"Universalis did not answer ({stale.Problem}), so some prices are from {stale.Since.ToLocalTime():t}.");
+            Note($"Universalis did not answer ({stale.Problem}), so some prices are from {stale.Since.ToLocalTime():t}.");
     }
 
     private bool shoppingCopied;
@@ -387,19 +396,21 @@ public partial class MainWindow
             Colored(Dim, list.Market.Enabled ? "Updating (asking Universalis)..." : "Updating...");
         }
         if (list.Market.Enabled) ShoppingMarketNote(list);
-        Colored(Dim, "Held counts every character's bags, saddlebags and crystals, their retainers, and the Free Company chests, as of each character's last sync.");
+        Note("Held counts every character's bags, saddlebags and crystals, their retainers, and the Free Company chests, as of each character's last sync.");
         var noRecipe = list.Parts.Where(p => p.NoRecipe).ToList();
-        if (noRecipe.Count > 0) Colored(Amber, $"No recipe found for {string.Join(", ", noRecipe.Select(p => p.Name))}.");
+        if (noRecipe.Count > 0)
+            using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                ImGui.TextWrapped($"No recipe found for {string.Join(", ", noRecipe.Select(p => p.Name))}.");
 
         var priced = list.Priced;
         ImGui.Spacing();
         ImGui.TextUnformatted("Sub parts to craft");
         ImGui.Separator();
-        Colored(Dim, "Tick parts off as you craft them in the app (Parts → Shopping List); every PC sees it. Once the plugin sees a crafted part in bags, " +
+        Note("Tick parts off as you craft them in the app (Parts → Shopping List); every PC sees it. Once the plugin sees a crafted part in bags, " +
                      "a retainer or the FC chest, it leaves the list by itself. The materials below are for every part on the list, made or not.");
         var partsTable = ShopPartsTable(priced);
         partsTable.DrawControls();
-        partsTable.Draw(list.Parts);
+        partsTable.Draw(list.Parts, fitRows: true);
         if (list.BuyFromVendors)
             ShopSection("Buy from vendors", "Sold by NPC vendors for gil, so these are not crafted and their materials are not needed.", list.Buy, ShopBuyTable,
                 $"{Number((long)SubRoutes.Round(list.BuyCost))} gil");

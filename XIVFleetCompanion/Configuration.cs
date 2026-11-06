@@ -31,6 +31,8 @@ public class Configuration : IPluginConfiguration
     // The Parts page's Shopping List: buy from vendors what they sell (instead of crafting or gathering it), show items
     // already held in full, and where market board prices are from ("dc:Dynamis"; none saved: the data center with the
     // most characters).
+    // The Parts page's Look ahead (0, 3, 7 or 14 days), kept as the app keeps its own.
+    public int PartsAheadDays { get; set; } = 0;
     public bool ShoppingBuyFromVendors { get; set; } = false;
     public bool ShoppingShowHeld { get; set; } = false;
     public string? ShoppingPriceScope { get; set; } = null;

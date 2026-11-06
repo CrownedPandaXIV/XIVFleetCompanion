@@ -179,8 +179,10 @@ public sealed class FleetTable<T>
     // One line of the table: a row, or an account's heading.
     private readonly record struct Line(T Row, string? Heading);
 
-    /// <summary>Draws the table: rows in its own order, sorted by a clicked column or grouped by account.</summary>
-    public void Draw(IReadOnlyList<T> rows, Action<T>? afterRow = null)
+    /// <summary>Draws the table: rows in its own order, sorted by a clicked column or grouped by account. fitRows: only as
+    /// tall as its rows, for a page with several tables one under another (the page scrolls instead); otherwise it fills
+    /// the space left and scrolls itself.</summary>
+    public void Draw(IReadOnlyList<T> rows, Action<T>? afterRow = null, bool fitRows = false)
     {
         var shown = Shown();
         if (shown.Count == 0) return;
@@ -188,9 +190,10 @@ public sealed class FleetTable<T>
         // widths saved before columns kept their own width were shares of the window, which don't carry over).
         // A little more room in each row, so long tables read easily.
         using var padding = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(ImGui.GetStyle().CellPadding.X + 2, ImGui.GetStyle().CellPadding.Y + 2) );
-        using var table = ImRaii.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}|w", shown.Count, Flags);
+        using var table = ImRaii.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}|w", shown.Count,
+            fitRows ? Flags & ~(ImGuiTableFlags.ScrollX | ImGuiTableFlags.ScrollY) : Flags);
         if (!table) return;
-        ImGui.TableSetupScrollFreeze(1, 1);
+        if (!fitRows) ImGui.TableSetupScrollFreeze(1, 1);
         foreach (var c in shown) ImGui.TableSetupColumn(c.Label, c.SortKey == null ? ImGuiTableColumnFlags.NoSort : ImGuiTableColumnFlags.None);
         if (resetSort)
         {

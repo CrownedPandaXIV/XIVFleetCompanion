@@ -14,8 +14,18 @@ namespace XIVFleetCompanion.Windows;
 public partial class MainWindow
 {
     private string partsFilter = "";
-    private int partsAheadDays;
     private static readonly int[] AheadChoices = { 0, 3, 7, 14 };
+    // Look ahead, remembered (as the app remembers its own).
+    private int partsAheadDays
+    {
+        get => System.Array.IndexOf(AheadChoices, plugin.Configuration.PartsAheadDays) >= 0 ? plugin.Configuration.PartsAheadDays : 0;
+        set
+        {
+            if (plugin.Configuration.PartsAheadDays == value) return;
+            plugin.Configuration.PartsAheadDays = value;
+            plugin.Configuration.Save();
+        }
+    }
     private (PartsRead Parts, RoutesRead? Routes, int Days, List<PartNeed> Needs)? partsAhead;
 
     // What's needed now, plus (with Look ahead) the builds coming up: worked out again only when a read or the days change.

@@ -171,6 +171,8 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   center or region chosen in Prices from (asked of Universalis in the background). The recipes come from the game's own
   files, so it works without the app's game data. Parts ticked off in the app show as made; ticking them off in the game
   comes later in 2.x. Checked against the app's answers for made-up fleets, recipes and listings, every way of asking.
+  Each of its tables is only as tall as its rows and the page scrolls as a whole, so every section shows. The Parts
+  page now remembers Look ahead, as the app does.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
