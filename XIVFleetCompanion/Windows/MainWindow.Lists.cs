@@ -1,4 +1,5 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using System;
 using System.Collections.Generic;
@@ -8,185 +9,217 @@ using System.Numerics;
 
 namespace XIVFleetCompanion.Windows;
 
-// 2.x, the rest of the tabs: the Roster, Retainers and PCs pages, from the database's views (FleetReader). Each reads
-// every minute while it's shown. They only show; changing things (reordering or removing characters, retainers' gear
-// targets, removing a PC) stays in the app for now.
+// 2.x, the rest of the tabs: the Roster, Retainers, PCs, Free Companies and Inventory pages, from the database's views
+// (FleetReader). Each reads every minute while it's shown, in the app's order (the Roster's for characters), and has
+// the app's table controls (FleetTable: sorting, Reset Sort, Columns, Group by account). They only show; changing
+// things (reordering or removing characters, gear targets, removing a PC) stays in the app for now.
 public partial class MainWindow
 {
     private string rosterFilter = "";
     private string retainersFilter = "";
+    private string fcsFilter = "";
+
+    private FleetTable<RosterRow>? rosterTable;
+    private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl)>? retainersTable;
+    private FleetTable<PcRow>? pcsTable;
+    private FleetTable<FcRow>? fcsTable;
 
     private static bool Matches(string filter, params string?[] values) =>
         string.IsNullOrWhiteSpace(filter) || values.Any(v => v != null && v.Contains(filter, StringComparison.OrdinalIgnoreCase));
 
-    private void ListToolbar(ref string filter, string id)
+    private void FilterBox(ref string filter, string id)
     {
-        RefreshButton();
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(180);
-        ImGui.InputText($"Filter##{id}", ref filter, 64);
-        ImGui.SameLine();
-        Colored(Dim, "Click a column to sort by it.");
+        ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText($"Filter##filter{id}", ref filter, 64);
     }
 
     private static string Number(long? value) => value.HasValue ? value.Value.ToString("N0", CultureInfo.CurrentCulture) : "—";
 
-    private void DrawRoster()
+    private static void Hover(string text)
     {
-        reader.ReadIfDue(withLists: true);
-        ListToolbar(ref rosterFilter, "roster");
-        ReadLine(reader.Roster, FleetReader.ListsEvery);
-        var roster = reader.Roster.Data;
-        if (roster == null) return;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(text);
+    }
 
-        var rows = roster.Select((c, order) => (c, order))
-            .Where(x => Matches(rosterFilter, x.c.Character, x.c.World, x.c.Account, x.c.FcName));
-        using var table = ImRaii.Table("##roster", 9, TableFlags);
-        if (!table) return;
-        ImGui.TableSetupScrollFreeze(1, 1);
-        ImGui.TableSetupColumn("Character");
-        ImGui.TableSetupColumn("FC");
-        ImGui.TableSetupColumn("House");
-        ImGui.TableSetupColumn("Gil");
-        ImGui.TableSetupColumn("Ceruleum");
-        ImGui.TableSetupColumn("Repair kits");
-        ImGui.TableSetupColumn("Retainers / subs");
-        ImGui.TableSetupColumn("Last synced");
-        ImGui.TableSetupColumn("Synced by");
-        ImGui.TableHeadersRow();
-        var (column, ascending) = SortedBy();
-        var list = column switch
+    // ---- Roster ----
+
+    private FleetTable<RosterRow> RosterTable => rosterTable ??= new FleetTable<RosterRow>("roster", plugin.Configuration, new List<FleetColumn<RosterRow>>
+    {
+        new("character", "Character", c =>
         {
-            1 => Sorted(rows, ascending, x => x.c.FcName ?? "", x => x.c.FcName == null),
-            2 => Sorted(rows, ascending, x => x.c.House ?? "", x => x.c.House == null),
-            3 => Sorted(rows, ascending, x => x.c.Gil),
-            4 => Sorted(rows, ascending, x => x.c.Ceruleum ?? 0),
-            5 => Sorted(rows, ascending, x => x.c.RepairKits ?? 0),
-            6 => Sorted(rows, ascending, x => x.c.Retainers * 100 + x.c.Submarines),
-            7 => Sorted(rows, ascending, x => x.c.LastSynced ?? DateTime.MinValue),
-            8 => Sorted(rows, ascending, x => FleetReader.SyncedBy(x.c.LoginPc, x.c.LoginLabel)),
-            _ => Sorted(rows, ascending, x => x.order),
-        };
-        var now = DateTime.Now;
-        foreach (var (c, _) in list)
-        {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
             ImGui.TextUnformatted($"{c.Character} ({c.World})");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Account: {(c.Account.Length > 0 ? c.Account : "none")}");
+            Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}");
             if (c.BehindMinutes is int behind)
             {
                 ImGui.SameLine();
                 Colored(Amber, "not synced");
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip($"{behind / 60} h {behind % 60} min behind the rest of its account: unticked in the plugin, or its AutoRetainer no longer has it.");
+                Hover($"{behind / 60} h {behind % 60} min behind the rest of its account: unticked in the plugin, or its AutoRetainer no longer has it.");
             }
-            ImGui.TableNextColumn();
+        }, c => c.Character, Locked: true),
+        new("world", "World", c => ImGui.TextUnformatted(c.World), c => c.World, Hidden: true),
+        new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
+        new("fc", "FC", c =>
+        {
             ImGui.TextUnformatted(c.FcName ?? "—");
-            if (c.FcPoints.HasValue && ImGui.IsItemHovered()) ImGui.SetTooltip($"{c.FcPoints.Value:N0} FC points");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(c.House ?? "—");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(Number(c.Gil));
-            ImGui.TableNextColumn();
+            if (c.FcPoints.HasValue) Hover($"{c.FcPoints.Value:N0} FC points");
+        }, c => c.FcName ?? "", c => c.FcName == null),
+        new("fcPoints", "FC Points", c => ImGui.TextUnformatted(Number(c.FcPoints)), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
+        new("house", "House", c => ImGui.TextUnformatted(c.House ?? "—"), c => c.House ?? "", c => c.House == null),
+        new("gil", "Gil", c => ImGui.TextUnformatted(Number(c.Gil)), c => c.Gil),
+        new("ceruleum", "Ceruleum", c =>
+        {
             if (c.LowCeruleum) Colored(Red, Number(c.Ceruleum)); else ImGui.TextUnformatted(Number(c.Ceruleum));
-            if (c.LowCeruleum && ImGui.IsItemHovered()) ImGui.SetTooltip("Below the low-ceruleum warning (set in the app: Settings → General → Warnings)");
-            ImGui.TableNextColumn();
+            if (c.LowCeruleum) Hover("Below the low-ceruleum warning (set in the app: Settings → General → Warnings)");
+        }, c => c.Ceruleum ?? 0),
+        new("repairKits", "Repair kits", c =>
+        {
             if (c.LowRepairKits) Colored(Red, Number(c.RepairKits)); else ImGui.TextUnformatted(Number(c.RepairKits));
-            if (c.LowRepairKits && ImGui.IsItemHovered()) ImGui.SetTooltip("Below the low-repair-kit warning (set in the app: Settings → General → Warnings)");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted($"{c.Retainers} / {c.Submarines}");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(c.LastSynced.HasValue ? FleetReader.Ago(c.LastSynced.Value, now) : "—");
-            if (c.LastSynced.HasValue && ImGui.IsItemHovered()) ImGui.SetTooltip(c.LastSynced.Value.ToString("g", CultureInfo.CurrentCulture));
-            ImGui.TableNextColumn();
+            if (c.LowRepairKits) Hover("Below the low-repair-kit warning (set in the app: Settings → General → Warnings)");
+        }, c => c.RepairKits ?? 0),
+        new("retainers", "Retainers", c => ImGui.TextUnformatted(c.Retainers.ToString(CultureInfo.InvariantCulture)), c => c.Retainers),
+        new("subs", "Subs", c => ImGui.TextUnformatted(c.Submarines.ToString(CultureInfo.InvariantCulture)), c => c.Submarines),
+        new("lastSynced", "Last synced", c =>
+        {
+            ImGui.TextUnformatted(c.LastSynced.HasValue ? FleetReader.Ago(c.LastSynced.Value, DateTime.Now) : "—");
+            if (c.LastSynced.HasValue) Hover(c.LastSynced.Value.ToString("g", CultureInfo.CurrentCulture));
+        }, c => c.LastSynced ?? DateTime.MinValue),
+        new("syncedBy", "Synced by", c =>
+        {
             ImGui.TextUnformatted(FleetReader.SyncedBy(c.LoginPc, c.LoginLabel));
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(c.LoginPc != null && c.LoggedInAt.HasValue
-                    ? $"Last logged in on this setup {c.LoggedInAt.Value:g}. Only this setup syncs the character; others that have it leave it alone."
-                    : "No login recorded yet: every setup that has the character syncs it.");
-        }
+            Hover(c.LoginPc != null && c.LoggedInAt.HasValue
+                ? $"Last logged in on this setup {c.LoggedInAt.Value:g}. Only this setup syncs the character; others that have it leave it alone."
+                : "No login recorded yet: every setup that has the character syncs it.");
+        }, c => FleetReader.SyncedBy(c.LoginPc, c.LoginLabel)),
+    }, c => c.Account);
+
+    private void DrawRoster()
+    {
+        reader.ReadIfDue(withLists: true);
+        RefreshButton();
+        ImGui.SameLine();
+        RosterTable.DrawControls();
+        FilterBox(ref rosterFilter, "roster");
+        ReadLine(reader.Roster, FleetReader.ListsEvery);
+        var roster = reader.Roster.Data;
+        if (roster == null) return;
+        RosterTable.Draw(roster.Where(c => Matches(rosterFilter, c.Character, c.World, c.Account, c.FcName)).ToList());
     }
+
+    // ---- Retainers ----
+
+    private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl)> RetainersTable => retainersTable ??=
+        new FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl)>("retainers", plugin.Configuration, new List<FleetColumn<(RetainerRow R, string Job, string Venture, double? Ilvl)>>
+    {
+        new("retainer", "Retainer", x => ImGui.TextUnformatted(x.R.Name), x => x.R.Name, Locked: true),
+        new("owner", "Owner", x =>
+        {
+            ImGui.TextUnformatted(x.R.Owner.Length > 0 ? $"{x.R.Owner} ({x.R.World})" : "—");
+            if (x.R.Account.Length > 0) Hover($"Account: {x.R.Account}");
+        }, x => x.R.Owner),
+        new("account", "Account", x => ImGui.TextUnformatted(x.R.Account.Length > 0 ? x.R.Account : "—"), x => x.R.Account, Hidden: true),
+        new("job", "Class/Level", x => ImGui.TextUnformatted(x.Job.Length > 0 ? $"{x.Job}/{(x.R.Level.HasValue ? x.R.Level.Value.ToString(CultureInfo.InvariantCulture) : "?")}" : "—"),
+            x => x.Job, x => x.Job.Length == 0),
+        new("gil", "Gil", x => ImGui.TextUnformatted(Number(x.R.Gil)), x => x.R.Gil ?? 0, x => x.R.Gil == null),
+        new("ilvl", "Avg ilvl", x =>
+        {
+            if (x.Ilvl.HasValue) ImGui.TextUnformatted(x.Ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture)); else Colored(Dim, "—");
+            if (!x.R.ItemsSeen) Hover("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
+        }, x => x.Ilvl ?? 0, x => x.Ilvl == null),
+        new("venture", "Venture", x => ImGui.TextUnformatted(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
+        // Status: done first, then the soonest done; idle last either way.
+        new("status", "Status", x =>
+        {
+            var status = FleetReader.VentureStatus(x.R.HasVenture, x.R.VentureEndsAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            if (status == "Venture Complete") Colored(Green, status);
+            else if (status == "Idle") Colored(x.R.Job > 0 ? Amber : Dim, status);
+            else ImGui.TextUnformatted(status);
+        }, x => x.R.VentureEndsAt, x => !x.R.HasVenture || x.R.VentureEndsAt <= 0),
+        new("target", "Gear target", x =>
+        {
+            if (x.R.TargetMode == null) Colored(Dim, "—");
+            else ImGui.TextUnformatted($"{(x.R.TargetMode == "level" ? "Level" : "ilvl")} {x.R.TargetValue}{(x.R.OnlyCrafted ? ", crafted only" : "")}");
+            Hover("Gear targets and the slot-by-slot check are set and shown in the app's Retainers tab for now.");
+        }, x => $"{x.R.TargetMode} {x.R.TargetValue:D4}", x => x.R.TargetMode == null),
+    }, x => x.R.Account);
 
     private void DrawRetainers()
     {
         reader.ReadIfDue(withLists: true);
-        ListToolbar(ref retainersFilter, "retainers");
+        RefreshButton();
+        ImGui.SameLine();
+        RetainersTable.DrawControls();
+        FilterBox(ref retainersFilter, "retainers");
         ReadLine(reader.Retainers, FleetReader.ListsEvery);
         var read = reader.Retainers.Data;
         if (read == null) return;
-        var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-        var rows = read.Retainers
-            .Select((r, order) => (r, order, job: GameNames.Job(r.Job), venture: GameNames.Venture(r.VentureId),
-                ilvl: read.Gear.TryGetValue(r.RetainerId, out var items) ? FleetReader.AverageItemLevel(items, GameNames.ItemLevel) : null))
-            .Where(x => Matches(retainersFilter, x.r.Owner, x.r.Name, x.r.Account, x.job, x.venture));
-        using var table = ImRaii.Table("##retainers", 8, TableFlags);
-        if (!table) return;
-        ImGui.TableSetupScrollFreeze(1, 1);
-        ImGui.TableSetupColumn("Retainer");
-        ImGui.TableSetupColumn("Owner");
-        ImGui.TableSetupColumn("Class/Level");
-        ImGui.TableSetupColumn("Gil");
-        ImGui.TableSetupColumn("Avg ilvl");
-        ImGui.TableSetupColumn("Venture");
-        ImGui.TableSetupColumn("Status");
-        ImGui.TableSetupColumn("Gear target");
-        ImGui.TableHeadersRow();
-        var (column, ascending) = SortedBy();
-        // Status: done first, then the soonest done; idle last either way.
-        long StatusKey(RetainerRow r) => r.HasVenture && r.VentureEndsAt > 0 ? r.VentureEndsAt : long.MaxValue;
-        var list = column switch
+        var unseen = read.Retainers.Count(r => !r.ItemsSeen);
+        if (unseen > 0)
         {
-            0 => Sorted(rows, ascending, x => x.r.Name),
-            1 => Sorted(rows, ascending, x => x.r.Owner),
-            2 => Sorted(rows, ascending, x => x.job, x => x.job.Length == 0),
-            3 => Sorted(rows, ascending, x => x.r.Gil ?? 0, x => x.r.Gil == null),
-            4 => Sorted(rows, ascending, x => x.ilvl ?? 0, x => x.ilvl == null),
-            5 => Sorted(rows, ascending, x => x.venture, x => x.venture.Length == 0),
-            6 => Sorted(rows, ascending, x => StatusKey(x.r), x => StatusKey(x.r) == long.MaxValue),
-            7 => Sorted(rows, ascending, x => $"{x.r.TargetMode} {x.r.TargetValue:D4}", x => x.r.TargetMode == null),
-            _ => Sorted(rows, ascending, x => x.order),
-        };
-        // Until a column is clicked: in the app's order (account, the Roster's order, hiring order).
-        if (ImGui.TableGetSortSpecs().SpecsCount < 1) list = rows.OrderBy(x => x.order).ToList();
-        foreach (var (r, _, job, venture, ilvl) in list)
-        {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(r.Name);
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(r.Owner.Length > 0 ? $"{r.Owner} ({r.World})" : "—");
-            if (ImGui.IsItemHovered() && r.Account.Length > 0) ImGui.SetTooltip($"Account: {r.Account}");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(job.Length > 0 ? $"{job}/{(r.Level.HasValue ? r.Level.Value.ToString(CultureInfo.InvariantCulture) : "?")}" : "—");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(Number(r.Gil));
-            ImGui.TableNextColumn();
-            if (ilvl.HasValue) ImGui.TextUnformatted(ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture));
-            else Colored(Dim, "—");
-            if (!r.ItemsSeen && ImGui.IsItemHovered())
-                ImGui.SetTooltip("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(venture.Length > 0 ? venture : "—");
-            ImGui.TableNextColumn();
-            var status = FleetReader.VentureStatus(r.HasVenture, r.VentureEndsAt, nowUnix);
-            if (status == "Venture Complete") Colored(Green, status);
-            else if (status == "Idle") Colored(r.Job > 0 ? Amber : Dim, status);
-            else ImGui.TextUnformatted(status);
-            ImGui.TableNextColumn();
-            if (r.TargetMode == null) Colored(Dim, "—");
-            else ImGui.TextUnformatted($"{(r.TargetMode == "level" ? "Level" : "ilvl")} {r.TargetValue}{(r.OnlyCrafted ? ", crafted only" : "")}");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Gear targets and the slot-by-slot check are set and shown in the app's Retainers tab for now.");
+            Colored(Amber, $"{unseen} retainer{(unseen == 1 ? "'s" : "s'")} items {(unseen == 1 ? "hasn't" : "haven't")} been seen yet (hover Avg ilvl for which).");
+            Hover("Allagan Tools only knows a retainer's items once it has been opened at a summoning bell on a PC running the plugin.");
         }
+        // In the Roster's order (each owner's place in it), then hiring order, as the app.
+        var rows = read.Retainers
+            .Select(r => (R: r, Job: GameNames.Job(r.Job), Venture: GameNames.Venture(r.VentureId),
+                Ilvl: read.Gear.TryGetValue(r.RetainerId, out var items) ? FleetReader.AverageItemLevel(items, GameNames.ItemLevel) : null))
+            .Where(x => Matches(retainersFilter, x.R.Owner, x.R.Name, x.R.Account, x.Job, x.Venture))
+            .ToList();
+        RetainersTable.Draw(rows);
     }
+
+    // ---- PCs ----
+
+    private static string YesNo(bool? b) => b == true ? "Yes" : b == false ? "No" : "—";
+
+    private FleetTable<PcRow> PcsTable => pcsTable ??= new FleetTable<PcRow>("pcs", plugin.Configuration, new List<FleetColumn<PcRow>>
+    {
+        new("pc", "PC", p => ImGui.TextUnformatted(p.Account.Length > 0 ? $"{p.Pc} ({p.Account})" : p.Pc), p => p.Pc, Locked: true),
+        new("plugin", "Plugin", p =>
+        {
+            var newest = reader.Pcs.Data?.Select(x => x.PluginVersion).Aggregate("0", (v, x) => FleetReader.CompareVersions(x, v) > 0 ? x! : v) ?? "0";
+            var old = FleetReader.CompareVersions(p.PluginVersion, newest) < 0;
+            if (old) Colored(Amber, p.PluginVersion ?? "—"); else ImGui.TextUnformatted(p.PluginVersion ?? "—");
+            if (old) Hover($"Older than {newest} on another PC: update it in /xlplugins there.");
+        }, p => string.Join(".", (p.PluginVersion ?? "").Split('.').Select(n => n.PadLeft(5, '0'))), p => p.PluginVersion == null),
+        new("lastSync", "Last sync", p => ImGui.TextUnformatted(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, DateTime.Now) : "never"),
+            p => p.LastSync ?? DateTime.MinValue, p => p.LastSync == null),
+        new("characters", "Characters", p =>
+        {
+            ImGui.TextUnformatted(FleetReader.PcCharacters(p.Characters, p.LeftOut, p.Elsewhere));
+            if (p.Elsewhere > 0) Hover($"{p.Elsewhere} of this setup's characters last logged in on another setup, so that setup syncs them (the Roster's Synced by column says which).");
+        }, p => p.Characters ?? 0, p => p.Characters == null),
+        new("autoretainer", "AutoRetainer", p =>
+        {
+            if (p.AutoRetainer == false) Colored(Amber, "No"); else ImGui.TextUnformatted(YesNo(p.AutoRetainer));
+            Hover("AutoRetainer running (needed: nothing syncs without it)");
+        }, p => YesNo(p.AutoRetainer)),
+        new("allagan", "Allagan Tools", p =>
+        {
+            if (p.AllaganTools == false) Colored(Amber, "No"); else ImGui.TextUnformatted(YesNo(p.AllaganTools));
+            Hover("Allagan Tools running (bags, retainers' items, FC chests and listings)");
+        }, p => YesNo(p.AllaganTools)),
+        new("fctracker", "FC Tracker", p => { ImGui.TextUnformatted(YesNo(p.FcTracker)); Hover("FC Tracker running in that game (optional: Free Company house details)"); },
+            p => YesNo(p.FcTracker)),
+        new("subtracker", "Submarine Tracker", p => { ImGui.TextUnformatted(YesNo(p.SubmarineTracker)); Hover("Submarine Tracker running in that game (loot per voyage; only needed with subs)"); },
+            p => YesNo(p.SubmarineTracker)),
+        new("ventures", "Venture Log", p => { ImGui.TextUnformatted(YesNo(p.VentureLog)); Hover("AutoRetainer's venture statistics found: what each retainer's ventures brought back (only with retainers)"); },
+            p => YesNo(p.VentureLog), Hidden: true),
+        new("problems", "Could not see", p =>
+        {
+            if (p.Problems.Count == 0) { ImGui.TextUnformatted("Nothing"); return; }
+            Colored(Amber, $"{p.Problems.Count} thing{(p.Problems.Count == 1 ? "" : "s")}");
+            Hover(string.Join("\n", p.Problems));
+        }, p => p.Problems.Count),
+    });
 
     private void DrawPcs()
     {
         reader.ReadIfDue(withLists: true);
         RefreshButton();
         ImGui.SameLine();
-        Colored(Dim, "Each setup of the plugin (PC and account label), as of its last sync. Click a column to sort by it.");
+        PcsTable.DrawControls();
+        ImGui.SameLine();
+        Colored(Dim, "Each setup of the plugin (PC and account label), as of its last sync.");
         ReadLine(reader.Pcs, FleetReader.ListsEvery);
         var pcs = reader.Pcs.Data;
         if (pcs == null) return;
@@ -195,78 +228,15 @@ public partial class MainWindow
             ImGui.TextWrapped("No PC has reported yet. Each setup reports here at its next sync.");
             return;
         }
-        var newest = pcs.Select(p => p.PluginVersion).Aggregate("0", (v, x) => FleetReader.CompareVersions(x, v) > 0 ? x! : v);
-        var now = DateTime.Now;
-
-        using (var table = ImRaii.Table("##pcs", 9, TableFlags & ~ImGuiTableFlags.ScrollY))
+        var checks = pcs.Where(p => p.CheckText != null).ToList();
+        // The table above, each setup's last "Check what I can see" below (folded), sharing the page.
+        var below = checks.Count * ImGui.GetFrameHeightWithSpacing();
+        using (var top = ImRaii.Child("##pcsTable", new Vector2(0, Math.Max(120 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y - below)), false))
         {
-            if (table)
-            {
-                ImGui.TableSetupColumn("PC");
-                ImGui.TableSetupColumn("Plugin");
-                ImGui.TableSetupColumn("Last sync");
-                ImGui.TableSetupColumn("Characters");
-                ImGui.TableSetupColumn("AutoRetainer");
-                ImGui.TableSetupColumn("Allagan Tools");
-                ImGui.TableSetupColumn("FC Tracker");
-                ImGui.TableSetupColumn("Submarine Tracker");
-                ImGui.TableSetupColumn("Could not see");
-                ImGui.TableHeadersRow();
-                var (column, ascending) = SortedBy();
-                var rows = pcs.Select((p, order) => (p, order));
-                static string YesNo(bool? b) => b == true ? "Yes" : b == false ? "No" : "—";
-                var list = column switch
-                {
-                    1 => Sorted(rows, ascending, x => x.p.PluginVersion ?? "", x => x.p.PluginVersion == null),
-                    2 => Sorted(rows, ascending, x => x.p.LastSync ?? DateTime.MinValue, x => x.p.LastSync == null),
-                    3 => Sorted(rows, ascending, x => x.p.Characters ?? 0, x => x.p.Characters == null),
-                    4 => Sorted(rows, ascending, x => YesNo(x.p.AutoRetainer)),
-                    5 => Sorted(rows, ascending, x => YesNo(x.p.AllaganTools)),
-                    6 => Sorted(rows, ascending, x => YesNo(x.p.FcTracker)),
-                    7 => Sorted(rows, ascending, x => YesNo(x.p.SubmarineTracker)),
-                    8 => Sorted(rows, ascending, x => x.p.Problems.Count),
-                    _ => Sorted(rows, ascending, x => x.order),
-                };
-                foreach (var (p, _) in list)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(p.Account.Length > 0 ? $"{p.Pc} ({p.Account})" : p.Pc);
-                    ImGui.TableNextColumn();
-                    var old = FleetReader.CompareVersions(p.PluginVersion, newest) < 0;
-                    if (old) Colored(Amber, p.PluginVersion ?? "—"); else ImGui.TextUnformatted(p.PluginVersion ?? "—");
-                    if (old && ImGui.IsItemHovered()) ImGui.SetTooltip($"Older than {newest} on another PC: update it in /xlplugins there.");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, now) : "never");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(FleetReader.PcCharacters(p.Characters, p.LeftOut, p.Elsewhere));
-                    if (p.Elsewhere > 0 && ImGui.IsItemHovered())
-                        ImGui.SetTooltip($"{p.Elsewhere} of this setup's characters last logged in on another setup, so that setup syncs them (the Roster's Synced by column says which).");
-                    ImGui.TableNextColumn();
-                    if (p.AutoRetainer == false) Colored(Amber, "No"); else ImGui.TextUnformatted(YesNo(p.AutoRetainer));
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("AutoRetainer running (needed: nothing syncs without it)");
-                    ImGui.TableNextColumn();
-                    if (p.AllaganTools == false) Colored(Amber, "No"); else ImGui.TextUnformatted(YesNo(p.AllaganTools));
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Allagan Tools running (bags, retainers' items, FC chests and listings)");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(YesNo(p.FcTracker));
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("FC Tracker running in that game (optional: Free Company house details)");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(YesNo(p.SubmarineTracker));
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Submarine Tracker running in that game (loot per voyage; only needed with subs)");
-                    ImGui.TableNextColumn();
-                    if (p.Problems.Count == 0) ImGui.TextUnformatted("Nothing");
-                    else
-                    {
-                        Colored(Amber, $"{p.Problems.Count} thing{(p.Problems.Count == 1 ? "" : "s")}");
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip(string.Join("\n", p.Problems));
-                    }
-                }
-            }
+            if (top.Success) PcsTable.Draw(pcs);
         }
-
-        // Each setup's last "Check what I can see", folded.
-        foreach (var p in pcs.Where(p => p.CheckText != null))
+        var now = DateTime.Now;
+        foreach (var p in checks)
         {
             var who = p.Account.Length > 0 ? $"{p.Pc} ({p.Account})" : p.Pc;
             var toFix = p.CheckToFix > 0 ? $"{p.CheckToFix} thing{(p.CheckToFix == 1 ? "" : "s")} to fix" : "nothing to fix";
@@ -277,5 +247,54 @@ public partial class MainWindow
                     ImGui.TextWrapped(line.TrimEnd('\r'));
             }
         }
+    }
+
+    // ---- Free Companies ----
+
+    private FleetTable<FcRow> FcsTable => fcsTable ??= new FleetTable<FcRow>("fcs", plugin.Configuration, new List<FleetColumn<FcRow>>
+    {
+        new("name", "FC", f => ImGui.TextUnformatted(f.Name.Length > 0 ? f.Name : "—"), f => f.Name, Locked: true),
+        new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
+        new("world", "World", f => ImGui.TextUnformatted(GameNames.World(f.HomeWorld) is { Length: > 0 } w ? w : "—"), f => GameNames.World(f.HomeWorld)),
+        new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
+        new("points", "FC Points", f => ImGui.TextUnformatted(Number(f.Points)), f => f.Points ?? 0, f => f.Points == null),
+        new("members", "Members", f => ImGui.TextUnformatted(f.Members.HasValue ? f.Members.Value.ToString(CultureInfo.InvariantCulture) : "—"),
+            f => f.Members ?? 0, f => f.Members == null),
+        new("house", "House", f =>
+        {
+            if (f.HasHouse) { ImGui.TextUnformatted(f.House ?? "—"); return; }
+            var text = f.Eligibility ?? "—";
+            if (text == "Eligible") Colored(Green, text); else ImGui.TextUnformatted(text);
+            if (f.EligibleAt.HasValue) Hover($"Can bid on a house from {f.EligibleAt.Value:g} (30 days after it was founded), at rank 6 or higher.");
+        }, f => f.HasHouse ? 1 : 0),
+        // Unknown dates sort as the oldest, since they are the ones to check.
+        new("lastEntered", "Last entered", f =>
+        {
+            if (!f.HasHouse) { Colored(Dim, "—"); return; }
+            var text = f.HouseDays == null ? "Unknown" : f.HouseDays == 0 ? "Today" : $"{f.HouseDays} day{(f.HouseDays == 1 ? "" : "s")} ago";
+            var color = f.HouseLevel switch { "danger" or "unknown" => (Vector4?)Red, "warn" => Amber, _ => null };
+            if (color is Vector4 c) Colored(c, text); else ImGui.TextUnformatted(text);
+            Hover(f.LastEntered.HasValue
+                ? $"Last entered {f.LastEntered.Value:g}. The game can demolish a house after 45 days without a member entering{(f.DemolitionInDays is int left ? $" ({left} days left)" : "")}."
+                : "FC Tracker has no date for this house yet.");
+        }, f => f.HasHouse ? f.HouseDays ?? 9999 : -1, f => !f.HasHouse),
+    }, f => f.Account);
+
+    private void DrawFcs()
+    {
+        reader.ReadIfDue(withLists: true);
+        RefreshButton();
+        ImGui.SameLine();
+        FcsTable.DrawControls();
+        FilterBox(ref fcsFilter, "fcs");
+        ReadLine(reader.Fcs, FleetReader.ListsEvery);
+        var fcs = reader.Fcs.Data;
+        if (fcs == null) return;
+        if (fcs.Count == 0)
+        {
+            ImGui.TextWrapped("No Free Companies yet. They appear once FC Tracker has seen them on a PC running the plugin.");
+            return;
+        }
+        FcsTable.Draw(fcs.Where(f => Matches(fcsFilter, f.Name, f.Leader, f.Account, f.House)).ToList());
     }
 }

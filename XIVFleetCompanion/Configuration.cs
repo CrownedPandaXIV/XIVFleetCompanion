@@ -21,6 +21,10 @@ public class Configuration : IPluginConfiguration
     public bool ColourBlindStatus { get; set; } = false;
     // The main window's sidebar folded down to its icons.
     public bool SidebarFolded { get; set; } = false;
+    // 2.x tables: each table's shown columns in order (the Columns button; none saved: the table's own), and whether
+    // it groups by account when not sorted by a column (none saved: yes, as the app).
+    public Dictionary<string, List<string>> TableColumns { get; set; } = new();
+    public Dictionary<string, bool> TableGroupByAccount { get; set; } = new();
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";

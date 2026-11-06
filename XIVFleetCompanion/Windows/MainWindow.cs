@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Roster, Retainers, Pcs, Check, SpeedTest, Status, Settings }
+    public enum Tab { Summary, Subs, Supplies, Roster, Retainers, Fcs, Inventory, Pcs, Check, SpeedTest, Status, Settings }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -115,6 +115,8 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Supplies: DrawSupplies(); break;
             case Tab.Roster: DrawRoster(); break;
             case Tab.Retainers: DrawRetainers(); break;
+            case Tab.Fcs: DrawFcs(); break;
+            case Tab.Inventory: DrawInventory(); break;
             case Tab.Pcs: DrawPcs(); break;
             case Tab.Check: plugin.CheckPage.DrawPage(); break;
             case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
@@ -161,7 +163,8 @@ public partial class MainWindow : Window, IDisposable
         var attention = back + (alerts?.Count ?? 0);
         var statusProblem = plugin.SyncProblem != null || (plugin.AutoRetainer != null && !SafeReady());
         var notSynced = alerts?.Count(a => a.Kind == "not_synced") ?? 0;
-        var venturesDone = reader.Summary.Data?.VenturesDone ?? 0;
+        var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
+        var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
         var setupsToCheck = alerts?.Count(a => a.Kind == "autoretainer") ?? 0;
 
         foreach (var group in Groups)
@@ -189,6 +192,9 @@ public partial class MainWindow : Window, IDisposable
                         notSynced > 0 ? $"{notSynced} character{(notSynced == 1 ? "" : "s")} no longer synced" : null);
                     Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
                         venturesDone > 0 ? $"{venturesDone} venture{(venturesDone == 1 ? "" : "s")} done" : null);
+                    Entry(Tab.Fcs, FontAwesomeIcon.Home, "Free Companies", folded, housesAtRisk > 0 ? $"{housesAtRisk} house{(housesAtRisk == 1 ? "" : "s")}" : null, p.Warn,
+                        housesAtRisk > 0 ? $"{housesAtRisk} house{(housesAtRisk == 1 ? "" : "s")} not entered for a while" : null);
+                    Entry(Tab.Inventory, FontAwesomeIcon.BoxOpen, "Inventory", folded, null, p.Dim, "What the fleet holds, and Where is it?");
                     break;
                 case "Tools":
                     Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);
@@ -482,16 +488,18 @@ public partial class MainWindow : Window, IDisposable
         ReadLine(reader.Subs, FleetReader.SubsEvery);
 
         Heading("Retainers");
-        var summary = reader.Summary.Data;
-        if (summary == null && reader.Summary.Error == null) ImGui.TextUnformatted("Reading...");
-        if (summary != null)
+        var counts = reader.RetainerCounts.Data;
+        if (counts == null && reader.RetainerCounts.Error == null) ImGui.TextUnformatted("Reading...");
+        if (counts != null)
         {
-            if (summary.VenturesDone > 0) Colored(Green, $"{summary.VenturesDone} venture{(summary.VenturesDone == 1 ? "" : "s")} done");
+            if (counts.VenturesDone > 0) Colored(Green, $"{counts.VenturesDone} venture{(counts.VenturesDone == 1 ? "" : "s")} done");
             else ImGui.TextUnformatted("No ventures done yet");
-            if (summary.RetainersIdle > 0) Colored(Amber, $"{summary.RetainersIdle} retainer{(summary.RetainersIdle == 1 ? "" : "s")} without a venture");
-            ImGui.TextUnformatted($"{summary.Retainers} retainer{(summary.Retainers == 1 ? "" : "s")} with a class");
+            if (counts.Idle > 0) Colored(Amber, $"{counts.Idle} retainer{(counts.Idle == 1 ? "" : "s")} without a venture");
+            ImGui.TextUnformatted($"{counts.Retainers} retainer{(counts.Retainers == 1 ? "" : "s")} with a class");
         }
+        ReadLine(reader.RetainerCounts, FleetReader.SubsEvery);
 
+        var summary = reader.Summary.Data;
         Heading("Supplies");
         if (summary != null)
         {
@@ -507,157 +515,99 @@ public partial class MainWindow : Window, IDisposable
         ReadLine(reader.Summary, FleetReader.SuppliesEvery);
     }
 
-    // The column a table is sorted by and which way (clicking a header sorts by it, again reverses it); the first
-    // column, A to Z, until one is clicked. Call after the columns are set up.
-    private static (int Column, bool Ascending) SortedBy()
-    {
-        var specs = ImGui.TableGetSortSpecs();
-        if (specs.SpecsCount < 1) return (0, true);
-        return (specs.Specs.ColumnIndex, specs.Specs.SortDirection != ImGuiSortDirection.Descending);
-    }
+    private FleetTable<SubRow>? subsTable;
+    private FleetTable<SupplyRow>? suppliesTable;
 
-    // Sorted by `key`, with the rows that have no value (`missing`) last either way.
-    private static List<T> Sorted<T>(IEnumerable<T> rows, bool ascending, Func<T, IComparable> key, Func<T, bool>? missing = null)
+    private FleetTable<SubRow> SubsTable => subsTable ??= new FleetTable<SubRow>("subs", plugin.Configuration, new List<FleetColumn<SubRow>>
     {
-        var byMissing = rows.OrderBy(x => missing != null && missing(x));
-        return (ascending ? byMissing.ThenBy(key) : byMissing.ThenByDescending(key)).ToList();
-    }
-
-    private const ImGuiTableFlags TableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
-        | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable;
+        new("character", "Character", sub =>
+        {
+            ImGui.TextUnformatted($"{sub.Character} ({sub.World})");
+            if (sub.Account.Length > 0) Hover($"Account: {sub.Account}");
+        }, sub => sub.Character),
+        new("account", "Account", sub => ImGui.TextUnformatted(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
+        new("sub", "Sub", sub => ImGui.TextUnformatted(sub.SubName), sub => sub.SubName, Locked: true),
+        new("rank", "Rank", sub =>
+        {
+            ImGui.TextUnformatted(sub.Rank.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
+        }, sub => sub.Rank),
+        new("build", "Build", sub => ImGui.TextUnformatted(sub.Build), sub => sub.Build),
+        // Status: back and waiting first, then the soonest back; in port last either way.
+        new("status", "Status", sub =>
+        {
+            var status = FleetReader.SubStatus(sub.ReturnTime, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            if (status == "Back") Colored(Green, status);
+            else if (status == "In port") Colored(Dim, status);
+            else ImGui.TextUnformatted(status);
+        }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
+    }, sub => sub.Account);
 
     private void DrawSubs()
     {
         reader.ReadIfDue();
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         RefreshButton();
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(180);
-        ImGui.InputText("Filter", ref subsFilter, 64);
-        ImGui.SameLine();
-        Colored(Dim, "Click a column to sort by it.");
+        SubsTable.DrawControls();
+        FilterBox(ref subsFilter, "subs");
         ReadLine(reader.Subs, FleetReader.SubsEvery);
-
         var subs = reader.Subs.Data;
         if (subs == null) return;
-        // Each sub with its place in the app's order (account, then the Roster's character order, then slot).
-        var rows = subs.Select((sub, order) => (sub, order));
-        if (!string.IsNullOrWhiteSpace(subsFilter))
-            rows = rows.Where(x => x.sub.Character.Contains(subsFilter, StringComparison.OrdinalIgnoreCase)
-                                || x.sub.SubName.Contains(subsFilter, StringComparison.OrdinalIgnoreCase)
-                                || x.sub.Account.Contains(subsFilter, StringComparison.OrdinalIgnoreCase));
-
-        using var table = ImRaii.Table("##subs", 5, TableFlags);
-        if (!table) return;
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("Character");
-        ImGui.TableSetupColumn("Sub");
-        ImGui.TableSetupColumn("Rank");
-        ImGui.TableSetupColumn("Build");
-        ImGui.TableSetupColumn("Status");
-        ImGui.TableHeadersRow();
-        var (column, ascending) = SortedBy();
-        var list = column switch
-        {
-            1 => Sorted(rows, ascending, x => x.sub.SubName),
-            2 => Sorted(rows, ascending, x => x.sub.Rank),
-            3 => Sorted(rows, ascending, x => x.sub.Build),
-            // Status: back and waiting first, then the soonest back; in port last either way.
-            4 => Sorted(rows, ascending, x => x.sub.ReturnTime, x => x.sub.ReturnTime <= 0),
-            _ => Sorted(rows, ascending, x => x.order),
-        };
-
-        string? lastCharacter = null;
-        foreach (var (sub, _) in list)
-        {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            var who = $"{sub.Character} ({sub.World})";
-            // Sorted by character: its name once, on its first sub.
-            if (column != 0 || who != lastCharacter) ImGui.TextUnformatted(who);
-            if (ImGui.IsItemHovered() && sub.Account.Length > 0) ImGui.SetTooltip($"Account: {sub.Account}");
-            lastCharacter = who;
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(sub.SubName);
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(sub.Rank.ToString());
-            if (ImGui.IsItemHovered() && sub.NextLevelExp > 0)
-                ImGui.SetTooltip($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(sub.Build);
-            ImGui.TableNextColumn();
-            var status = FleetReader.SubStatus(sub.ReturnTime, now);
-            if (status == "Back") Colored(Green, status);
-            else if (status == "In port") Colored(Dim, status);
-            else ImGui.TextUnformatted(status);
-        }
+        // In the app's order: account, the Roster's character order, then slot.
+        SubsTable.Draw(subs.Where(x => Matches(subsFilter, x.Character, x.SubName, x.Account, x.Build)).ToList());
     }
+
+    // Days left: "never" (none used) counts as the most; not enough history has none and goes last.
+    private static double DaysKey(double? days) => days ?? double.MaxValue;
+
+    private FleetTable<SupplyRow> SuppliesTable => suppliesTable ??= new FleetTable<SupplyRow>("supplies", plugin.Configuration, new List<FleetColumn<SupplyRow>>
+    {
+        new("character", "Character", c =>
+        {
+            ImGui.TextUnformatted($"{c.Character} ({c.World})");
+            Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}{(c.LastSynced.HasValue ? $"\nLast synced {c.LastSynced.Value:g}" : "")}");
+        }, c => c.Character, Locked: true),
+        new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
+        new("ceruleum", "Ceruleum", c => ImGui.TextUnformatted(c.Ceruleum.ToString("N0")), c => c.Ceruleum),
+        new("ceruleumPerDay", "A day##ceruleum", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
+        new("ceruleumDays", "Days left##ceruleum", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
+        new("kits", "Repair kits", c => ImGui.TextUnformatted(c.RepairKits.ToString("N0")), c => c.RepairKits),
+        new("kitsPerDay", "A day##kits", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
+        new("kitsDays", "Days left##kits", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
+        new("buy", "To buy", c =>
+        {
+            var buy = new List<string>();
+            if (c.CeruleumRestock > 0) buy.Add($"{c.CeruleumRestock:N0} ceruleum");
+            if (c.RepairKitsRestock > 0) buy.Add($"{c.RepairKitsRestock:N0} kits");
+            ImGui.TextUnformatted(buy.Count > 0 ? string.Join(", ", buy) : "—");
+        }, c => (long)c.CeruleumRestock * 1_000_000 + c.RepairKitsRestock),
+    }, c => c.Account);
 
     private void DrawSupplies()
     {
         reader.ReadIfDue();
         RefreshButton();
+        ImGui.SameLine();
+        SuppliesTable.DrawControls();
         var supplies = reader.Supplies.Data;
         if (supplies != null && supplies.Count > 0)
         {
             ImGui.SameLine();
-            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days (both set in the app's Supplies tab). Click a column to sort by it.");
+            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days (both set in the app's Supplies tab).");
         }
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
         if (supplies == null) return;
-
-        using var table = ImRaii.Table("##supplies", 8, TableFlags);
-        if (!table) return;
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("Character");
-        ImGui.TableSetupColumn("Ceruleum");
-        ImGui.TableSetupColumn("A day");
-        ImGui.TableSetupColumn("Days left");
-        ImGui.TableSetupColumn("Repair kits");
-        ImGui.TableSetupColumn("A day##kits");
-        ImGui.TableSetupColumn("Days left##kits");
-        ImGui.TableSetupColumn("To buy");
-        ImGui.TableHeadersRow();
-        var (column, ascending) = SortedBy();
-        var rows = supplies.Select((c, order) => (c, order));
-        // Days left: "never" (none used) counts as the most; not enough history has none and goes last.
-        static double DaysKey(double? days) => days ?? double.MaxValue;
-        var list = column switch
-        {
-            1 => Sorted(rows, ascending, x => x.c.Ceruleum),
-            2 => Sorted(rows, ascending, x => x.c.CeruleumPerDay ?? 0, x => x.c.CeruleumPerDay == null),
-            3 => Sorted(rows, ascending, x => DaysKey(x.c.CeruleumDaysLeft), x => x.c.CeruleumPerDay == null),
-            4 => Sorted(rows, ascending, x => x.c.RepairKits),
-            5 => Sorted(rows, ascending, x => x.c.RepairKitsPerDay ?? 0, x => x.c.RepairKitsPerDay == null),
-            6 => Sorted(rows, ascending, x => DaysKey(x.c.RepairKitsDaysLeft), x => x.c.RepairKitsPerDay == null),
-            7 => Sorted(rows, ascending, x => (long)x.c.CeruleumRestock * 1_000_000 + x.c.RepairKitsRestock),
-            _ => Sorted(rows, ascending, x => x.order),
-        };
-        foreach (var (c, _) in list)
-        {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted($"{c.Character} ({c.World})");
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip($"Account: {(c.Account.Length > 0 ? c.Account : "none")}{(c.LastSynced.HasValue ? $"\nLast synced {c.LastSynced.Value:g}" : "")}");
-            SupplyCells(c.Ceruleum, c.CeruleumPerDay, c.CeruleumDaysLeft);
-            SupplyCells(c.RepairKits, c.RepairKitsPerDay, c.RepairKitsDaysLeft);
-            ImGui.TableNextColumn();
-            var buy = new List<string>();
-            if (c.CeruleumRestock > 0) buy.Add($"{c.CeruleumRestock:N0} ceruleum");
-            if (c.RepairKitsRestock > 0) buy.Add($"{c.RepairKitsRestock:N0} kits");
-            ImGui.TextUnformatted(buy.Count > 0 ? string.Join(", ", buy) : "—");
-        }
+        SuppliesTable.Draw(supplies);
     }
 
-    private void SupplyCells(int have, double? perDay, double? daysLeft)
+    private void PerDayCell(double? perDay)
     {
-        ImGui.TableNextColumn();
-        ImGui.TextUnformatted(have.ToString("N0"));
-        ImGui.TableNextColumn();
         ImGui.TextUnformatted(PerDay(perDay));
-        if (perDay == null && ImGui.IsItemHovered()) ImGui.SetTooltip("Not enough history yet (needs a day).");
-        ImGui.TableNextColumn();
+        if (perDay == null) Hover("Not enough history yet (needs a day).");
+    }
+
+    private void DaysCell(double? daysLeft, double? perDay)
+    {
         var days = Days(daysLeft, perDay);
         if (DaysColor(daysLeft) is Vector4 color) Colored(color, days); else ImGui.TextUnformatted(days);
     }

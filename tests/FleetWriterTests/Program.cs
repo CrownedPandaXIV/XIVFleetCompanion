@@ -233,6 +233,79 @@ internal static class Program
             "rest of the tabs: plugin versions compare part by part");
         await Exec(conn, "DROP VIEW fleet_roster_view, fleet_retainers_view, fleet_retainer_gear_view, fleet_pcs_view");
 
+        // The app's orders: the Roster's (saved place, none last, then name) and the Retainers tab's (owner's place, owner,
+        // hiring order, retainer); Group by account (A to Z, Ungrouped last).
+        RosterRow R(string name, int sortIndex, string account = "") => new(0, name, "Maduin", account, sortIndex, null, null, null, 0, null, null, 0, 0, null, null, null, null, null, false, false);
+        var rosterOrder = FleetOrder.Roster(new[] { R("Cal", int.MaxValue), R("Bex", 5), R("Aki", int.MaxValue), R("Dee", 1) });
+        Check(string.Join(",", rosterOrder.Select(r => r.Character)) == "Dee,Bex,Aki,Cal", "orders: the Roster's (saved place, none last, then name): " + string.Join(",", rosterOrder.Select(r => r.Character)));
+        RetainerRow T(string owner, int sortIndex, int hire, string name) => new(0, owner, "Maduin", "", sortIndex, name, 0, null, null, false, 0, 0, hire, null, null, false, true);
+        var retainerOrder = FleetOrder.Retainers(new[] { T("Aki", 3, 1, "B"), T("Bex", 1, int.MaxValue, "Z"), T("Aki", 3, 0, "Y"), T("Bex", 1, 2, "A"), T("Cal", int.MaxValue, 0, "C"), T("Aki", 3, int.MaxValue, "A") });
+        Check(string.Join(",", retainerOrder.Select(r => $"{r.Owner}:{r.Name}")) == "Bex:A,Bex:Z,Aki:Y,Aki:B,Aki:A,Cal:C",
+            "orders: retainers by their owner's place in the Roster, then hiring order (none last), as the app: " + string.Join(",", retainerOrder.Select(r => $"{r.Owner}:{r.Name}")));
+        var groups = FleetOrder.ByAccount(new[] { R("Aki", 1, "B"), R("Bex", 2, ""), R("Cal", 3, "A"), R("Dee", 4, "B") }, r => r.Account);
+        Check(string.Join(" | ", groups.Select(g => $"{g.Label}: {string.Join(",", g.Rows.Select(r => r.Character))}")) == "A: Cal | B: Aki,Dee | Ungrouped: Bex",
+            "orders: Group by account, A to Z, Ungrouped last, rows kept in order: " + string.Join(" | ", groups.Select(g => $"{g.Label}: {string.Join(",", g.Rows.Select(r => r.Character))}")));
+
+        // Stacks (Where is it?) and what the app's characters/item-locations.js groupByItem makes of them, generated from it.
+        var whereStacks = new List<HoldingRow>
+        {
+            new("character", 1, null, 0, 10155, false, 5, "Aki", "Maduin", "Aki", "A", 2, null, int.MaxValue, null, false, "Bags"),
+            new("character", 1, null, 1, 10155, false, 7, "Aki", "Maduin", "Aki", "A", 2, null, int.MaxValue, null, false, "Bags"),
+            new("character", 1, null, 4000, 10155, false, 30, "Aki", "Maduin", "Aki", "A", 2, null, int.MaxValue, null, false, "Saddlebag"),
+            new("retainer", 1, null, 10000, 10155, false, 1, "Aki", "Maduin", "Aki", "A", 2, "Zed", 1, null, false, "Retainer Zed"),
+            new("retainer", 1, null, 10000, 10155, false, 2, "Aki", "Maduin", "Aki", "A", 2, "Amy", 0, null, false, "Retainer Amy"),
+            new("retainer", 1, null, 12002, 10155, false, 3, "Aki", "Maduin", "Aki", "A", 2, "Bo", int.MaxValue, null, false, "Retainer Bo (for sale)"),
+            new("fc", 1, 11, 20000, 10155, false, 100, "Kittehs", "", "Aki", "A", 2, null, int.MaxValue, null, false, "FC chest tab 1"),
+            new("character", 2, null, 2, 10155, false, 4, "Bex", "Maduin", "Bex", "B", 1, null, int.MaxValue, null, false, "Bags"),
+            new("character", 4, null, 0, 10155, false, 9, "Cal", "Exodus", "Cal", "", int.MaxValue, null, int.MaxValue, null, false, "Bags"),
+            new("character", 3, null, 0, 10155, false, 8, "Cal", "Behemoth", "Cal", "", int.MaxValue, null, int.MaxValue, null, false, "Bags"),
+            new("character", 2, null, 2001, 5, false, 999, "Bex", "Maduin", "Bex", "B", 1, null, int.MaxValue, null, false, "Crystals"),
+        };
+        var whereExpected = new[]
+        {
+            "Air Shard: 999 = Bex|Maduin|Crystals|999",
+            "Ceruleum Tank: 169 = Bex|Maduin|Bags|4 / Aki|Maduin|Saddlebag|30 / Aki|Maduin|Bags|12 / Aki|Maduin|Retainer Amy|2 / Aki|Maduin|Retainer Zed|1 / Aki|Maduin|Retainer Bo (for sale)|3 / Kittehs||FC chest tab 1|100 / Cal|Behemoth|Bags|8 / Cal|Exodus|Bags|9",
+        };
+        var names = new Dictionary<int, string> { [10155] = "Ceruleum Tank", [5] = "Air Shard" };
+        var whereText = FleetOrder.WhereIsIt(whereStacks, id => names[id]).Select(i => $"{i.Name}: {i.Total} = {string.Join(" / ", i.Places.Select(p => $"{p.Who}|{p.World}|{p.Where}|{p.Quantity}"))}").ToArray();
+        Check(whereText.SequenceEqual(whereExpected), "Where is it?: the same items, totals, places and order as the app: " + string.Join(" || ", whereText));
+        Check(FleetOrder.WhereIsIt(new[] { whereStacks[0] with { Money = true }, whereStacks[1] with { Quantity = 0 } }, id => names[id]).Count == 0,
+            "Where is it?: gil and empty stacks left out");
+        Check(FleetOrder.CharacterLocation(whereStacks[0] with { ContainerName = "Inventory 1" }) == "Inventory 1" && FleetOrder.CharacterLocation(whereStacks[0]) == "Container 0"
+              && FleetOrder.CharacterLocation(whereStacks[3]) == "Retainer: Zed" && FleetOrder.CharacterLocation(whereStacks[3] with { RetainerName = "" }) == "Retainer: Unknown",
+            "Inventory: a stack's Location reads as the app's Characters inventory");
+
+        // Batch 2: retainer counts, Free Companies, every stack, the fleet's totals and the items held.
+        await Exec(conn, @"
+            CREATE VIEW fleet_retainer_counts_view AS SELECT 160::int AS retainers, 65::int AS ventures_done, 94::int AS retainers_away, 1::int AS retainers_idle;
+            CREATE VIEW fleet_fcs_view AS SELECT * FROM (VALUES
+              (11::numeric, 'Kittehs'::text, 'Aki'::text, 52000::int, '8'::text, 3::int, true, 'Mist W12 P30'::text, 34::int, now(), 9::int, 'warn'::text, 36::int, NULL::timestamptz, NULL::text, 'A'::text, 3::int),
+              (12::numeric, 'Young', NULL, NULL, NULL, NULL, false, NULL, NULL, NULL, NULL, NULL, NULL, now(), 'Eligible in 3 days', NULL, NULL))
+              AS t(fc_id, fc_name, fc_master, fc_points, fc_rank, total_members, has_house, house, home_world_id, house_last_visited, house_days, house_level,
+                   demolition_in_days, eligible_at, eligibility, account_label, sort_index);
+            CREATE VIEW fleet_holdings_view AS SELECT * FROM (VALUES
+              ('character'::text, 1::numeric, 1::numeric, NULL::numeric, 0::int, 10155::int, true, 5::int, 'Aki'::text, 'Maduin'::text, 'Aki'::text, 'A'::text, 2::int, NULL::text, NULL::int, 'Inventory 1'::text, false, 'Bags'::text),
+              ('fc', 1, NULL, 11, 22000, 1, false, 500000, 'Kittehs', NULL, 'Aki', 'A', 2, NULL, NULL, NULL, true, 'FC container 22000'))
+              AS t(kind, owner_cid, retainer_id, fc_id, container, item_id, hq, quantity, who, world, owner_name, account_label, sort_index, retainer_name,
+                   hire_order_index, container_name, money, place);
+            CREATE VIEW fleet_item_totals_view AS SELECT 10155::int AS item_id, true AS hq, 5::bigint AS total;");
+        var counts = await FleetReader.ReadRetainerCounts(conn);
+        Check(counts == new RetainerCountsRow(160, 65, 94, 1), "batch 2: the retainer counts read: " + counts);
+        var fcs = await FleetReader.ReadFcs(conn);
+        Check(fcs.Count == 2 && fcs[0].Name == "Kittehs" && fcs[0].HasHouse && fcs[0].HouseLevel == "warn" && fcs[0].HomeWorld == 34 && fcs[0].Points == 52000
+              && fcs[1].Name == "Young" && !fcs[1].HasHouse && fcs[1].Eligibility == "Eligible in 3 days" && fcs[1].SortIndex == int.MaxValue && fcs[1].Account == "",
+            "batch 2: the Free Companies read, in the Roster's order: " + string.Join(" | ", fcs));
+        var holdings = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 1 }));
+        Check(holdings.Count == 2 && holdings[0].Hq && holdings[0].Place == "Bags" && holdings[0].ContainerName == "Inventory 1" && holdings[1].Money && holdings[1].FcId == 11 && holdings[1].World == "",
+            "batch 2: stacks read with a condition: " + string.Join(" | ", holdings));
+        var none = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 2 }));
+        Check(none.Count == 0, "batch 2: only the stacks asked for");
+        var totals = await FleetReader.ReadItemTotals(conn);
+        Check(totals.Count == 1 && totals[0] == new ItemTotalRow(10155, true, 5), "batch 2: the fleet's totals read");
+        var heldItems = await FleetReader.ReadHeldItems(conn);
+        Check(heldItems.SequenceEqual(new[] { 10155 }), "batch 2: the items held, without gil: " + string.Join(",", heldItems));
+        await Exec(conn, "DROP VIEW fleet_retainer_counts_view, fleet_fcs_view, fleet_holdings_view, fleet_item_totals_view");
+
         var reader = new FleetReader(() => null);
         reader.ReadIfDue(everything: true);
         Check(reader.Subs.Error != null && reader.Subs.Error.Contains("isn't set up") && reader.Roster.Error == reader.Subs.Error && !reader.Busy, "fleet views: no database set up says so, and reads nothing");

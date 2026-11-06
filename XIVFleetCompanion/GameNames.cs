@@ -15,6 +15,22 @@ namespace XIVFleetCompanion
         private static readonly Dictionary<int, string> Ventures = new();
         private static readonly Dictionary<int, string> Items = new();
         private static readonly Dictionary<int, int?> ItemLevels = new();
+        private static readonly Dictionary<int, string> Worlds = new();
+
+        /// <summary>A world's name for its number; "" when unknown.</summary>
+        public static string World(int world)
+        {
+            if (world <= 0) return "";
+            if (Worlds.TryGetValue(world, out var known)) return known;
+            var name = "";
+            try
+            {
+                var row = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>().GetRowOrDefault((uint)world);
+                if (row.HasValue) name = row.Value.Name.ExtractText();
+            }
+            catch (Exception ex) { Plugin.Log.Debug($"Fleet Companion: world {world} — {ex.Message}"); }
+            return Worlds[world] = name;
+        }
 
         /// <summary>"WHM" for a class number; "" for none (0) or one the game doesn't know.</summary>
         public static string Job(int job)

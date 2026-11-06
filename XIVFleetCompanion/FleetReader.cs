@@ -25,7 +25,7 @@ namespace XIVFleetCompanion
 
     /// <summary>One character, from fleet_roster_view. BehindMinutes: how far behind its account when the plugin no longer
     /// syncs it, else null. House null: none.</summary>
-    public sealed record RosterRow(string Character, string World, string Account, int SortIndex, string? FcName, int? FcPoints, string? House,
+    public sealed record RosterRow(long Cid, string Character, string World, string Account, int SortIndex, string? FcName, int? FcPoints, string? House,
         long Gil, int? Ceruleum, int? RepairKits, int Retainers, int Submarines, DateTime? LastSynced,
         string? LoginPc, string? LoginLabel, DateTime? LoggedInAt, int? BehindMinutes, bool LowCeruleum, bool LowRepairKits);
 
@@ -42,6 +42,24 @@ namespace XIVFleetCompanion
     public sealed record PcRow(string Pc, string Account, string? PluginVersion, DateTime? LastSync, bool? AutoRetainer, bool? AllaganTools,
         bool? FcTracker, bool? SubmarineTracker, bool? VentureLog, int? Characters, int? LeftOut, int? Elsewhere,
         List<string> Problems, string? CheckText, int? CheckToFix, DateTime? CheckAt);
+
+    /// <summary>The retainers with a class right now, from fleet_retainer_counts_view (as the app's Summary).</summary>
+    public sealed record RetainerCountsRow(int Retainers, int VenturesDone, int Away, int Idle);
+
+    /// <summary>One Free Company, from fleet_fcs_view. HomeWorld: a World number, named from the game's files.
+    /// HouseLevel: "ok", "warn", "danger" or "unknown" (null without a house). Eligibility: when it can bid, without a house.</summary>
+    public sealed record FcRow(long FcId, string Name, string? Leader, int? Points, int? Members, bool HasHouse, string? House,
+        int HomeWorld, int? HouseDays, string? HouseLevel, int? DemolitionInDays, DateTime? LastEntered, string? Eligibility,
+        DateTime? EligibleAt, string Account, int SortIndex);
+
+    /// <summary>One stack of an item, from fleet_holdings_view. Kind: "character", "retainer" or "fc". ItemId is the plain
+    /// item (Hq: high quality). OwnerCid: the character, or for an FC chest the member it's counted on. Money: gil, not items.</summary>
+    public sealed record HoldingRow(string Kind, long? OwnerCid, long? FcId, int Container, int ItemId, bool Hq, long Quantity,
+        string Who, string World, string? OwnerName, string Account, int SortIndex, string? RetainerName, int HireOrder,
+        string? ContainerName, bool Money, string Place);
+
+    /// <summary>How many of an item the fleet holds, from fleet_item_totals_view (high quality apart).</summary>
+    public sealed record ItemTotalRow(int ItemId, bool Hq, long Total);
 
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
@@ -74,6 +92,8 @@ namespace XIVFleetCompanion
         public FleetRead<List<RosterRow>> Roster { get; private set; } = new(null, null, null);
         public FleetRead<RetainersRead> Retainers { get; private set; } = new(null, null, null);
         public FleetRead<List<PcRow>> Pcs { get; private set; } = new(null, null, null);
+        public FleetRead<RetainerCountsRow> RetainerCounts { get; private set; } = new(null, null, null);
+        public FleetRead<List<FcRow>> Fcs { get; private set; } = new(null, null, null);
         public bool Busy => busy;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
@@ -103,6 +123,8 @@ namespace XIVFleetCompanion
                 Roster = Roster with { Error = notSetUp };
                 Retainers = Retainers with { Error = notSetUp };
                 Pcs = Pcs with { Error = notSetUp };
+                RetainerCounts = RetainerCounts with { Error = notSetUp };
+                Fcs = Fcs with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -119,6 +141,7 @@ namespace XIVFleetCompanion
                     {
                         Subs = await Read(conn, ReadSubs, Subs);
                         Alerts = await Read(conn, ReadAlerts, Alerts);
+                        RetainerCounts = await Read(conn, ReadRetainerCounts, RetainerCounts);
                     }
                     if (supplies)
                     {
@@ -130,14 +153,15 @@ namespace XIVFleetCompanion
                         Roster = await Read(conn, ReadRoster, Roster);
                         Retainers = await Read(conn, ReadRetainers, Retainers);
                         Pcs = await Read(conn, ReadPcs, Pcs);
+                        Fcs = await Read(conn, ReadFcs, Fcs);
                     }
                 }
                 catch (Exception ex)
                 {
                     var text = $"Could not reach the database: {ex.Message}";
-                    if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; }
+                    if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; }
-                    if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; }
+                    if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                 }
                 finally
                 {
@@ -228,12 +252,12 @@ namespace XIVFleetCompanion
                 "SELECT * FROM fleet_roster_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
-                list.Add(new RosterRow(Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
+                list.Add(new RosterRow(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
                     TextOrNull(r, "fc_name"), IntOrNull(r, "fc_points"), TextOrNull(r, "house"),
                     Long(r, "gil"), IntOrNull(r, "ceruleum"), IntOrNull(r, "repair_kits"), Int(r, "retainer_count"), Int(r, "submarine_count"),
                     Time(r, "last_synced_at"), TextOrNull(r, "login_pc"), TextOrNull(r, "login_label"), Time(r, "logged_in_at"),
                     IntOrNull(r, "behind_minutes"), BoolOrNull(r, "low_ceruleum") == true, BoolOrNull(r, "low_repair_kits") == true));
-            return list;
+            return FleetOrder.Roster(list);
         }
 
         public static async Task<RetainersRead> ReadRetainers(NpgsqlConnection conn)
@@ -260,7 +284,7 @@ namespace XIVFleetCompanion
                     items.Add(Int(r, "item_id"));
                 }
             }
-            return new RetainersRead(list, gear);
+            return new RetainersRead(FleetOrder.Retainers(list), gear);
         }
 
         public static async Task<List<PcRow>> ReadPcs(NpgsqlConnection conn)
@@ -276,6 +300,128 @@ namespace XIVFleetCompanion
                     Text(r, "problems").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
                     TextOrNull(r, "check_text"), IntOrNull(r, "check_to_fix"), Time(r, "check_at")));
             return list;
+        }
+
+        public static async Task<RetainerCountsRow> ReadRetainerCounts(NpgsqlConnection conn)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_retainer_counts_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return new RetainerCountsRow(0, 0, 0, 0);
+            return new RetainerCountsRow(Int(r, "retainers"), Int(r, "ventures_done"), Int(r, "retainers_away"), Int(r, "retainers_idle"));
+        }
+
+        public static async Task<List<FcRow>> ReadFcs(NpgsqlConnection conn)
+        {
+            var list = new List<FcRow>();
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_fcs_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                list.Add(new FcRow(Long(r, "fc_id"), Text(r, "fc_name"), TextOrNull(r, "fc_master"), IntOrNull(r, "fc_points"), IntOrNull(r, "total_members"),
+                    BoolOrNull(r, "has_house") == true, TextOrNull(r, "house"), Int(r, "home_world_id"), IntOrNull(r, "house_days"), TextOrNull(r, "house_level"),
+                    IntOrNull(r, "demolition_in_days"), Time(r, "house_last_visited"), TextOrNull(r, "eligibility"), Time(r, "eligible_at"),
+                    Text(r, "account_label"), Int(r, "sort_index", int.MaxValue)));
+            return FleetOrder.Fcs(list);
+        }
+
+        /// <summary>The stacks matching a condition on fleet_holdings_view (for example "owner_cid = ANY(@cids)"), with its
+        /// parameters added by addParameters.</summary>
+        public static async Task<List<HoldingRow>> ReadHoldings(NpgsqlConnection conn, string where, Action<NpgsqlParameterCollection> addParameters)
+        {
+            var list = new List<HoldingRow>();
+            await using var cmd = new NpgsqlCommand($"SELECT * FROM fleet_holdings_view WHERE {where}", conn);
+            addParameters(cmd.Parameters);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                list.Add(new HoldingRow(Text(r, "kind"), LongOrNull(r, "owner_cid"), LongOrNull(r, "fc_id"), Int(r, "container"), Int(r, "item_id"),
+                    BoolOrNull(r, "hq") == true, Long(r, "quantity"), Text(r, "who"), Text(r, "world"), TextOrNull(r, "owner_name"), Text(r, "account_label"),
+                    Int(r, "sort_index", int.MaxValue), TextOrNull(r, "retainer_name"), Int(r, "hire_order_index", int.MaxValue), TextOrNull(r, "container_name"),
+                    BoolOrNull(r, "money") == true, Text(r, "place")));
+            return list;
+        }
+
+        public static async Task<List<ItemTotalRow>> ReadItemTotals(NpgsqlConnection conn)
+        {
+            var list = new List<ItemTotalRow>();
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_item_totals_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                list.Add(new ItemTotalRow(Int(r, "item_id"), BoolOrNull(r, "hq") == true, Long(r, "total")));
+            return list;
+        }
+
+        /// <summary>Every item the fleet holds (not gil), for searching by name in Where is it?.</summary>
+        public static async Task<List<int>> ReadHeldItems(NpgsqlConnection conn)
+        {
+            var list = new List<int>();
+            await using var cmd = new NpgsqlCommand("SELECT DISTINCT item_id FROM fleet_holdings_view WHERE NOT money AND item_id IS NOT NULL", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) list.Add(Int(r, "item_id"));
+            return list;
+        }
+
+        // --- The Inventory page's reads: on demand, one at a time, apart from the regular ones above. ---
+
+        private volatile bool inventoryBusy;
+        public bool InventoryBusy => inventoryBusy;
+        /// <summary>What the Inventory page last asked for (Key says which: the characters, FCs or search), and the answer.</summary>
+        public FleetRead<List<HoldingRow>> Holdings { get; private set; } = new(null, null, null);
+        public string? HoldingsKey { get; private set; }
+        public FleetRead<List<ItemTotalRow>> ItemTotals { get; private set; } = new(null, null, null);
+        public FleetRead<List<int>> HeldItems { get; private set; } = new(null, null, null);
+
+        /// <summary>Reads the stacks for key (say "characters:1,2") when it isn't what was last read, or that is over a
+        /// minute old.</summary>
+        public void ReadHoldingsIfDue(string key, string where, Action<NpgsqlParameterCollection> addParameters, bool force = false)
+        {
+            if (!force && HoldingsKey == key && Holdings.At.HasValue && DateTime.Now - Holdings.At.Value < ListsEvery) return;
+            RunInventoryRead(async conn =>
+            {
+                var before = HoldingsKey == key ? Holdings : new FleetRead<List<HoldingRow>>(null, null, null);
+                HoldingsKey = key;
+                Holdings = before;
+                Holdings = await Read(conn, c => ReadHoldings(c, where, addParameters), before);
+            }, text => Holdings = Holdings with { Error = text });
+        }
+
+        public void ReadItemTotalsIfDue(bool force = false)
+        {
+            if (!force && ItemTotals.At.HasValue && DateTime.Now - ItemTotals.At.Value < ListsEvery) return;
+            RunInventoryRead(async conn => ItemTotals = await Read(conn, ReadItemTotals, ItemTotals), text => ItemTotals = ItemTotals with { Error = text });
+        }
+
+        public void ReadHeldItemsIfDue(bool force = false)
+        {
+            if (!force && HeldItems.At.HasValue && DateTime.Now - HeldItems.At.Value < ListsEvery) return;
+            RunInventoryRead(async conn => HeldItems = await Read(conn, ReadHeldItems, HeldItems), text => HeldItems = HeldItems with { Error = text });
+        }
+
+        private void RunInventoryRead(Func<NpgsqlConnection, Task> read, Action<string> failed)
+        {
+            if (inventoryBusy) return;
+            var cs = connectionString();
+            if (cs == null)
+            {
+                failed("The database isn't set up yet (Settings tab).");
+                return;
+            }
+            inventoryBusy = true;
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await using var conn = new NpgsqlConnection(cs);
+                    await conn.OpenAsync();
+                    await read(conn);
+                }
+                catch (Exception ex)
+                {
+                    failed($"Could not reach the database: {ex.Message}");
+                }
+                finally
+                {
+                    inventoryBusy = false;
+                }
+            });
         }
 
         /// <summary>A retainer's venture, as the Retainers tab: "Idle", "Venture Complete" (waiting to be collected) or the

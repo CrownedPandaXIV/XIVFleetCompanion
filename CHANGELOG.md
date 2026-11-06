@@ -66,6 +66,24 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   - These pages only show for now: reordering or removing characters, setting retainers' gear targets and removing a
     PC stay in the app.
   - `/xivfleet roster`, `/xivfleet retainers` and `/xivfleet pcs` open them.
+- **Stage 6, part 2: Free Companies and Inventory, and the app's table controls everywhere.**
+  - **Free Companies** (Fleet): every Free Company with its leader, world, points, members, house (or, without one,
+    when it can bid) and how long since a member entered it (amber from the house warning, red from 30 days or with
+    no date). The sidebar counts houses not entered for a while.
+  - **Inventory** (Fleet), as the app's: **Characters** (what chosen characters and their retainers hold),
+    **Free Companies** (chosen FC chests), **Fleet totals** (each item across the fleet, the most first) and
+    **Where is it?** (type part of an item's name: every place the fleet holds it, in the Roster's order, by account).
+    HQ items say so.
+  - **Every table** (Subs, Supplies, Roster, Retainers, Free Companies, PCs, Inventory) works like the app's:
+    click a heading to sort, again for the other way, a third time to go back; **Reset Sort** goes back at once;
+    **Columns** shows, hides and reorders the columns (remembered; Reset columns undoes it); **Group by account**
+    while not sorted. Long tables only draw the rows on screen.
+  - **Retainers in the app's order**: by their owner's place in the Roster, then hiring order. The Roster and the Free
+    Companies follow the Roster's saved order too.
+  - **The Summary's retainer line matches the app's** and updates every 30 seconds instead of every 5 minutes, so a
+    retainer caught between two ventures while AutoRetainer sends it out again no longer shows "without a venture" for
+    minutes. Retainers of characters no longer synced are left out, as in the app.
+  - `/xivfleet fcs` and `/xivfleet inventory` open the new pages.
 - **Fleet in the info bar keeps working after an update.** Right after the plugin updated, clicking "Fleet" could do
   nothing until the plugin was turned off and on: the old copy's entry was still on screen. The plugin now asks again
   every few seconds until "Fleet" is its own, and takes it back if it ever isn't (noted in /xllog).
