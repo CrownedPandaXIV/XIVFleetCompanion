@@ -94,7 +94,8 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   shown. Fight Club's expected figures and Loot per Voyage come later in 2.x, with routes. `/xivfleet salvage` and
   `/xivfleet income` open them.
   Salvage leads with the Fleet-Wide Salvage Total, each hover ends with its total (pieces and gil), and the Summary
-  shows the Fleet-Wide Salvage Total too, as the app's.
+  shows the Fleet-Wide Salvage Total too, as the app's. The Summary also shows the venture income per day (last days of
+  the Income window, at what a vendor pays), read with the supplies.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by

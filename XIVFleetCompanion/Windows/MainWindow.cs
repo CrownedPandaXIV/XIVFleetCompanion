@@ -502,6 +502,16 @@ public partial class MainWindow : Window, IDisposable
             ImGui.TextUnformatted($"{counts.Retainers} retainer{(counts.Retainers == 1 ? "" : "s")} with a class");
         }
         ReadLine(reader.RetainerCounts, FleetReader.SubsEvery);
+        // As the app's Venture Income tile: the rewards over the Income window, at what a vendor pays.
+        var ventures = reader.Ventures.Data;
+        if (ventures != null && ventures.Rows.Count == 0) ImGui.TextUnformatted("Venture income: no rewards recorded in the Income window (AutoRetainer: \"Record statistics\")");
+        else if (ventures != null)
+        {
+            var perDay = FleetReader.SummarizeVentures(ventures.Rows, ventures.WindowDays, VendorPrice).Sum(v => v.PerDay);
+            ImGui.TextUnformatted($"Venture income: {Gil(perDay)} gil a day");
+            Colored(Dim, $"Last {ventures.WindowDays} days, at what a vendor pays (Income page)");
+        }
+        if (reader.Ventures.Error != null) Colored(Amber, reader.Ventures.Error);
 
         var summary = reader.Summary.Data;
         Heading("Supplies");

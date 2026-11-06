@@ -80,6 +80,9 @@ namespace XIVFleetCompanion
     public sealed record VentureIncomeRow(long Cid, string Character, string World, string Account, int SortIndex, int ItemId, long Quantity,
         int? SalvagePrice, int Rewards, int Retainers);
 
+    /// <summary>The venture rewards over the Income window (days; 7 when none were recorded, the app's default).</summary>
+    public sealed record VenturesRead(List<VentureIncomeRow> Rows, int WindowDays);
+
     /// <summary>The Income page's read: each character's income, the venture rewards, the window (days) and repair kit cost.</summary>
     public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
 
@@ -121,6 +124,8 @@ namespace XIVFleetCompanion
         public FleetRead<List<FcRow>> Fcs { get; private set; } = new(null, null, null);
         public FleetRead<List<SalvageRow>> Salvage { get; private set; } = new(null, null, null);
         public FleetRead<IncomeRead> Income { get; private set; } = new(null, null, null);
+        /// <summary>The venture rewards alone (quick), for the Summary's venture income: read with the supplies.</summary>
+        public FleetRead<VenturesRead> Ventures { get; private set; } = new(null, null, null);
         public bool Busy => busy;
 
         /// <param name="connectionString">The database to read (null when none is set up), asked each time.</param>
@@ -156,6 +161,7 @@ namespace XIVFleetCompanion
                 Fcs = Fcs with { Error = notSetUp };
                 Salvage = Salvage with { Error = notSetUp };
                 Income = Income with { Error = notSetUp };
+                Ventures = Ventures with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -181,6 +187,7 @@ namespace XIVFleetCompanion
                         Summary = await Read(conn, ReadSummary, Summary);
                         // The Summary's salvage total (quick), unless the Salvage page reads it now anyway.
                         if (!money) Salvage = await Read(conn, ReadSalvage, Salvage);
+                        Ventures = await Read(conn, ReadVentures, Ventures);
                     }
                     if (lists)
                     {
@@ -199,7 +206,7 @@ namespace XIVFleetCompanion
                 {
                     var text = $"Could not reach the database: {ex.Message}";
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
-                    if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; }
+                    if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; }
                 }
@@ -432,18 +439,24 @@ namespace XIVFleetCompanion
                     kitCost = Double(r, "kit_cost") ?? 0;
                 }
             }
+            var ventures = await ReadVentures(conn);
+            if (ventures.Rows.Count > 0) windowDays = ventures.WindowDays;
+            return new IncomeRead(FleetOrder.Roster(characters, x => x.SortIndex, x => x.Character), ventures.Rows, windowDays, kitCost);
+        }
+
+        public static async Task<VenturesRead> ReadVentures(NpgsqlConnection conn)
+        {
             var ventures = new List<VentureIncomeRow>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_venture_income_view", conn))
-            await using (var r = await cmd.ExecuteReaderAsync())
+            var windowDays = 7;
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_venture_income_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
             {
-                while (await r.ReadAsync())
-                {
-                    ventures.Add(new VentureIncomeRow(Long(r, "owner_cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
-                        Int(r, "item_id"), Long(r, "quantity"), IntOrNull(r, "salvage_price"), Int(r, "rewards"), Int(r, "retainers")));
-                    windowDays = Int(r, "window_days", windowDays);
-                }
+                ventures.Add(new VentureIncomeRow(Long(r, "owner_cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
+                    Int(r, "item_id"), Long(r, "quantity"), IntOrNull(r, "salvage_price"), Int(r, "rewards"), Int(r, "retainers")));
+                windowDays = Int(r, "window_days", windowDays);
             }
-            return new IncomeRead(FleetOrder.Roster(characters, x => x.SortIndex, x => x.Character), ventures, windowDays, kitCost);
+            return new VenturesRead(ventures, windowDays);
         }
 
         /// <summary>Each character's venture rewards added up, as the Income tab's Retainer Ventures: rewards, retainers,
