@@ -66,6 +66,9 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   - These pages only show for now: reordering or removing characters, setting retainers' gear targets and removing a
     PC stay in the app.
   - `/xivfleet roster`, `/xivfleet retainers` and `/xivfleet pcs` open them.
+- **Fleet in the info bar keeps working after an update.** Right after the plugin updated, clicking "Fleet" could do
+  nothing until the plugin was turned off and on: the old copy's entry was still on screen. The plugin now asks again
+  every few seconds until "Fleet" is its own, and takes it back if it ever isn't (noted in /xllog).
 
 ## 1.0.3 - 2026-11-05
 

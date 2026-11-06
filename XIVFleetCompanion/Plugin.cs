@@ -36,6 +36,10 @@ public sealed class Plugin : IDalamudPlugin
     private DateTime infoBarCheckedAt = DateTime.MinValue;
     private string infoBarText = "";
     private string infoBarTooltip = "";
+    private const string InfoBarTitle = "XIV Fleet Companion";
+    // When the "Fleet" entry was last asked for or checked, and whether asking has failed since it last worked.
+    private DateTime infoBarAttachedAt = DateTime.MinValue;
+    private bool infoBarFailed;
 
     private const string CommandName = "/xivfleet";
 
@@ -105,17 +109,7 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, roster, retainers, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
 
-        try
-        {
-            infoBar = DtrBar.Get("XIV Fleet Companion");
-            infoBar.Text = "Fleet";
-            infoBar.OnClick = _ => MainWindow.OpenAt(MainWindow.Tab.Summary);
-            infoBar.Shown = Configuration.ShowInInfoBar;
-        }
-        catch (Exception ex)
-        {
-            Log.Warning($"Fleet Companion: could not add to the info bar — {ex.Message}");
-        }
+        AttachInfoBar();
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         // The settings and main window buttons in the plugin installer.
@@ -186,10 +180,59 @@ public sealed class Plugin : IDalamudPlugin
 
     // Once a second: the info bar line's text and tooltip, from what was last read; reads again in the background
     // when due (subs and what needs attention every 30 seconds), only while the line is shown.
+    // Takes the "Fleet" entry in the game's info bar. Right after the plugin updates, the old copy's entry may not be
+    // cleared yet, and the game refuses the title: the old entry then stays on screen, still pointing at the old copy,
+    // so clicking it does nothing. UpdateInfoBar keeps asking until it works.
+    private void AttachInfoBar()
+    {
+        infoBarAttachedAt = DateTime.UtcNow;
+        try
+        {
+            var entry = DtrBar.Get(InfoBarTitle);
+            entry.Text = "Fleet";
+            entry.OnClick = _ => MainWindow.OpenAt(MainWindow.Tab.Summary);
+            entry.Shown = Configuration.ShowInInfoBar;
+            infoBar = entry;
+            // Send the text and tooltip again on the next update.
+            infoBarText = "";
+            infoBarTooltip = "";
+            if (infoBarFailed) Log.Information("Fleet Companion: the info bar's Fleet entry works again.");
+            infoBarFailed = false;
+        }
+        catch (Exception ex)
+        {
+            infoBar = null;
+            if (!infoBarFailed) Log.Warning($"Fleet Companion: could not take the info bar's Fleet entry yet (trying again every few seconds) — {ex.Message}");
+            infoBarFailed = true;
+        }
+    }
+
+    // Every few seconds: when the "Fleet" entry couldn't be taken, ask again; when it's no longer the game's live
+    // entry (removed, or another copy's), take it again.
+    private void KeepInfoBar(DateTime now)
+    {
+        if (now - infoBarAttachedAt < TimeSpan.FromSeconds(3)) return;
+        if (infoBar == null)
+        {
+            if (Configuration.ShowInInfoBar) AttachInfoBar();
+            return;
+        }
+        infoBarAttachedAt = now;
+        bool live;
+        try { live = DtrBar.Entries.Any(e => ReferenceEquals(e, infoBar)); }
+        catch { return; }
+        if (!live)
+        {
+            Log.Information("Fleet Companion: the info bar's Fleet entry was no longer this copy's; taking it again.");
+            AttachInfoBar();
+        }
+    }
+
     private void UpdateInfoBar()
     {
-        if (infoBar == null) return;
         var now = DateTime.UtcNow;
+        KeepInfoBar(now);
+        if (infoBar == null) return;
         if (now - infoBarCheckedAt < TimeSpan.FromSeconds(1)) return;
         infoBarCheckedAt = now;
         infoBar.Shown = Configuration.ShowInInfoBar;
