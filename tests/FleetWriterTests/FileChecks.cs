@@ -22,6 +22,7 @@ internal static partial class Program
             await BackupChecks(folder);
             await KeeperOnFileChecks(folder);
             await TwoGamesAtOnceChecks(folder);
+            await HealthAndRestoreChecks(folder);
         }
         finally
         {
@@ -237,5 +238,94 @@ internal static partial class Program
             Console.Error.WriteLine($"game {seed}: {ex.GetType().Name}: {ex.Message}");
             return 1;
         }
+    }
+
+    // The weekly check that the file isn't damaged, and putting a backup back while games keep running.
+    private static async Task HealthAndRestoreChecks(string folder)
+    {
+        var files = FileDatabase.Files.Embedded();
+        var path = Path.Combine(folder, "restore", "fleet.db");
+        await using var conn = await FileDatabase.OpenAsync(path, Array.Empty<string>());
+        await FileDatabase.EnsureAsync(conn, files, "test");
+        Check(await FileDatabase.LastHealthAsync(conn) == null && FileDatabase.HealthDue(null, DateTime.UtcNow), "health: a new file hasn't been checked, so it's due");
+        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        var health = await FileDatabase.CheckAsync(conn, now);
+        var read = await FileDatabase.LastHealthAsync(conn);
+        Check(health.Ok && read is { Ok: true } && read.CheckedAt == now && read.LastOkAt == now && health.Text.Contains("is whole"),
+            $"health: a whole file is found whole, and that's noted in it ({health.Text})");
+        Check(!FileDatabase.HealthDue(read, now.AddDays(6)) && FileDatabase.HealthDue(read, now.AddDays(7)), "health: checked again a week later");
+
+        // A damaged file: some of its pages overwritten.
+        var broken = Path.Combine(folder, "restore", "broken.db");
+        await using (var b = new SQLiteConnection($"Data Source={broken};Pooling=False"))
+        {
+            await b.OpenAsync();
+            await Db.Exec(b, "CREATE TABLE companion_file_info (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE t (x INTEGER PRIMARY KEY, y TEXT); CREATE INDEX t_y ON t (y)");
+            await using var tx = await b.BeginTransactionAsync();
+            for (var i = 0; i < 3000; i++) await Db.Exec(b, "INSERT INTO t (y) VALUES (@y)", tx, ("y", $"row {i} {new string('x', 40)}"));
+            await tx.CommitAsync();
+        }
+        SQLiteConnection.ClearAllPools();
+        await using (var f = new FileStream(broken, FileMode.Open, FileAccess.Write))
+        {
+            f.Seek(4096 * 5, SeekOrigin.Begin);
+            f.Write(Enumerable.Repeat((byte)0x5A, 4096 * 3).ToArray());
+        }
+        await using (var b = new SQLiteConnection($"Data Source={broken};Pooling=False"))
+        {
+            await b.OpenAsync();
+            var bad = await FileDatabase.CheckAsync(b, now);
+            Check(!bad.Ok && bad.Text.Contains("damaged") && bad.Text.Contains("Restore"), $"health: a damaged file is found damaged, and says to restore a backup ({bad.Text})");
+        }
+        Check(await FileDatabase.WhyNotWhole(broken) != null && await FileDatabase.WhyNotWhole(path) == null, "health: a backup is checked whole before it's used");
+
+        // The keeper doesn't back up a damaged file (its copies would push out the good ones).
+        var keptPath = Path.Combine(folder, "restore-keeper", "fleet.db");
+        await using (var kept = await FileDatabase.OpenAsync(keptPath, Array.Empty<string>()))
+        {
+            await FileDatabase.EnsureAsync(kept, files, "test");
+            foreach (var (k, v) in new[] { ("health_checked_at", DateTime.UtcNow.ToString("o")), ("health_result", "page 5 is never used") })
+                await Db.Exec(kept, "INSERT INTO companion_file_info (key, value) VALUES (@k, @v)", null, ("k", k), ("v", v));
+            var keeper = new DatabaseKeeper(() => throw new InvalidOperationException(), "plugin test");
+            await keeper.RunIfDueAsync(kept, keptPath);
+            Check(keeper.Health is { Ok: false } && FileDatabase.Backups(keptPath).Count == 0,
+                "health: while the file is damaged, no backup is made, so the good ones are kept");
+        }
+
+        // ---- Restoring ----
+        await FleetWriter.WriteCurrentCharactersAsync(conn, new List<FleetWriter.CharacterSnapshot> { new() { Cid = 1, Name = "Then", World = "Maduin", Gil = 100 } });
+        await FleetEdits.AddRule(conn, new FleetEdits.Rule(null, 50, null, null, "S", "S", "C", "C"));
+        var day = new DateTime(2025, 6, 1, 9, 0, 0);
+        var then = await FileDatabase.BackUpAsync(conn, path, day);
+        File.SetLastWriteTime(then, day);
+        await FleetWriter.WriteCurrentCharactersAsync(conn, new List<FleetWriter.CharacterSnapshot>
+        {
+            new() { Cid = 1, Name = "Now", World = "Maduin", Gil = 999 }, new() { Cid = 2, Name = "Later", World = "Maduin" },
+        });
+        var refused = "";
+        try { await FileDatabase.RestoreAsync(conn, path, broken, files, DateTime.Now); }
+        catch (FileDatabase.RefusedException ex) { refused = ex.Message; }
+        Check(refused.Contains("can't be used") && await Count(conn, "SELECT count(*) FROM companion_character_current") == 2,
+            $"restore: a damaged backup is refused and nothing changes ({refused})");
+
+        var other = await FileDatabase.OpenAsync(path, Array.Empty<string>());   // another game, open meanwhile
+        var text = await FileDatabase.RestoreAsync(conn, path, then, files, new DateTime(2026, 11, 7, 10, 30, 0));
+        Check(await Count(conn, "SELECT count(*) FROM companion_character_current") == 1 && await Count(conn, "SELECT count(*) FROM companion_character_current WHERE name = 'Then' AND gil = 100") == 1
+              && await Count(conn, "SELECT count(*) FROM sub_build_rules") == 1,
+            $"restore: the fleet is as it was in the backup ({text})");
+        Check(await Count(other, "SELECT count(*) FROM companion_character_current WHERE name = 'Then'") == 1,
+            "restore: a game that had the file open sees the restored fleet straight away, without restarting");
+        await other.DisposeAsync();
+        var before = FileDatabase.Backups(path).FirstOrDefault(f => f.Name.Contains("before-restore"));
+        Check(before != null && text.Contains(before.Name) && text.Contains("The file is whole"), $"restore: the fleet as it was just before is kept as a backup ({before?.Name})");
+        await using (var copy = new SQLiteConnection($"Data Source={before!.FullName};Pooling=False;Read Only=True"))
+        {
+            await copy.OpenAsync();
+            Check(await Count(copy, "SELECT count(*) FROM companion_character_current") == 2, "restore: ...and that backup has the fleet from just before");
+        }
+        Check(await Count(conn, "SELECT count(*) FROM companion_file_info WHERE key = 'app_version'") == 1 && (await FleetReader.ReadSubs(conn)) != null,
+            "restore: the file keeps its version notes and views, and the pages read it");
+        var rule = await FleetEdits.AddRule(conn, new FleetEdits.Rule(null, 60, null, null, "S", "S", "S", "S"));
+        Check(rule == 2, $"restore: a Sub Rule added afterwards gets the next number ({rule})");
     }
 }

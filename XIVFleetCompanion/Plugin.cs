@@ -985,14 +985,16 @@ public sealed class Plugin : IDalamudPlugin
     /// into this PC's fleet file. Syncing waits meanwhile; on success this game, then every game on the PC, uses the new
     /// place. On any problem nothing changes.
     /// </summary>
-    public void MoveFleet(bool toShared)
+    public void MoveFleet(bool toShared, bool trial = false)
     {
         if (moving) return;
         moving = true;
         MoveFailed = false;
+        MoveWasTrial = trial;
         MoveStatus = "Waiting for the sync that's running to finish...";
         Task.Run(async () =>
         {
+            string? trialFolder = null;
             try
             {
                 for (var i = 0; i < 120 && syncInProgress; i++) await Task.Delay(500);
@@ -1000,20 +1002,39 @@ public sealed class Plugin : IDalamudPlugin
                 var by = $"plugin {VersionText}";
                 await using var pg = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection)
                                      ?? throw new FleetMove.RefusedException("Enter the shared database's details above and save them first.");
-                await using var file = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
                 FleetMove.Result result;
                 if (toShared)
                 {
+                    await using var file = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
                     var target = new Npgsql.NpgsqlConnectionStringBuilder(pg.ConnectionString);
                     result = await FleetMove.FileToSharedAsync(file, pg, files, DatabaseUpkeep.Files.Embedded(), by,
-                        $"the shared database {target.Database} at {target.Host}:{target.Port}, {DateTime.Now:g}", s => MoveStatus = s);
-                    Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+                        $"the shared database {target.Database} at {target.Host}:{target.Port}, {DateTime.Now:g}", s => MoveStatus = s, trial);
+                }
+                else if (trial)
+                {
+                    // A trial copies into a scratch file, after the same check the move makes on this PC's fleet file.
+                    if (File.Exists(FileDatabase.DefaultPath))
+                    {
+                        await using var existing = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
+                        if (await FleetMove.WhyNotIntoFile(existing, FileDatabase.DefaultPath) is { } why) throw new FleetMove.RefusedException(why);
+                    }
+                    trialFolder = Path.Combine(Path.GetTempPath(), $"xiv-fleet-trial-{Guid.NewGuid():N}");
+                    var scratch = Path.Combine(trialFolder, FileDatabase.FileName);
+                    await using var file = await FileDatabase.OpenAsync(scratch, Array.Empty<string>());
+                    result = await FleetMove.SharedToFileAsync(pg, file, scratch, files, by, s => MoveStatus = s, trial: true);
                 }
                 else
                 {
+                    await using var file = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
                     result = await FleetMove.SharedToFileAsync(pg, file, FileDatabase.DefaultPath, files, by, s => MoveStatus = s);
-                    Configuration.FleetStore = FleetStoreChoice.ThisPc;
                 }
+                if (trial)
+                {
+                    MoveStatus = result.Text;
+                    Log.Information($"Fleet Companion: {MoveStatus}");
+                    return;
+                }
+                Configuration.FleetStore = toShared ? FleetStoreChoice.SharedDatabase : FleetStoreChoice.ThisPc;
                 Configuration.Enabled = true;
                 Configuration.Save();
                 SaveChoiceForPc(Configuration);
@@ -1024,10 +1045,65 @@ public sealed class Plugin : IDalamudPlugin
             catch (Exception ex)
             {
                 MoveFailed = true;
+                var what = trial ? "The trial run found a problem, so the move wouldn't work yet" : "The move didn't work, so nothing changed";
                 MoveStatus = ex is FleetMove.RefusedException or FileDatabase.RefusedException
-                    ? ex.Message
-                    : $"The move didn't work, so nothing changed: {SyncFailure.Describe(ex)}";
-                Log.Warning($"Fleet Companion: move {(toShared ? "to the shared database" : "to this PC")}: {ex.Message}");
+                    ? (trial ? $"{what}: {ex.Message}" : ex.Message)
+                    : $"{what}: {SyncFailure.Describe(ex)}";
+                Log.Warning($"Fleet Companion: {(trial ? "trial " : "")}move {(toShared ? "to the shared database" : "to this PC")}: {ex.Message}");
+            }
+            finally
+            {
+                if (trialFolder != null)
+                {
+                    System.Data.SQLite.SQLiteConnection.ClearAllPools();
+                    try { Directory.Delete(trialFolder, true); } catch (IOException) { }
+                }
+                moving = false;
+            }
+        });
+    }
+
+    // ---- The fleet file's Check now and Restore (Status page) ----
+
+    /// <summary>What Check now or a restore did (null: nothing yet); FileActionFailed when it didn't work.</summary>
+    public string? FileActionStatus { get; private set; }
+    public bool FileActionFailed { get; private set; }
+
+    /// <summary>Checks the fleet file for damage now, as the weekly check does.</summary>
+    public void CheckFileNow() => RunFileAction("Checking the fleet file...", async conn => (await Keeper.CheckFileAsync(conn)).Text);
+
+    /// <summary>Puts a backup back (FileDatabase.RestoreAsync), while the other games keep running; syncing waits meanwhile.</summary>
+    public void RestoreBackup(string backupPath) => RunFileAction("Restoring...", async conn =>
+    {
+        var text = await FileDatabase.RestoreAsync(conn, FileDatabase.DefaultPath, backupPath, FileDatabase.Files.Embedded(), DateTime.Now,
+            damaged: Keeper.Health is { Ok: false });
+        Keeper.NoteHealth(await FileDatabase.LastHealthAsync(conn));
+        Log.Information($"Fleet Companion: {text}");
+        Fleet.ReadIfDue(everything: true);
+        return text;
+    });
+
+    private void RunFileAction(string doing, Func<DbConnection, Task<string>> action)
+    {
+        if (moving) return;
+        moving = true;
+        FileActionFailed = false;
+        FileActionStatus = doing;
+        Task.Run(async () =>
+        {
+            try
+            {
+                for (var i = 0; i < 120 && syncInProgress; i++) await Task.Delay(500);
+                await using var conn = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
+                FileActionStatus = await action(conn);
+                FileActionFailed = Keeper.Health is { Ok: false };
+            }
+            catch (Exception ex)
+            {
+                FileActionFailed = true;
+                FileActionStatus = ex is FileDatabase.RefusedException ? ex.Message
+                    : $"That didn't work, so nothing changed: {SyncFailure.Describe(ex)} If the file is too damaged to restore this way, close every game and copy the backup over {FileDatabase.FileName}.";
+                Log.Warning($"Fleet Companion: {ex.Message}");
             }
             finally
             {
@@ -1035,6 +1111,9 @@ public sealed class Plugin : IDalamudPlugin
             }
         });
     }
+
+    /// <summary>Whether the last move was a trial run.</summary>
+    public bool MoveWasTrial { get; private set; }
 
     /// <summary>True when the fleet is kept in the one file on this PC (Just this PC).</summary>
     public bool OnThisPc => Configuration.FleetStore == FleetStoreChoice.ThisPc;

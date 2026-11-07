@@ -90,15 +90,22 @@ minute, so nothing is lost mid-copy.
 There's nothing to set up: the file is made the first time the game reads or syncs, and every game on the PC uses the
 same one. The plugin keeps it up to date itself.
 
-- **Backups** are in the `Backups` folder beside the file, one a day, the last 7 kept. The Status page shows the newest
-  and has **Back up now**. To go back to one, close every game, then copy it over `fleet.db`.
+- **Backups** are in the `Backups` folder beside the file, one a day, the last 7 kept. The Status page has **Back up
+  now**, and **Restore a backup** lists them with a **Restore** button each: games can keep running and see the
+  restored fleet straight away, and your fleet as it was is backed up first, so a restore can be undone the same way.
+  (If the file is ever too damaged for that, close every game and copy a backup over `fleet.db`.)
+- **A damage check** runs once a week (and on **Check now** on the Status page): SQLite's own check that the file is
+  whole. If it ever finds damage, the Status page says which backup to go back to, and daily backups pause so the good
+  ones aren't pushed out.
 - **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, the repair kit cost, Fight
   Club's data) are in the plugin's Settings, saved in the file.
 - **Without the app**, the plugin does what the app would: it saves each sub's Next Rank date once an hour for Route
   Optimization's forecast line, and the Supplies page's days are changed on that page.
 - **Moving your fleet** between Just this PC and a shared database, either way, is in the plugin's Settings → **Move
-  your fleet**. Every table is copied and compared before anything switches, it never copies into a place that already
-  has a fleet, and the side it came from is left as it was. Every game on the PC follows at its next sync.
+  your fleet**. **Try the move first** does everything a move does, checks every row, then undoes it, so you know
+  it'll work and how long it takes. A real move copies and compares every table before anything switches, never
+  copies into a place that already has a fleet, and leaves the side it came from as it was. Every game on the PC
+  follows at its next sync.
 
 ## Using it
 

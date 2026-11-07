@@ -436,6 +436,11 @@ public sealed class DatabaseKeeper
         nextAt = DateTime.UtcNow + Every;
         if (result.Created || result.Applied.Count > 0 || (result.Newer && lastLogged != result.Text)) Say(result.Text);
         else lastLogged = null;
+        // Once a week, SQLite's own check that the file isn't damaged.
+        Health ??= await FileDatabase.LastHealthAsync(conn);
+        if (FileDatabase.HealthDue(Health, DateTime.UtcNow)) await CheckFileAsync(conn);
+        // A damaged file isn't backed up: its copies would push out the good ones.
+        if (Health is { Ok: false }) return;
         if (filePath == null || !FileDatabase.BackupDue(filePath, DateTime.Now)) return;
         try
         {
@@ -447,6 +452,24 @@ public sealed class DatabaseKeeper
             if (BackupProblem != ex.Message) Say($"Couldn't back up the fleet file (trying again later): {ex.Message}");
             BackupProblem = ex.Message;
         }
+    }
+
+    /// <summary>The fleet file's last health check (null: not looked at yet).</summary>
+    public FileDatabase.Health? Health { get; private set; }
+
+    /// <summary>Takes a health check made elsewhere (after a restore).</summary>
+    public void NoteHealth(FileDatabase.Health? health)
+    {
+        if (health != null) Health = health;
+    }
+
+    /// <summary>Checks the fleet file now (the weekly check, or Check now on the Status page), and says so when it's damaged.</summary>
+    public async Task<FileDatabase.Health> CheckFileAsync(DbConnection conn)
+    {
+        var health = await FileDatabase.CheckAsync(conn, DateTime.UtcNow);
+        Health = health;
+        if (!health.Ok && lastLogged != health.Text) Say(health.Text);
+        return health;
     }
 
     private void Say(string text)

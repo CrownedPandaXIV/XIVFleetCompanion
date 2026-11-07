@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.3.0 - 2026-11-07
+
+- **Try the move first.** Settings → Move your fleet has a trial run: it copies your whole fleet and checks every row,
+  exactly as a move does, then undoes it all and says whether the move would work and how long it took. Nothing
+  switches and nothing is kept.
+- **Restore a backup in the game** (Just this PC). The Status page lists the backups, each with **Restore**. Games can
+  keep running: the fleet is put back in one go and they see it straight away. The backup is checked whole first, and
+  your fleet as it was is backed up before, so a restore can be undone the same way.
+- **A weekly damage check** (Just this PC): SQLite's own check that the fleet file is whole, once a week and on **Check
+  now** on the Status page. If it ever finds damage, it says which backup to go back to, and daily backups pause so the
+  good ones are kept.
+- Tested with a big made-up fleet (100 characters, 400 subs, 800 retainers, 90 days of history, loot and ventures):
+  every page reads in under a third of a second on both a shared database and the fleet file.
+
 ## 2.2.0 - 2026-11-07
 
 **Just this PC**: your fleet can now live in one file on your PC instead of a PostgreSQL database, with nothing to

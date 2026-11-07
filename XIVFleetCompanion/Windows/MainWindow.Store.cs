@@ -2,6 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -25,7 +26,7 @@ public partial class MainWindow
     private bool backingUp;
     private string? backupResult;
     // The newest backup, looked up every few seconds rather than every frame.
-    private FileInfo? newestBackup;
+    private List<FileInfo> backupList = new();
     private DateTime newestBackupAt = DateTime.MinValue;
 
     // The question, in place of every page until it's answered (the Status and Settings pages still open).
@@ -110,29 +111,46 @@ public partial class MainWindow
         Show(Tab.Summary);
     }
 
-    // The Status page's database lines on the fleet file.
+    // The Status page's lines on the fleet file: where it is, whether it's whole (checked weekly; Check now), and its
+    // backups (Back up now; Restore any of them).
+    private string? restoreArmed;
+    private DateTime restoreArmedUntil = DateTime.MinValue;
+
     private void DrawFileStatus()
     {
         ImGui.BulletText("Fleet data: Just this PC");
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-        {
             ImGui.TextWrapped($"File: {FileDatabase.DefaultPath}");
-            if (DateTime.UtcNow - newestBackupAt > TimeSpan.FromSeconds(5))
-            {
-                newestBackupAt = DateTime.UtcNow;
-                try { newestBackup = FileDatabase.Backups(FileDatabase.DefaultPath).FirstOrDefault(); }
-                catch (IOException) { newestBackup = null; }
-            }
-            var newest = newestBackup;
-            ImGui.TextWrapped(newest == null
-                ? "Backups: none yet (one is made the first time the game reads or syncs each day)."
-                : $"Backups: the newest is from {newest.LastWriteTime:g}, in {FileDatabase.BackupFolder(FileDatabase.DefaultPath)} (the last {FileDatabase.BackupsKept} are kept).");
+
+        // Health.
+        var health = plugin.Keeper.Health;
+        using (ImRaii.PushColor(ImGuiCol.Text, health is { Ok: false } ? Amber : Palette.Dim))
+            ImGui.TextWrapped(health?.Text ?? "Not checked for damage yet (once a week, the first time the game reads the file).");
+        using (ImRaii.Disabled(plugin.Moving))
+        {
+            if (ImGui.Button("Check now")) plugin.CheckFileNow();
         }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("SQLite's own check that the file isn't damaged (it also runs once a week). Games carry on meanwhile.");
+
+        // Backups.
+        if (DateTime.UtcNow - newestBackupAt > TimeSpan.FromSeconds(5))
+        {
+            newestBackupAt = DateTime.UtcNow;
+            try { backupList = FileDatabase.Backups(FileDatabase.DefaultPath); }
+            catch (IOException) { backupList = new List<FileInfo>(); }
+        }
+        ImGui.Spacing();
+        using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
+            ImGui.TextWrapped(backupList.Count == 0
+                ? "Backups: none yet (one is made the first time the game reads or syncs each day)."
+                : $"Backups: {backupList.Count}, the newest from {backupList[0].LastWriteTime:g}, in {FileDatabase.BackupFolder(FileDatabase.DefaultPath)} " +
+                  $"(the last {FileDatabase.BackupsKept} are kept).");
         if (plugin.Keeper.BackupProblem is { } problem)
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
                 ImGui.TextWrapped($"The last backup didn't work: {problem}");
 
-        using (ImRaii.Disabled(backingUp))
+        using (ImRaii.Disabled(backingUp || plugin.Moving))
         {
             if (ImGui.Button("Back up now"))
             {
@@ -165,6 +183,41 @@ public partial class MainWindow
             ImGui.SameLine();
             ImGui.TextWrapped(backupResult);
         }
+
+        if (backupList.Count > 0 && ImGui.TreeNode($"Restore a backup##restore"))
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
+                ImGui.TextWrapped("Puts the fleet back as it was in that backup. Games can keep running: they see it straight away. " +
+                                  "Your fleet as it is now is backed up first, so a restore can be undone the same way.");
+            foreach (var backup in backupList)
+            {
+                var armed = restoreArmed == backup.FullName && DateTime.UtcNow < restoreArmedUntil;
+                using (ImRaii.Disabled(plugin.Moving))
+                {
+                    if (ImGui.Button((armed ? "Click again to restore" : "Restore") + $"##{backup.Name}"))
+                    {
+                        if (armed)
+                        {
+                            restoreArmed = null;
+                            plugin.RestoreBackup(backup.FullName);
+                        }
+                        else
+                        {
+                            restoreArmed = backup.FullName;
+                            restoreArmedUntil = DateTime.UtcNow.AddSeconds(5);
+                        }
+                    }
+                }
+                ImGui.SameLine();
+                ImGui.TextUnformatted($"{backup.LastWriteTime:g}");
+                ImGui.SameLine();
+                Colored(Dim, $"{backup.Name}, {backup.Length / 1024.0 / 1024.0:0.0} MB");
+            }
+            ImGui.TreePop();
+        }
+        if (plugin.FileActionStatus is { } done)
+            using (ImRaii.PushColor(ImGuiCol.Text, plugin.FileActionFailed ? Amber : Palette.Dim))
+                ImGui.TextWrapped(done);
     }
 
     // ---- Moving the fleet (Settings) ----
@@ -203,6 +256,15 @@ public partial class MainWindow
         }
 
         ImGui.Spacing();
+        // A trial first: everything a move does, checked, then undone.
+        using (ImRaii.Disabled(plugin.Moving))
+        {
+            if (ImGui.Button("Try the move first")) plugin.MoveFleet(toShared, trial: true);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Copies your whole fleet and checks every row, exactly as a move does, then undoes it all. Nothing switches and nothing is lost. " +
+                             "It tells you whether the move would work and how long it takes.");
+        ImGui.SameLine();
         var armed = DateTime.UtcNow < moveArmedUntil;
         var label = toShared ? "Move my fleet to the shared database" : "Move my fleet to this PC";
         using (ImRaii.Disabled(plugin.Moving))
@@ -221,7 +283,7 @@ public partial class MainWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Syncing waits while it copies. If anything goes wrong, nothing changes.");
         if (plugin.MoveStatus is { } status)
-            using (ImRaii.PushColor(ImGuiCol.Text, plugin.MoveFailed ? Amber : Palette.Dim))
+            using (ImRaii.PushColor(ImGuiCol.Text, plugin.MoveFailed ? Amber : plugin.MoveWasTrial ? Palette.Good : Palette.Dim))
                 ImGui.TextWrapped(status);
     }
 }

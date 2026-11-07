@@ -28,10 +28,12 @@ public static class FleetMove
     }
 
     /// <summary>What was moved: rows per table.</summary>
-    public sealed record Result(IReadOnlyList<(string Table, long Rows)> Tables)
+    public sealed record Result(IReadOnlyList<(string Table, long Rows)> Tables, bool Trial = false, double Seconds = 0)
     {
         public long Rows => Tables.Sum(t => t.Rows);
-        public string Text => $"Moved {Rows:N0} rows in {Tables.Count} tables; every table matches.";
+        public string Text => Trial
+            ? $"Trial run: {Rows:N0} rows in {Tables.Count} tables copied and checked in {Seconds:0.#} seconds, and every row matched. Nothing was changed: the move would work."
+            : $"Moved {Rows:N0} rows in {Tables.Count} tables; every table matches.";
     }
 
     /// <summary>The tables that move: every table the fleet file has, except the lookups its tables file fills itself.</summary>
@@ -68,6 +70,14 @@ public static class FleetMove
         {
             return null;
         }
+    }
+
+    /// <summary>Why the fleet can't be moved into this fleet file (it has a fleet of its own), or null when it can.</summary>
+    public static async Task<string?> WhyNotIntoFile(DbConnection file, string filePath)
+    {
+        var there = await CharacterCount(file);
+        if (there == 0 || await MovedAwayNote(file) != null) return null;
+        return $"This PC already has a fleet file with a fleet in it ({there} character{(there == 1 ? "" : "s")}), so nothing was copied. It's at {filePath}.";
     }
 
     // ---- Column types ----
@@ -148,9 +158,12 @@ public static class FleetMove
     // ---- Moving ----
 
     /// <param name="progress">Told what's happening ("Copying companion_metric_history...").</param>
+    /// <param name="trial">Copy and check everything, then undo it all (the shared database only keeps its tables, made
+    /// ready as the app makes them): whether the move would work, and how long it takes.</param>
     public static async Task<Result> FileToSharedAsync(DbConnection file, NpgsqlConnection pg, FileDatabase.Files files, DatabaseUpkeep.Files pgFiles,
-        string recordedBy, string movedTo, Action<string>? progress = null)
+        string recordedBy, string movedTo, Action<string>? progress = null, bool trial = false)
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         progress?.Invoke("Getting the shared database ready...");
         var ready = await DatabaseUpkeep.EnsureAsync(pg, pgFiles, recordedBy, wait: true);
         if (ready.Newer)
@@ -176,12 +189,18 @@ public static class FleetMove
                 }
                 progress?.Invoke("Checking every table arrived...");
                 await Compare(file, null, pg, tx, moved);
-                await tx.CommitAsync();
+                if (trial) await tx.RollbackAsync();
+                else await tx.CommitAsync();
             }
             catch
             {
                 await tx.RollbackAsync();
                 throw;
+            }
+            if (trial)
+            {
+                await Db.Exec(file, "ROLLBACK");
+                return new Result(moved, true, clock.Elapsed.TotalSeconds);
             }
             await Db.Exec(file, "INSERT INTO companion_file_info (key, value) VALUES ('moved_to', @v) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 null, ("v", movedTo));
@@ -199,19 +218,18 @@ public static class FleetMove
     /// Copies the shared database's fleet into the file. A file that already has a fleet is refused, unless its fleet was
     /// moved away earlier (its note): then a backup of it is made first and it's emptied.
     /// </summary>
+    /// <param name="trial">Copy and check everything, then undo it (the file keeps only its tables, made ready).</param>
     public static async Task<Result> SharedToFileAsync(NpgsqlConnection pg, DbConnection file, string filePath, FileDatabase.Files files, string recordedBy,
-        Action<string>? progress = null)
+        Action<string>? progress = null, bool trial = false)
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         progress?.Invoke("Getting the fleet file ready...");
         var ready = await FileDatabase.EnsureAsync(file, files, recordedBy);
         if (ready.Newer)
             throw new RefusedException("The fleet file on this PC was updated by a newer plugin. Update this plugin first, then move.");
+        if (await WhyNotIntoFile(file, filePath) is { } why) throw new RefusedException(why);
         var there = await CharacterCount(file);
-        var reused = await MovedAwayNote(file);
-        if (there > 0 && reused == null)
-            throw new RefusedException($"This PC already has a fleet file with a fleet in it ({there} character{(there == 1 ? "" : "s")}), so nothing was copied. " +
-                                       $"It's at {filePath}.");
-        if (there > 0)
+        if (there > 0 && !trial)
         {
             progress?.Invoke("Backing up the old fleet file...");
             await FileDatabase.BackUpAsync(file, filePath, DateTime.Now);
@@ -233,7 +251,8 @@ public static class FleetMove
             await Db.Exec(file, "DELETE FROM companion_file_info WHERE key = 'moved_to'", tx);
             progress?.Invoke("Checking every table arrived...");
             await Compare(file, tx, pg, read, moved);
-            await tx.CommitAsync();
+            if (trial) await tx.RollbackAsync();
+            else await tx.CommitAsync();
         }
         catch
         {
@@ -244,7 +263,7 @@ public static class FleetMove
         {
             await read.RollbackAsync();
         }
-        return new Result(moved);
+        return new Result(moved, trial, clock.Elapsed.TotalSeconds);
     }
 
     // Every row of a table from the file into PostgreSQL (its columns both have), a few hundred to a statement.
