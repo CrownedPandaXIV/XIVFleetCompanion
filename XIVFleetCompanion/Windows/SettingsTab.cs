@@ -93,7 +93,7 @@ public class SettingsTab : IDisposable
     // Which characters are synced: every one except the unticked, or only the ticked (for an account
     // with many characters of which only a few should reach the app).
     // The shared database's connection (Shared between PCs): Local or Remote, and its saved login.
-    private void DrawDatabaseConnection()
+    public void DrawDatabaseConnection()
     {
         ImGui.Text("Connection Mode");
 
@@ -102,6 +102,7 @@ public class SettingsTab : IDisposable
         {
             configuration.UseRemoteConnection = false;
             configuration.Save();
+            Plugin.SaveChoiceForPc(configuration);
             LoadSavedCredential();
         }
         ImGui.SameLine();
@@ -109,6 +110,7 @@ public class SettingsTab : IDisposable
         {
             configuration.UseRemoteConnection = true;
             configuration.Save();
+            Plugin.SaveChoiceForPc(configuration);
             LoadSavedCredential();
         }
 

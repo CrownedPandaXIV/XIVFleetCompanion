@@ -4,14 +4,6 @@ using System.Collections.Generic;
 
 namespace XIVFleetCompanion;
 
-/// <summary>Where the fleet lives: a PostgreSQL database shared between PCs (with the app), or one file on this PC.</summary>
-public enum FleetStoreChoice
-{
-    NotChosen = 0,
-    SharedDatabase = 1,
-    ThisPc = 2,
-}
-
 [Serializable]
 public class Configuration : IPluginConfiguration
 {

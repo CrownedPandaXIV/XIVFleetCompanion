@@ -20,6 +20,18 @@ install.
 - **It keeps itself up to date.** The plugin adds what a newer version needs to the file (never removing anything) and
   replaces the fleet views when they change, all or nothing. A file a newer plugin in another game already updated is
   left alone, and the Status page says to update.
+- **Moving your fleet, either way** (Settings → **Move your fleet**):
+  - from Just this PC to a shared database, when you get a second PC or want the app: set up an empty database with the
+    app's Database Helper, enter its details, and move;
+  - from a shared database to Just this PC, when this is the only PC you play on (it warns you if another PC synced to
+    the database in the last day).
+
+  Syncing waits while every table is copied, and other games on the PC wait to write. Then every row is compared on
+  both sides, and only when all of it matches does anything switch. It never copies into a place that already has a
+  fleet, and the side it came from is left as it was (a fleet file moved away is backed up before it's ever reused).
+  If anything goes wrong, nothing changes.
+- **Every game on a PC goes the same way.** The choice is kept beside the fleet file, so when one game chooses or
+  moves, the others follow at their next sync. A second game on a PC that's already set up isn't asked.
 - **Daily backups.** Once a day while a game runs, the file is copied into a `Backups` folder beside it, and the last 7
   are kept. The Status page shows the newest and has **Back up now**.
 - On Just this PC, Settings shows where the file is in place of the database login, and the Status page leaves out the
@@ -27,7 +39,7 @@ install.
   and the PCs page talks about the games on this PC.
 - **Without the app, the plugin does its part:** it saves each sub's Next Rank date once an hour (as the app does while
   it's open), so Route Optimization's forecast line works on Just this PC too.
-- **The Supplies page's days can be changed in the game**: how many days its use per day is measured over (3, 7, 14 or
+- **The Supplies page's days can be changed in the game**, on their own line under the table's buttons: how many days its use per day is measured over (3, 7, 14 or
   30) and how many days of supplies to buy for (1 to 90), with the same checks as the app's Supplies tab.
 - Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) works on the file.
   The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and every page must read

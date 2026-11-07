@@ -1529,66 +1529,75 @@ internal static partial class Program
             null => null,
             _ => JsonNode.Parse(n.ToJsonString()),
         };
+        System.Data.Common.DbConnection left = pg, right = lite;
+        var label = "file";
         async Task Same<T>(string what, Func<System.Data.Common.DbConnection, Task<T>> read, bool unordered = false)
         {
             string a, b;
             try
             {
-                a = JsonSerializer.Serialize(await read(pg), options);
-                b = JsonSerializer.Serialize(await read(lite), options);
+                a = JsonSerializer.Serialize(await read(left), options);
+                b = JsonSerializer.Serialize(await read(right), options);
             }
             catch (Exception ex)
             {
-                Check(false, $"file: {what} reads on both: {ex.GetType().Name}: {ex.Message.Replace("\r", " ").Replace("\n", " ")}");
+                Check(false, $"{label}: {what} reads on both: {ex.GetType().Name}: {ex.Message.Replace("\r", " ").Replace("\n", " ")}");
                 return;
             }
             var diff = unordered ? JsonDiff(Sorted(JsonNode.Parse(a)), Sorted(JsonNode.Parse(b)), "") : JsonDiff(JsonNode.Parse(a), JsonNode.Parse(b), "");
-            Check(diff == null, $"file: {what} the same on both" + (diff == null ? $" ({a.Length} characters)" : $": {diff}"));
+            Check(diff == null, $"{label}: {what} the same on both" + (diff == null ? $" ({a.Length} characters)" : $": {diff}"));
         }
-        await Same("logins", c => FleetWriter.ReadLoginOwnersAsync(c, new ulong[] { 1001, 1002, 1003 }));
-        await Same("item totals of a character", c => FleetWriter.ReadItemTotalsAsync(c, 1001, new uint[] { 10155, 10373, 5 }));
-        await Same("sources stored", c => FleetWriter.ReadStoredSourceCountAsync(c, 1001));
-        await Same("how long ago things were stored", async c =>
+        async Task CompareAll()
         {
-            var ages = await FleetWriter.ReadStoredAgesAsync(c, new ulong[] { 1001, 1002 }, new ulong[] { bigFc });
-            return new { Synced = ages.Synced.Keys.OrderBy(k => k).ToList(), Inventory = ages.Inventory.Keys.Select(k => $"{k.Owner}/{k.Source}").OrderBy(k => k).ToList(),
-                Chest = ages.Chest.Keys.ToList(), Recent = ages.Synced.Values.Concat(ages.Inventory.Values).Concat(ages.Chest.Values).All(t => t < TimeSpan.FromMinutes(5)) };
-        });
-        await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToList());
-        await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 1001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
-        await Same("settings", FleetReader.ReadSettings);
-        await Same("Subs", FleetReader.ReadSubs);
-        await Same("Supplies", FleetReader.ReadSupplies);
-        await Same("Summary", FleetReader.ReadSummary);
-        await Same("what needs attention", FleetReader.ReadAlerts);
-        await Same("Roster", FleetReader.ReadRoster);
-        await Same("Retainers", FleetReader.ReadRetainers);
-        await Same("PCs", FleetReader.ReadPcs);
-        await Same("retainer counts", FleetReader.ReadRetainerCounts);
-        await Same("Free Companies", FleetReader.ReadFcs);
-        await Same("Inventory", c => FleetReader.ReadHoldings(c, "true"));
-        await Same("a character's stacks", c => FleetReader.ReadHoldings(c, "kind <> 'fc'", "owner_cid", new object[] { 1001L }), unordered: true);
-        await Same("a Free Company's chest", c => FleetReader.ReadHoldings(c, "kind = 'fc'", "fc_id", new object[] { (decimal)bigFc }));
-        await Same("Where is it?", c => FleetReader.ReadHoldings(c, "NOT money", "item_id", new object[] { 10155, 22500 }), unordered: true);
-        await Same("item totals", FleetReader.ReadItemTotals, unordered: true);
-        await Same("Gil & Market", async c => (await FleetReader.ReadMarketData(c)).Read);
-        await Same("what to ask Universalis", async c => { var ask = (await FleetReader.ReadMarketData(c)).Ask; return ask == null ? null : new { Exclude = ask.Exclude.OrderBy(x => x).ToList(), Wanted = ask.Wanted.Select(w => $"{w.World}:{w.ItemId}").OrderBy(x => x).ToList() }; });
-        await Same("routes' inputs", FleetReader.ReadRoutesInputs, unordered: true);
-        await Same("forecast accuracy", FleetReader.ReadForecasts);
-        await Same("Loot per Voyage", FleetReader.ReadLoot);
-        await Same("Parts", async c => (await FleetReader.ReadParts(c)).Needs);
-        await Same("Parts' inputs", FleetReader.ReadPartsInputs, unordered: true);
-        await Same("Salvage", FleetReader.ReadSalvage);
-        await Same("Income", FleetReader.ReadIncome, unordered: true);
-        await Same("venture income", FleetReader.ReadVentures, unordered: true);
-        await Same("items held", FleetReader.ReadHeldItems, unordered: true);
-        await Same("Shopping List", FleetReader.ReadShopping);
-        await Same("Trends: what's recorded", FleetReader.ReadTrendsMeta);
-        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        await Same("Trends: gil, whole fleet", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, null)));
-        await Same("Trends: gil, each character", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, new() { "1001", "1003" })));
-        await Same("Trends: a Free Company's points", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 5, new() { new("fc_points", "fc") }, new() { bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture) })));
-        await Same("Trends: a sum of two", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 6, new() { new("gil", "character"), new("fc_points", "fc", 2) }, null)));
+            await Same("logins", c => FleetWriter.ReadLoginOwnersAsync(c, new ulong[] { 1001, 1002, 1003 }));
+            await Same("item totals of a character", c => FleetWriter.ReadItemTotalsAsync(c, 1001, new uint[] { 10155, 10373, 5 }));
+            await Same("sources stored", c => FleetWriter.ReadStoredSourceCountAsync(c, 1001));
+            await Same("how long ago things were stored", async c =>
+            {
+                var ages = await FleetWriter.ReadStoredAgesAsync(c, new ulong[] { 1001, 1002 }, new ulong[] { bigFc });
+                return new { Synced = ages.Synced.Keys.OrderBy(k => k).ToList(), Inventory = ages.Inventory.Keys.Select(k => $"{k.Owner}/{k.Source}").OrderBy(k => k).ToList(),
+                    Chest = ages.Chest.Keys.ToList(), Recent = ages.Synced.Values.Concat(ages.Inventory.Values).Concat(ages.Chest.Values).All(t => t < TimeSpan.FromMinutes(5)) };
+            });
+            await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToList());
+            await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 1001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
+            await Same("settings", FleetReader.ReadSettings);
+            await Same("Subs", FleetReader.ReadSubs);
+            await Same("Supplies", FleetReader.ReadSupplies);
+            await Same("Summary", FleetReader.ReadSummary);
+            await Same("what needs attention", FleetReader.ReadAlerts);
+            await Same("Roster", FleetReader.ReadRoster);
+            await Same("Retainers", FleetReader.ReadRetainers);
+            await Same("PCs", FleetReader.ReadPcs);
+            await Same("retainer counts", FleetReader.ReadRetainerCounts);
+            await Same("Free Companies", FleetReader.ReadFcs);
+            await Same("Inventory", c => FleetReader.ReadHoldings(c, "true"));
+            await Same("a character's stacks", c => FleetReader.ReadHoldings(c, "kind <> 'fc'", "owner_cid", new object[] { 1001L }), unordered: true);
+            await Same("a Free Company's chest", c => FleetReader.ReadHoldings(c, "kind = 'fc'", "fc_id", new object[] { (decimal)bigFc }));
+            await Same("Where is it?", c => FleetReader.ReadHoldings(c, "NOT money", "item_id", new object[] { 10155, 22500 }), unordered: true);
+            await Same("item totals", FleetReader.ReadItemTotals, unordered: true);
+            await Same("Gil & Market", async c => (await FleetReader.ReadMarketData(c)).Read);
+            await Same("what to ask Universalis", async c => { var ask = (await FleetReader.ReadMarketData(c)).Ask; return ask == null ? null : new { Exclude = ask.Exclude.OrderBy(x => x).ToList(), Wanted = ask.Wanted.Select(w => $"{w.World}:{w.ItemId}").OrderBy(x => x).ToList() }; });
+            await Same("routes' inputs", FleetReader.ReadRoutesInputs, unordered: true);
+            await Same("forecast accuracy", FleetReader.ReadForecasts);
+            await Same("Loot per Voyage", FleetReader.ReadLoot);
+            await Same("Parts", async c => (await FleetReader.ReadParts(c)).Needs);
+            await Same("Parts' inputs", FleetReader.ReadPartsInputs, unordered: true);
+            await Same("Salvage", FleetReader.ReadSalvage);
+            await Same("Income", FleetReader.ReadIncome, unordered: true);
+            await Same("venture income", FleetReader.ReadVentures, unordered: true);
+            await Same("items held", FleetReader.ReadHeldItems, unordered: true);
+            await Same("Shopping List", FleetReader.ReadShopping);
+            await Same("Trends: what's recorded", FleetReader.ReadTrendsMeta);
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await Same("Trends: gil, whole fleet", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, null)));
+            await Same("Trends: gil, each character", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, new() { "1001", "1003" })));
+            await Same("Trends: a Free Company's points", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 5, new() { new("fc_points", "fc") }, new() { bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture) })));
+            await Same("Trends: a sum of two", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 6, new() { new("gil", "character"), new("fc_points", "fc", 2) }, null)));
+        }
+        await CompareAll();
+
+        // ---- Moving the fleet (step 4): the file's into an empty shared database, and that back into a new file ----
+        await MoveChecks(admin, given, pg, lite, async (x, y, what) => { left = x; right = y; label = what; await CompareAll(); });
 
         await lite.CloseAsync();
         System.Data.SQLite.SQLiteConnection.ClearAllPools();

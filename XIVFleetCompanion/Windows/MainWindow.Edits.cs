@@ -357,35 +357,51 @@ public partial class MainWindow
     private int restockDraft = -1;
     private int restockShown = -1;
 
+    // On its own line, each label before what it sets: "Use per day measured over [14 days] · Buy enough for [14] days [Save]".
     private void SupplyDaysEditor(int window, int target)
     {
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("Use per day measured over");
+        Hover("How many days back the use per day is measured" + (WithApp ? ", for the app too." : "."));
+        ImGui.SameLine();
         ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("use per day over##supplyWindow", $"{window} days"))
+        using (var combo = ImRaii.Combo("##supplyWindow", $"{window} days"))
         {
             if (combo)
                 foreach (var d in FleetEdits.WindowChoices)
                     if (ImGui.Selectable($"{d} days", d == window) && d != window)
                         reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, d, target));
         }
-        Hover("How many days back the use per day is measured" + (WithApp ? ", for the app too." : "."));
+        ImGui.SameLine();
+        Colored(Dim, "·");
+        ImGui.SameLine();
+        ImGui.TextUnformatted("Buy enough for");
+        Hover($"The To buy column: enough supplies to last this many days (1 to {FleetEdits.MaxRestockDays})" + (WithApp ? ", for the app too." : "."));
         // The box follows what was read until it's changed here.
         if (restockShown != target) { restockShown = target; restockDraft = target; }
         ImGui.SameLine();
         ImGui.SetNextItemWidth(90 * ImGuiHelpers.GlobalScale);
-        ImGui.InputInt("days to buy for##restockDays", ref restockDraft, 1);
+        ImGui.InputInt("##restockDays", ref restockDraft, 1);
         restockDraft = Math.Clamp(restockDraft, 1, FleetEdits.MaxRestockDays);
-        Hover($"To buy: enough for this many days (1 to {FleetEdits.MaxRestockDays})" + (WithApp ? ", for the app too." : "."));
         ImGui.SameLine();
-        using (ImRaii.Disabled(reader.Editing || restockDraft == target))
+        ImGui.TextUnformatted("days");
+        if (restockDraft != target)
         {
-            if (ImGui.Button("Save##restockDays"))
+            ImGui.SameLine();
+            using (ImRaii.Disabled(reader.Editing))
             {
-                var days = restockDraft;
-                reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, window, days));
+                if (ImGui.Button("Save##restockDays"))
+                {
+                    var days = restockDraft;
+                    reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, window, days));
+                }
             }
         }
-        ImGui.SameLine();
-        EditLine();
+        if (reader.Editing || reader.LastEdit != null)
+        {
+            ImGui.SameLine();
+            EditLine();
+        }
     }
 
     // ---- Removing a PC (PCs page) ----

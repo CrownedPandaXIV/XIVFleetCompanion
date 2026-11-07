@@ -79,6 +79,8 @@ public sealed class Plugin : IDalamudPlugin
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        // Another game on this PC already chose (or moved): this one follows, without asking.
+        FollowPcChoice(now: true);
         // A setup from before "Just this PC" (2.2) already uses a shared database: it is never asked.
         if (Configuration.FleetStore == FleetStoreChoice.NotChosen &&
             (PostgresCredentialStore.Load(false) != null || PostgresCredentialStore.Load(true) != null || Configuration.LastSyncTimestamp != null))
@@ -492,6 +494,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task RunSyncAsync()
     {
+        if (moving) return;
         var fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
         if (fromAutoRetainer == null)
         {
@@ -930,6 +933,109 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    // ---- Which way this PC goes (store.json beside the fleet file, shared by every game on it) ----
+
+    private DateTime choiceCheckedAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Follows what another game on this PC chose or moved to (FleetMove's store.json), looked at every 15 seconds at
+    /// most. A setup from before any game wrote it keeps its own choice.
+    /// </summary>
+    public void FollowPcChoice(bool now = false)
+    {
+        if (!now && DateTime.UtcNow - choiceCheckedAt < TimeSpan.FromSeconds(15)) return;
+        choiceCheckedAt = DateTime.UtcNow;
+        var choice = FleetMove.ReadChoice(FleetMove.ChoicePath(FileDatabase.DefaultPath));
+        if (choice == null || moving) return;
+        if (choice.Store == Configuration.FleetStore && (choice.Store != FleetStoreChoice.SharedDatabase || choice.UseRemote == Configuration.UseRemoteConnection))
+            return;
+        var was = Configuration.FleetStore;
+        Configuration.FleetStore = choice.Store;
+        if (choice.Store == FleetStoreChoice.SharedDatabase) Configuration.UseRemoteConnection = choice.UseRemote;
+        Configuration.Save();
+        if (was != FleetStoreChoice.NotChosen)
+            Log.Information($"Fleet Companion: another game on this PC ({choice.ChangedBy}) moved the fleet {(choice.Store == FleetStoreChoice.ThisPc ? "to this PC's fleet file" : "to the shared database")}; this game follows.");
+    }
+
+    /// <summary>Saves this game's choice for every game on this PC (they follow it at their next read or sync).</summary>
+    public static void SaveChoiceForPc(Configuration configuration)
+    {
+        if (configuration.FleetStore == FleetStoreChoice.NotChosen) return;
+        try
+        {
+            FleetMove.WriteChoice(FleetMove.ChoicePath(FileDatabase.DefaultPath),
+                new FleetMove.PcChoice(configuration.FleetStore, configuration.UseRemoteConnection, $"plugin {VersionText} ({configuration.AccountLabel})", DateTime.UtcNow));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning($"Fleet Companion: couldn't note where the fleet lives for the other games on this PC: {ex.Message}");
+        }
+    }
+
+    // ---- Moving the fleet (FleetMove) ----
+
+    private volatile bool moving;
+    public bool Moving => moving;
+    /// <summary>What the move is doing, or how it ended (null: none yet); MoveFailed when it didn't move.</summary>
+    public string? MoveStatus { get; private set; }
+    public bool MoveFailed { get; private set; }
+
+    /// <summary>
+    /// Moves the fleet: from the fleet file into the shared database (its saved connection), or from the shared database
+    /// into this PC's fleet file. Syncing waits meanwhile; on success this game, then every game on the PC, uses the new
+    /// place. On any problem nothing changes.
+    /// </summary>
+    public void MoveFleet(bool toShared)
+    {
+        if (moving) return;
+        moving = true;
+        MoveFailed = false;
+        MoveStatus = "Waiting for the sync that's running to finish...";
+        Task.Run(async () =>
+        {
+            try
+            {
+                for (var i = 0; i < 120 && syncInProgress; i++) await Task.Delay(500);
+                var files = FileDatabase.Files.Embedded();
+                var by = $"plugin {VersionText}";
+                await using var pg = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection)
+                                     ?? throw new FleetMove.RefusedException("Enter the shared database's details above and save them first.");
+                await using var file = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
+                FleetMove.Result result;
+                if (toShared)
+                {
+                    var target = new Npgsql.NpgsqlConnectionStringBuilder(pg.ConnectionString);
+                    result = await FleetMove.FileToSharedAsync(file, pg, files, DatabaseUpkeep.Files.Embedded(), by,
+                        $"the shared database {target.Database} at {target.Host}:{target.Port}, {DateTime.Now:g}", s => MoveStatus = s);
+                    Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+                }
+                else
+                {
+                    result = await FleetMove.SharedToFileAsync(pg, file, FileDatabase.DefaultPath, files, by, s => MoveStatus = s);
+                    Configuration.FleetStore = FleetStoreChoice.ThisPc;
+                }
+                Configuration.Enabled = true;
+                Configuration.Save();
+                SaveChoiceForPc(Configuration);
+                MoveStatus = $"{result.Text} Your fleet is now {(toShared ? "in the shared database" : "on this PC")}; the other games on this PC follow at their next sync.";
+                Log.Information($"Fleet Companion: {MoveStatus}");
+                Fleet.ReadIfDue(everything: true);
+            }
+            catch (Exception ex)
+            {
+                MoveFailed = true;
+                MoveStatus = ex is FleetMove.RefusedException or FileDatabase.RefusedException
+                    ? ex.Message
+                    : $"The move didn't work, so nothing changed: {SyncFailure.Describe(ex)}";
+                Log.Warning($"Fleet Companion: move {(toShared ? "to the shared database" : "to this PC")}: {ex.Message}");
+            }
+            finally
+            {
+                moving = false;
+            }
+        });
+    }
+
     /// <summary>True when the fleet is kept in the one file on this PC (Just this PC).</summary>
     public bool OnThisPc => Configuration.FleetStore == FleetStoreChoice.ThisPc;
 
@@ -937,7 +1043,13 @@ public sealed class Plugin : IDalamudPlugin
     /// Where the fleet is, or null when nothing is set up: the fleet file (Just this PC), else the shared database's
     /// connection (no saved connection: null).
     /// </summary>
-    public string? FleetLocation() => Configuration.FleetStore switch
+    public string? FleetLocation()
+    {
+        FollowPcChoice();
+        return FleetLocationNow();
+    }
+
+    private string? FleetLocationNow() => Configuration.FleetStore switch
     {
         FleetStoreChoice.ThisPc => FileDatabase.DefaultPath,
         FleetStoreChoice.SharedDatabase => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString,
@@ -950,6 +1062,7 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     public async Task<DbConnection?> OpenFleetAsync()
     {
+        FollowPcChoice();
         if (Configuration.FleetStore == FleetStoreChoice.ThisPc) return await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
         if (Configuration.FleetStore == FleetStoreChoice.SharedDatabase) return await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
         return null;

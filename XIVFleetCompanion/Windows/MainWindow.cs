@@ -147,6 +147,8 @@ public partial class MainWindow : Window, IDisposable
                     DrawSharedSettings();
                     ImGui.Spacing();
                     DrawFightClubImport();
+                    ImGui.Spacing();
+                    DrawMoveFleet();
                 });
                 break;
         }
@@ -903,13 +905,10 @@ public partial class MainWindow : Window, IDisposable
         RefreshButton();
         ImGui.SameLine();
         SuppliesTable.DrawControls();
-        var supplies = reader.Supplies.Data;
-        if (supplies != null && supplies.Count > 0)
-        {
-            ImGui.SameLine();
-            SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
-        }
+        ImGui.SameLine();
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
+        var supplies = reader.Supplies.Data;
+        if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
         if (supplies == null) return;
         SuppliesTable.Draw(supplies);
     }

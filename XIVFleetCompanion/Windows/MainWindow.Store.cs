@@ -37,7 +37,7 @@ public partial class MainWindow
         ImGui.Text("Where should your fleet data live?");
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
             ImGui.TextWrapped("The plugin keeps your characters, subs, retainers and their history somewhere it can read them back. Choose one; " +
-                              "moving between the two comes in a later version.");
+                              "you can move your fleet to the other later (Settings → Move your fleet). Every game on this PC uses the same.");
         ImGui.Spacing();
 
         var cardWidth = Math.Max(240f * ImGuiHelpers.GlobalScale, (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2f);
@@ -75,6 +75,7 @@ public partial class MainWindow
                 {
                     plugin.Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
                     plugin.Configuration.Save();
+                    Plugin.SaveChoiceForPc(plugin.Configuration);
                     storeProblem = null;
                     Show(Tab.Settings);
                 }
@@ -103,6 +104,8 @@ public partial class MainWindow
         // Nothing else to set up, so syncing starts straight away.
         plugin.Configuration.Enabled = true;
         plugin.Configuration.Save();
+        // Every other game on this PC uses the file too, without being asked.
+        Plugin.SaveChoiceForPc(plugin.Configuration);
         reader.ReadIfDue(everything: true);
         Show(Tab.Summary);
     }
@@ -162,5 +165,63 @@ public partial class MainWindow
             ImGui.SameLine();
             ImGui.TextWrapped(backupResult);
         }
+    }
+
+    // ---- Moving the fleet (Settings) ----
+
+    private DateTime moveArmedUntil = DateTime.MinValue;
+
+    private void DrawMoveFleet()
+    {
+        if (plugin.Configuration.FleetStore == FleetStoreChoice.NotChosen) return;
+        if (!ImGui.CollapsingHeader("Move your fleet")) return;
+        var toShared = plugin.OnThisPc;
+        if (toShared)
+        {
+            ImGui.TextWrapped("Your fleet is in a file on this PC. Moving it to a shared database lets your other PCs and the XIV Fleet Companion app use it too.");
+            using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
+                ImGui.TextWrapped("1. Set up an empty database with the app (its Database Helper is enough). 2. Enter its details below and save them. " +
+                                  "3. Move. Every table is copied and checked before anything switches; the file stays as it is, as a backup.");
+            ImGui.Spacing();
+            settings.DrawDatabaseConnection();
+        }
+        else
+        {
+            ImGui.TextWrapped("Your fleet is in a shared database. Moving it to this PC keeps it in one file here instead, with nothing else to install: " +
+                              "for when this is the only PC you play on.");
+            using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
+                ImGui.TextWrapped("Every table is copied and checked before anything switches. The shared database is left as it is. " +
+                                  "The XIV Fleet Companion app can't open the file, so afterwards you see your fleet in the game.");
+            // Other PCs still syncing to the database would carry on there, not in this PC's file.
+            reader.ReadIfDue(withLists: true);
+            var others = reader.Pcs.Data?.Where(p => !string.Equals(p.Pc, Environment.MachineName, StringComparison.OrdinalIgnoreCase)
+                                                     && p.LastSync is { } at && DateTime.Now - at < TimeSpan.FromDays(1)).Select(p => p.Pc).Distinct().ToList();
+            if (others is { Count: > 0 })
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                    ImGui.TextWrapped($"{string.Join(", ", others)} synced to the shared database in the last day. After the move, {(others.Count == 1 ? "it keeps" : "they keep")} " +
+                                      "syncing there, not to this PC: only move if you've stopped playing there.");
+        }
+
+        ImGui.Spacing();
+        var armed = DateTime.UtcNow < moveArmedUntil;
+        var label = toShared ? "Move my fleet to the shared database" : "Move my fleet to this PC";
+        using (ImRaii.Disabled(plugin.Moving))
+        {
+            if (ImGui.Button(armed ? "Click again to move" : label))
+            {
+                if (armed)
+                {
+                    moveArmedUntil = DateTime.MinValue;
+                    plugin.MoveFleet(toShared);
+                }
+                else
+                    moveArmedUntil = DateTime.UtcNow.AddSeconds(5);
+            }
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Syncing waits while it copies. If anything goes wrong, nothing changes.");
+        if (plugin.MoveStatus is { } status)
+            using (ImRaii.PushColor(ImGuiCol.Text, plugin.MoveFailed ? Amber : Palette.Dim))
+                ImGui.TextWrapped(status);
     }
 }

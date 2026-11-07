@@ -96,7 +96,9 @@ same one. The plugin keeps it up to date itself.
   Club's data) are in the plugin's Settings, saved in the file.
 - **Without the app**, the plugin does what the app would: it saves each sub's Next Rank date once an hour for Route
   Optimization's forecast line, and the Supplies page's days are changed on that page.
-- Moving your fleet between Just this PC and a shared database comes in a later version.
+- **Moving your fleet** between Just this PC and a shared database, either way, is in the plugin's Settings → **Move
+  your fleet**. Every table is copied and compared before anything switches, it never copies into a place that already
+  has a fleet, and the side it came from is left as it was. Every game on the PC follows at its next sync.
 
 ## Using it
 
