@@ -3,9 +3,12 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
-## 2.0.0 - unreleased
+## 2.0.0 - 2026-11-07
 
-In progress: the fleet inside the game. Built in stages, each tried as a test build first.
+The fleet inside the game: every page of the app in the plugin's own window (Summary, Subs, Route Optimization, Parts,
+Supplies, Salvage, Roster, Retainers, Free Companies, Inventory, Income, Gil & Market, Trends, PCs), the app's edits made
+from the game, and Fleet in the game's info bar. Needs app 1.8.0, which adds what the plugin reads to the database: open
+the app once after updating. Built in stages, each tried as a test build first:
 
 - **Stage 1: speed test.** Main window → **Speed test (2.0)** (or `/xivfleet speedtest`) times reading from the
   database what the in-game Summary, Subs and Supplies windows will need: connecting, characters, subs, retainers,
