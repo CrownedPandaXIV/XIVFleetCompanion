@@ -29,6 +29,14 @@ internal static partial class Program
             await FileDatabase.EnsureAsync(twinFile, files, "move test");
             var characters = await FleetMove.CharacterCount(twinFile);
 
+            // ---- A trial first: everything a move does, then undone ----
+            var trial = await FleetMove.FileToSharedAsync(twinFile, shared, files, pgFiles, "move test", "trial", null, trial: true);
+            Check(trial.Trial && trial.Rows >= 40 && trial.Text.Contains("Nothing was changed") && await FleetMove.CharacterCount(shared) == 0
+                  && await FleetMove.MovedAwayNote(twinFile) == null && await Count(shared, "SELECT count(*) FROM companion_metric_history") == 0,
+                $"move trial: to the shared database, every row copied and checked, then nothing kept ({trial.Text})");
+            var writableAfterTrial = await Db.Exec(twinFile, "UPDATE companion_file_info SET value = value WHERE key = 'app_version'") == 1;
+            Check(writableAfterTrial, "move trial: the file can be written again afterwards");
+
             // ---- The file into an empty shared database ----
             var steps = new List<string>();
             var there = await FleetMove.FileToSharedAsync(twinFile, shared, files, pgFiles, "move test", "move_pg on the test PC", steps.Add);
@@ -54,6 +62,24 @@ internal static partial class Program
             catch (FleetMove.RefusedException ex) { refused = ex.Message; }
             Check(refused.Contains("already has a fleet") && await FleetMove.CharacterCount(shared) == characters && await FleetMove.MovedAwayNote(twinFile) == "move_pg on the test PC",
                 $"move: never into a database that already has a fleet; nothing changes ({refused})");
+
+            // ---- A trial the other way: into a scratch file, then undone ----
+            var scratchPath = Path.Combine(folder, "scratch", "fleet.db");
+            await using (var scratch = await FileDatabase.OpenAsync(scratchPath, Array.Empty<string>()))
+            {
+                var back = await FleetMove.SharedToFileAsync(shared, scratch, scratchPath, files, "move test", null, trial: true);
+                Check(back.Trial && back.Rows == there.Rows && await FleetMove.CharacterCount(scratch) == 0 && FileDatabase.Backups(scratchPath).Count == 0,
+                    $"move trial: to a file, every row copied and checked, then nothing kept ({back.Text})");
+            }
+            // A trial over a file with a fleet of its own is refused as the move would be.
+            Check(await FleetMove.WhyNotIntoFile(twinFile, "here") == null, "move trial: a file whose fleet was moved away may take it back");
+            await using (var other = await FileDatabase.OpenAsync(Path.Combine(folder, "other", "fleet.db"), Array.Empty<string>()))
+            {
+                await FileDatabase.EnsureAsync(other, files, "move test");
+                await FleetWriter.WriteCurrentCharactersAsync(other, new List<FleetWriter.CharacterSnapshot> { new() { Cid = 5, Name = "Mine", World = "Maduin" } });
+                Check((await FleetMove.WhyNotIntoFile(other, "there"))?.Contains("already has a fleet file") == true,
+                    "move trial: a file with a fleet of its own would be refused, and the trial says so first");
+            }
 
             // ---- The shared database into a new file ----
             var newPath = Path.Combine(folder, "new", "fleet.db");

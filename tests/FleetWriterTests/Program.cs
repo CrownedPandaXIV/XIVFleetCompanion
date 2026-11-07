@@ -100,7 +100,15 @@ internal static partial class Program
         var listings = Enumerable.Range(0, 1500).Select(i => new ListingRow(i, 0, i % 20, items[i % 400], 1, false, 500, null, $"Ret{i % 160}", "A", worlds[i % 5], null, null, 500, 3, false)).ToList();
         var read = new MarketRead(new MarketSettings(7, true), new List<MarketAccountRow>(), listings, live);
         var rows = Enumerable.Range(0, 60).SelectMany(ch => items.Take(150).Select(id => new VentureIncomeRow(ch, $"Char{ch}", worlds[ch % 5], "A", ch, id, 5, null, 1, 1, 1))).ToList();
-        // In the background: asking takes no time on the game's thread, and the answers follow.
+        // In the background: asking takes no time on the game's thread, and the answers follow. Timed on a second cache:
+        // a first use can pay one-off costs (compiling, starting the background threads), which aren't the per-read cost
+        // this checks; the first use's time is shown too.
+        var cold = new MarketCache();
+        var swCold = System.Diagnostics.Stopwatch.StartNew();
+        cold.Undercut(read);
+        cold.VenturesPerDay(read, rows, 7, _ => 10);
+        var firstUse = swCold.Elapsed.TotalMilliseconds;
+        while (cold.Working) System.Threading.Thread.Sleep(1);
         var cache = new MarketCache();
         var sw = System.Diagnostics.Stopwatch.StartNew();
         cache.Undercut(read);
@@ -132,7 +140,7 @@ internal static partial class Program
         var again = old != null && ReferenceEquals(meanwhile, old) && renewed != null && !ReferenceEquals(renewed, old) && Math.Abs(renewed[3]["region"] - old[3]["region"]) < 1e-9
                     && now.Undercut(newer) == direct && new MarketCache().Undercut(read with { Live = null }) == 0;
         Check(same && again && undercut == direct && allMatch && perFrame < 0.5 && asking < 50,
-            $"market: worked out in the background once per read and kept ({asking:0} ms on the game's thread, {background:0} ms in the background, {perFrame * 1000:0.0} µs a frame after; {undercut} undercut, the same as working it out directly); a new read works it out again");
+            $"market: worked out in the background once per read and kept ({asking:0} ms on the game's thread (the very first time {firstUse:0} ms), {background:0} ms in the background, {perFrame * 1000:0.0} µs a frame after; {undercut} undercut, the same as working it out directly); a new read works it out again");
     }
 
     // The Gil & Market page read through the database (stand-ins for the views with their PostgreSQL types), Live Market
@@ -2037,6 +2045,7 @@ internal static partial class Program
         await DatabaseAgainstTheApp(conn);
         await TwinAgainstTheFile(conn);
         await FileChecks();
+        await BigFleetChecks(conn, Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres");
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

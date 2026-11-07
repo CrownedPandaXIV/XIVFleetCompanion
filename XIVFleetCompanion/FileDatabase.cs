@@ -280,12 +280,14 @@ public static class FileDatabase
     /// 7. A copy taken while games write is whole: SQLite copies one moment of it. Another game making the same backup at
     /// the same moment is fine: one of the two copies is kept.
     /// </summary>
-    public static async Task<string> BackUpAsync(DbConnection conn, string path, DateTime now)
+    /// <param name="prune">Keep only the newest 7 afterwards (not while a restore still needs an older one).</param>
+    /// <param name="label">Added to the name (fleet-2026-11-07-before-restore-093000.db).</param>
+    public static async Task<string> BackUpAsync(DbConnection conn, string path, DateTime now, bool prune = true, string? label = null)
     {
         var folder = BackupFolder(path);
         Directory.CreateDirectory(folder);
-        var name = Path.Combine(folder, $"fleet-{now:yyyy-MM-dd}.db");
-        if (File.Exists(name)) name = Path.Combine(folder, $"fleet-{now:yyyy-MM-dd-HHmmss}.db");
+        var name = Path.Combine(folder, label == null ? $"fleet-{now:yyyy-MM-dd}.db" : $"fleet-{now:yyyy-MM-dd}-{label}-{now:HHmmss}.db");
+        if (File.Exists(name)) name = Path.Combine(folder, $"fleet-{now:yyyy-MM-dd-HHmmss}{(label == null ? "" : "-" + label)}.db");
         var temp = Path.Combine(folder, $"making-{Environment.ProcessId}-{Guid.NewGuid():N}.tmp");
         try
         {
@@ -303,6 +305,13 @@ public static class FileDatabase
         {
             if (File.Exists(temp)) File.Delete(temp);
         }
+        if (prune) Prune(path);
+        return name;
+    }
+
+    // Only the newest 7 backups are kept.
+    private static void Prune(string path)
+    {
         foreach (var old in Backups(path).Skip(BackupsKept))
             try
             {
@@ -312,10 +321,185 @@ public static class FileDatabase
             {
                 // in use; next time
             }
-        return name;
     }
 
     /// <summary>True when no backup was made today (local time).</summary>
     public static bool BackupDue(string path, DateTime now) =>
         !Backups(path).Any(f => f.LastWriteTime.Date == now.Date);
+
+    // ---- Health: SQLite's own check that the file isn't damaged ----
+
+    public static readonly TimeSpan HealthEvery = TimeSpan.FromDays(7);
+
+    /// <summary>The last check: when, whether it found the file whole, its first problems, and when it was last whole.</summary>
+    public sealed record Health(DateTime CheckedAt, bool Ok, string Problems, DateTime? LastOkAt)
+    {
+        public string Text => Ok
+            ? $"The fleet file was checked {CheckedAt.ToLocalTime():g} and is whole."
+            : $"The fleet file is damaged (checked {CheckedAt.ToLocalTime():g}): {Problems.TrimEnd('.')}. " +
+              (LastOkAt is { } ok ? $"Restore a backup from {ok.ToLocalTime():d} or earlier (it was last found whole then)." : "Restore the newest backup.") +
+              " Backups stop until it's whole again, so the good ones are kept.";
+    }
+
+    /// <summary>The last check recorded in the file (null: never checked, or it can't be read).</summary>
+    public static async Task<Health?> LastHealthAsync(DbConnection conn)
+    {
+        try
+        {
+            await using var cmd = Db.Command(conn, "SELECT key, value FROM companion_file_info WHERE key LIKE 'health_%'");
+            await using var r = await cmd.ExecuteReaderAsync();
+            var info = new Dictionary<string, string?>();
+            while (await r.ReadAsync()) info[r.GetString(0)] = r.IsDBNull(1) ? null : r.GetString(1);
+            if (!info.TryGetValue("health_checked_at", out var at) || !DateTime.TryParse(at, null, System.Globalization.DateTimeStyles.RoundtripKind, out var when)) return null;
+            DateTime? okAt = info.TryGetValue("health_ok_at", out var ok) && DateTime.TryParse(ok, null, System.Globalization.DateTimeStyles.RoundtripKind, out var o) ? o : null;
+            var problems = info.GetValueOrDefault("health_result") ?? "";
+            return new Health(when, problems == "ok", problems == "ok" ? "" : problems, okAt);
+        }
+        catch (DbException)
+        {
+            return null;
+        }
+    }
+
+    public static bool HealthDue(Health? last, DateTime nowUtc) => last == null || nowUtc - last.CheckedAt >= HealthEvery;
+
+    /// <summary>
+    /// Runs SQLite's integrity check over the whole file (other games carry on meanwhile) and records the result in it, when
+    /// it still can. A file too damaged to check counts as damaged.
+    /// </summary>
+    public static async Task<Health> CheckAsync(DbConnection conn, DateTime nowUtc)
+    {
+        var before = await LastHealthAsync(conn);
+        var problems = new List<string>();
+        try
+        {
+            await using var cmd = Db.Command(conn, "PRAGMA integrity_check(20)");
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                problems.AddRange(Lines(Convert.ToString(r.GetValue(0))));
+        }
+        catch (DbException ex)
+        {
+            problems.Clear();
+            problems.Add(Lines(ex.Message).FirstOrDefault() ?? "it couldn't be read");
+        }
+        var ok = problems.Count == 1 && problems[0] == "ok";
+        var text = ok ? "ok" : string.Join("; ", problems.Take(3)) + (problems.Count > 3 ? $" (and {problems.Count - 3} more)" : "");
+        var okAt = ok ? nowUtc : before?.LastOkAt ?? (before is { Ok: true } ? before.CheckedAt : null);
+        try
+        {
+            foreach (var (key, value) in new[] { ("health_checked_at", nowUtc.ToString("o")), ("health_result", text), ("health_ok_at", okAt?.ToString("o")) })
+                await Db.Exec(conn, "INSERT INTO companion_file_info (key, value) VALUES (@k, @v) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                    null, ("k", key), ("v", value));
+        }
+        catch (DbException)
+        {
+            // too damaged to note it: the result is still shown
+        }
+        return new Health(nowUtc, ok, ok ? "" : text, okAt);
+    }
+
+    /// <summary>Whether a copy (a backup) opens and is whole, without changing it.</summary>
+    public static async Task<string?> WhyNotWhole(string path)
+    {
+        try
+        {
+            await using var conn = new SQLiteConnection(new SQLiteConnectionStringBuilder { DataSource = path, Pooling = false, ReadOnly = true }.ToString());
+            await conn.OpenAsync();
+            await using var cmd = Db.Command(conn, "PRAGMA integrity_check(3)");
+            var first = Lines(Convert.ToString(await cmd.ExecuteScalarAsync())).FirstOrDefault();
+            return first == "ok" ? null : $"it's damaged ({first})";
+        }
+        catch (Exception ex) when (ex is DbException or IOException)
+        {
+            return $"it couldn't be opened ({Lines(ex.Message).FirstOrDefault()})";
+        }
+    }
+
+    // SQLite's messages, one plain line each (its own headings and blank lines left out).
+    private static IEnumerable<string> Lines(string? text) => (text ?? "").Split('\n')
+        .Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("***"));
+
+    // ---- Restoring a backup ----
+
+    /// <summary>
+    /// Puts a backup's fleet back into the live file, while games keep running: the backup is checked whole first, the fleet
+    /// as it is now is backed up (unless the file is too damaged to copy and damaged is set), then every table is replaced
+    /// with the backup's in one transaction (other games wait to write) and the counts compared. On any problem nothing
+    /// changes. Afterwards the file is checked again. Returns what was done, in plain words.
+    /// </summary>
+    public static async Task<string> RestoreAsync(DbConnection live, string livePath, string backupPath, Files files, DateTime now, bool damaged = false)
+    {
+        if (await WhyNotWhole(backupPath) is { } why) throw new RefusedException($"That backup can't be used: {why}. Nothing was changed.");
+        string? keptAs = null;
+        try
+        {
+            keptAs = await BackUpAsync(live, livePath, now, prune: false, label: "before-restore");
+        }
+        catch (DbException ex) when (damaged)
+        {
+            // too damaged to copy: restored anyway, as asked
+            keptAs = null;
+            _ = ex;
+        }
+        var tables = FleetMove.TablesToMove(files);
+        long rows = 0;
+        await Db.Exec(live, "ATTACH DATABASE @p AS restore_from", null, ("p", backupPath));
+        try
+        {
+            await using var tx = await live.BeginTransactionAsync();
+            try
+            {
+                var inBackup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                await using (var cmd = Db.Command(live, "SELECT name FROM restore_from.sqlite_master WHERE type = 'table'", tx))
+                await using (var r = await cmd.ExecuteReaderAsync())
+                    while (await r.ReadAsync()) inBackup.Add(r.GetString(0));
+                foreach (var table in tables)
+                {
+                    await Db.Exec(live, $"DELETE FROM main.\"{table}\"", tx);
+                    // A table newer than the backup stays empty, as it was then.
+                    if (!inBackup.Contains(table)) continue;
+                    var columns = await CommonColumns(live, tx, table);
+                    var list = string.Join(", ", columns.Select(c => $"\"{c}\""));
+                    await Db.Exec(live, $"INSERT INTO main.\"{table}\" ({list}) SELECT {list} FROM restore_from.\"{table}\"", tx);
+                    await using var a = Db.Command(live, $"SELECT (SELECT count(*) FROM main.\"{table}\"), (SELECT count(*) FROM restore_from.\"{table}\")", tx);
+                    await using var r = await a.ExecuteReaderAsync();
+                    await r.ReadAsync();
+                    var (mine, theirs) = (Convert.ToInt64(r.GetValue(0)), Convert.ToInt64(r.GetValue(1)));
+                    if (mine != theirs) throw new RefusedException($"{table} didn't restore whole ({mine:N0} of {theirs:N0} rows), so nothing was changed.");
+                    rows += mine;
+                }
+                await tx.CommitAsync();
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+        finally
+        {
+            await Db.Exec(live, "DETACH DATABASE restore_from");
+        }
+        Prune(livePath);
+        var health = await CheckAsync(live, now.ToUniversalTime());
+        return $"Restored {Path.GetFileName(backupPath)} ({rows:N0} rows)." +
+               (keptAs != null ? $" The fleet as it was just before is kept as {Path.GetFileName(keptAs)}." : " The fleet as it was couldn't be copied first (the file was too damaged).") +
+               (health.Ok ? " The file is whole." : $" {health.Text}");
+    }
+
+    // The columns a table has both in the live file and in the backup.
+    private static async Task<List<string>> CommonColumns(DbConnection live, DbTransaction tx, string table)
+    {
+        async Task<List<string>> Of(string schema)
+        {
+            var names = new List<string>();
+            await using var cmd = Db.Command(live, $"PRAGMA {schema}.table_info(\"{table}\")", tx);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) names.Add(r.GetString(1));
+            return names;
+        }
+        var theirs = (await Of("restore_from")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (await Of("main")).Where(theirs.Contains).ToList();
+    }
 }
