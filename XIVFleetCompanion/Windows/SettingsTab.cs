@@ -5,12 +5,17 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.ImGuiFileDialog;
+using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 
 namespace XIVFleetCompanion.Windows;
 
-public class ConfigWindow : Window, IDisposable
+/// <summary>
+/// The Settings tab of the main window (until 2.0 its own window, which Dalamud's settings button now opens the main
+/// window at).
+/// </summary>
+public class SettingsTab : IDisposable
 {
     private readonly Configuration configuration;
     private readonly Plugin plugin;
@@ -41,21 +46,16 @@ public class ConfigWindow : Window, IDisposable
     private string pgSaveResult = "";
     private DateTime clearArmedUntil = DateTime.MinValue;
 
-    // "###" keeps the window's ImGui ID fixed while the title shows the version.
-    public ConfigWindow(Plugin plugin) : base($"XIV Fleet Companion Settings v{Plugin.VersionText}###XIVFleetCompanionSettings")
+    public SettingsTab(Plugin plugin)
     {
-        Flags = ImGuiWindowFlags.NoCollapse;
-
-        Size = new Vector2(320, 340);
-        SizeCondition = ImGuiCond.FirstUseEver;
-
         configuration = plugin.Configuration;
         this.plugin = plugin;
     }
 
     public void Dispose() { }
 
-    public override void OnOpen()
+    /// <summary>When the tab is shown: the saved connection is read again and the character list re-read.</summary>
+    public void OnShown()
     {
         LoadSavedCredential();
         knownCharacters = null;
@@ -158,7 +158,8 @@ public class ConfigWindow : Window, IDisposable
         clearArmedUntil = DateTime.MinValue;
     }
 
-    public override void Draw()
+    /// <summary>shared: the settings shared with the app (drawn by the main window, after the Characters list).</summary>
+    public void Draw(Action? shared = null)
     {
         // Can't ref a property, so use a local copy
         var enabled = configuration.Enabled;
@@ -176,7 +177,7 @@ public class ConfigWindow : Window, IDisposable
         }
         if (string.IsNullOrWhiteSpace(configuration.AccountLabel))
         {
-            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.75f, 0.3f, 1f)))
+            using (ImRaii.PushColor(ImGuiCol.Text, Theme.Status(configuration.Theme, configuration.ColourBlindStatus).Warn))
                 ImGui.TextWrapped(Configuration.NoAccountLabelText);
         }
 
@@ -199,8 +200,58 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app sees its subs a few seconds later instead of at the next interval.");
 
+        var showInInfoBar = configuration.ShowInInfoBar;
+        if (ImGui.Checkbox("Show Fleet in the game's info bar", ref showInInfoBar))
+        {
+            configuration.ShowInInfoBar = showInInfoBar;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("\"Fleet\" by the clock at the top right: it says what needs you (subs back, supplies running low, houses...); hover for the list, click to open the Summary. Dalamud's own Server Info Bar settings can hide it too.");
+
+        // The look of this window (Theme.cs): only it changes, never the game or other plugins. The app has the same looks.
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Look:");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
+        var current = Theme.Info(configuration.Theme);
+        using (var combo = ImRaii.Combo("##look", current.Name))
+        {
+            if (combo)
+            {
+                foreach (var look in Theme.Looks)
+                {
+                    if (ImGui.Selectable($"{look.Name}##look{look.Key}", look.Choice == configuration.Theme))
+                    {
+                        configuration.Theme = look.Choice;
+                        configuration.Save();
+                    }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(look.About);
+                    ImGui.SameLine(170 * ImGuiHelpers.GlobalScale);
+                    Swatches(look.Choice);
+                }
+            }
+        }
+        ImGui.SameLine();
+        Swatches(configuration.Theme);
+        ImGui.TextDisabled(current.About);
+        var colourBlind = configuration.ColourBlindStatus;
+        if (ImGui.Checkbox("Colour-blind friendly status colors", ref colourBlind))
+        {
+            configuration.ColourBlindStatus = colourBlind;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Blue for fine, yellow for a look, orange-red for urgent, in place of green, amber and red: told apart with every common kind of colour blindness.");
+
         ImGui.Spacing();
         DrawCharacters();
+
+        if (shared != null)
+        {
+            ImGui.Spacing();
+            shared();
+        }
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -306,7 +357,8 @@ public class ConfigWindow : Window, IDisposable
             fcTrackerFileFound = !string.IsNullOrWhiteSpace(checkedFcTrackerPath) && File.Exists(checkedFcTrackerPath);
             fcTrackerCheckedAt = DateTime.UtcNow;
         }
-        using (ImRaii.PushColor(ImGuiCol.Text, fcTrackerFileFound ? new Vector4(0.45f, 0.85f, 0.45f, 1f) : new Vector4(0.95f, 0.70f, 0.35f, 1f)))
+        var status = Theme.Status(configuration.Theme, configuration.ColourBlindStatus);
+        using (ImRaii.PushColor(ImGuiCol.Text, fcTrackerFileFound ? status.Good : status.Warn))
         {
             ImGui.TextWrapped(fcTrackerFileFound
                 ? "Found."
@@ -337,6 +389,22 @@ public class ConfigWindow : Window, IDisposable
         pgPassword = "";
         pgHasSavedPassword = true;
         return "Saved.";
+    }
+
+    // A strip of a look's colours.
+    private static void Swatches(ThemeChoice theme)
+    {
+        var size = ImGui.GetTextLineHeight() * 0.8f;
+        var draw = ImGui.GetWindowDrawList();
+        var at = ImGui.GetCursorScreenPos() + new Vector2(0, (ImGui.GetTextLineHeight() - size) / 2);
+        var colors = Theme.Swatches(theme);
+        for (var i = 0; i < colors.Length; i++)
+        {
+            var min = at + new Vector2(i * (size + 3), 0);
+            draw.AddRectFilled(min, min + new Vector2(size, size), ImGui.GetColorU32(colors[i]), 2f);
+            draw.AddRect(min, min + new Vector2(size, size), ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 0.6f)), 2f);
+        }
+        ImGui.Dummy(new Vector2(colors.Length * (size + 3), ImGui.GetTextLineHeight()));
     }
 
     private void SetFcTrackerPath(string path)

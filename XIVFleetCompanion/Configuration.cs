@@ -14,6 +14,34 @@ public class Configuration : IPluginConfiguration
     public int SyncIntervalMinutes { get; set; } = 5;
     // Also sync a few seconds after a character logs out (AutoRetainer finished with it).
     public bool SyncAfterLogout { get; set; } = true;
+    // 2.0: "Fleet" in the game's info bar (top right), with what needs attention; click opens the Summary.
+    public bool ShowInInfoBar { get; set; } = true;
+    // 2.x: the look of the plugin's window (Theme.cs) and colour-blind friendly status colors.
+    public ThemeChoice Theme { get; set; } = ThemeChoice.Fleet;
+    public bool ColourBlindStatus { get; set; } = false;
+    // The main window's sidebar folded down to its icons.
+    public bool SidebarFolded { get; set; } = false;
+    // 2.x tables: each table's shown columns in order (the Columns button; none saved: the table's own), and whether
+    // it groups by account when not sorted by a column (none saved: yes, as the app).
+    public Dictionary<string, List<string>> TableColumns { get; set; } = new();
+    public Dictionary<string, bool> TableGroupByAccount { get; set; } = new();
+    // Which columns each table had when its columns were chosen: one added since shows until it's hidden.
+    public Dictionary<string, List<string>> TableColumnsKnown { get; set; } = new();
+    // The Inventory page's "Hide equipped gear" (Characters, Fleet totals and Where is it?): leaves out gear being worn
+    // by the characters and their retainers.
+    public bool HideEquippedGear { get; set; } = false;
+    // The Parts page's Shopping List: buy from vendors what they sell (instead of crafting or gathering it), show items
+    // already held in full, and where market board prices are from ("dc:Dynamis"; none saved: the data center with the
+    // most characters).
+    // The Trends page: the value and span last chosen, and which page charts (Roster, Salvage, Free Companies) are open.
+    public string? TrendsMetric { get; set; } = null;
+    public string? TrendsRange { get; set; } = null;
+    public Dictionary<string, bool> TrendCardsOpen { get; set; } = new();
+    // The Parts page's Look ahead (0, 3, 7 or 14 days), kept as the app keeps its own.
+    public int PartsAheadDays { get; set; } = 0;
+    public bool ShoppingBuyFromVendors { get; set; } = false;
+    public bool ShoppingShowHeld { get; set; } = false;
+    public string? ShoppingPriceScope { get; set; } = null;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
     public string FCTrackerConfigPath { get; set; } = "";

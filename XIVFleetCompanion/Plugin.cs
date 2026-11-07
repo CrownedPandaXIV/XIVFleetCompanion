@@ -1,5 +1,6 @@
 using AutoRetainerAPI;
 using Dalamud.Game.Command;
+using Dalamud.Game.Gui.Dtr;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -26,6 +27,19 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
+    [PluginService] internal static IDtrBar DtrBar { get; private set; } = null!;
+
+    /// <summary>2.0: the fleet from the database's views, shared by the main window and the info bar line.</summary>
+    public FleetReader Fleet { get; }
+    // "Fleet" in the game's info bar (top right): what needs attention; click opens the Summary.
+    private IDtrBarEntry? infoBar;
+    private DateTime infoBarCheckedAt = DateTime.MinValue;
+    private string infoBarText = "";
+    private string infoBarTooltip = "";
+    private const string InfoBarTitle = "XIV Fleet Companion";
+    // When the "Fleet" entry was last asked for or checked, and whether asking has failed since it last worked.
+    private DateTime infoBarAttachedAt = DateTime.MinValue;
+    private bool infoBarFailed;
 
     private const string CommandName = "/xivfleet";
 
@@ -54,9 +68,10 @@ public sealed class Plugin : IDalamudPlugin
     public int SyncedElsewhere { get; private set; } = 0;
 
     public readonly WindowSystem WindowSystem = new("XIVFleetCompanion");
-    private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
-    private CheckWindow CheckWindow { get; init; }
+    // Tools pages of the main window (2.x: no longer windows of their own).
+    public CheckWindow CheckPage { get; init; }
+    public SpeedTestWindow SpeedTestPage { get; init; }
 
     public Plugin()
     {
@@ -82,18 +97,22 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
-        ConfigWindow = new ConfigWindow(this);
+        // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
+        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame,
+            () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection),
+            () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText));
         MainWindow = new MainWindow(this, submarineImagePath);
-        CheckWindow = new CheckWindow(this);
+        CheckPage = new CheckWindow(this);
+        SpeedTestPage = new SpeedTestWindow(this);
 
-        WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
-        WindowSystem.AddWindow(CheckWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion main window. /xivfleet check shows what the plugin can see for each character."
+            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, parts, roster, retainers, fcs, inventory, salvage, income, market, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
         });
+
+        AttachInfoBar();
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         // The settings and main window buttons in the plugin installer.
@@ -111,14 +130,15 @@ public sealed class Plugin : IDalamudPlugin
         
         WindowSystem.RemoveAllWindows();
 
-        ConfigWindow.Dispose();
         MainWindow.Dispose();
-        CheckWindow.Dispose();
+        CheckPage.Dispose();
+        SpeedTestPage.Dispose();
 
         CommandManager.RemoveHandler(CommandName);
 
         Framework.Update -= OnFrameworkUpdate;
         ClientState.Logout -= OnLogout;
+        infoBar?.Remove();
 
         AutoRetainer?.Dispose();
         ECommonsMain.Dispose();
@@ -126,15 +146,31 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        if (args.Trim().Equals("check", StringComparison.OrdinalIgnoreCase))
+        var word = args.Trim();
+        if (word.Equals("check", StringComparison.OrdinalIgnoreCase))
             OpenCheck();
+        else if (word.Equals("speedtest", StringComparison.OrdinalIgnoreCase))
+            OpenSpeedTest();
+        else if (Enum.TryParse<MainWindow.Tab>(word, ignoreCase: true, out var tab) && word.Length > 0 && !char.IsDigit(word[0]))
+            MainWindow.OpenAt(tab);
         else
             MainWindow.Toggle();
     }
 
-    public void OpenCheck() => CheckWindow.OpenAndRun();
+    public void OpenCheck()
+    {
+        MainWindow.OpenAt(MainWindow.Tab.Check);
+        CheckPage.Run();
+    }
 
-    public void ToggleConfigUi() => ConfigWindow.Toggle();
+    public void OpenSpeedTest()
+    {
+        MainWindow.OpenAt(MainWindow.Tab.SpeedTest);
+        SpeedTestPage.Run();
+    }
+
+    // Dalamud's settings button opens the main window at its Settings tab (2.0: one window for everything).
+    public void ToggleConfigUi() => MainWindow.OpenAt(MainWindow.Tab.Settings);
     public void ToggleMainUi() => MainWindow.Toggle();
 
     // AutoRetainer logs a character out once it has finished with it: sync that news soon instead of
@@ -145,9 +181,93 @@ public sealed class Plugin : IDalamudPlugin
             schedule.RequestSoon(DateTime.UtcNow);
     }
 
+    // Once a second: the info bar line's text and tooltip, from what was last read; reads again in the background
+    // when due (subs and what needs attention every 30 seconds), only while the line is shown.
+    // Takes the "Fleet" entry in the game's info bar. Right after the plugin updates, the old copy's entry may not be
+    // cleared yet, and the game refuses the title: the old entry then stays on screen, still pointing at the old copy,
+    // so clicking it does nothing. UpdateInfoBar keeps asking until it works.
+    private void AttachInfoBar()
+    {
+        infoBarAttachedAt = DateTime.UtcNow;
+        try
+        {
+            var entry = DtrBar.Get(InfoBarTitle);
+            entry.Text = "Fleet";
+            entry.OnClick = _ => MainWindow.OpenAt(MainWindow.Tab.Summary);
+            entry.Shown = Configuration.ShowInInfoBar;
+            infoBar = entry;
+            // Send the text and tooltip again on the next update.
+            infoBarText = "";
+            infoBarTooltip = "";
+            if (infoBarFailed) Log.Information("Fleet Companion: the info bar's Fleet entry works again.");
+            infoBarFailed = false;
+        }
+        catch (Exception ex)
+        {
+            infoBar = null;
+            if (!infoBarFailed) Log.Warning($"Fleet Companion: could not take the info bar's Fleet entry yet (trying again every few seconds) — {ex.Message}");
+            infoBarFailed = true;
+        }
+    }
+
+    // Every few seconds: when the "Fleet" entry couldn't be taken, ask again; when it's no longer the game's live
+    // entry (removed, or another copy's), take it again.
+    private void KeepInfoBar(DateTime now)
+    {
+        if (now - infoBarAttachedAt < TimeSpan.FromSeconds(3)) return;
+        if (infoBar == null)
+        {
+            if (Configuration.ShowInInfoBar) AttachInfoBar();
+            return;
+        }
+        infoBarAttachedAt = now;
+        bool live;
+        try { live = DtrBar.Entries.Any(e => ReferenceEquals(e, infoBar)); }
+        catch { return; }
+        if (!live)
+        {
+            Log.Information("Fleet Companion: the info bar's Fleet entry was no longer this copy's; taking it again.");
+            AttachInfoBar();
+        }
+    }
+
+    private void UpdateInfoBar()
+    {
+        var now = DateTime.UtcNow;
+        KeepInfoBar(now);
+        if (infoBar == null) return;
+        if (now - infoBarCheckedAt < TimeSpan.FromSeconds(1)) return;
+        infoBarCheckedAt = now;
+        infoBar.Shown = Configuration.ShowInInfoBar;
+        if (!infoBar.Shown) return;
+        Fleet.ReadIfDue(withSupplies: false);
+
+        var back = FleetReader.SubsBack(Fleet.Subs.Data, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var alerts = Fleet.Alerts.Data;
+        var readySubs = Fleet.Parts.Data is { } parts ? PartsPlanner.SubsReady(parts.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var text = FleetReader.InfoBarText(back, alerts, readySubs.Count);
+        var lines = new List<string>();
+        if (back > 0) lines.Add($"{back} sub{(back == 1 ? " is" : "s are")} back and waiting");
+        if (readySubs.Count > 0) lines.Add(PartsPlanner.ReadyText(readySubs));
+        if (alerts != null)
+        {
+            foreach (var alert in alerts.Take(8)) lines.Add($"{alert.Subject}: {alert.Detail}");
+            if (alerts.Count > 8) lines.Add($"...and {alerts.Count - 8} more");
+        }
+        var error = Fleet.Alerts.Error ?? Fleet.Subs.Error;
+        if (error != null) lines.Add(error);
+        if (lines.Count == 0) lines.Add(Fleet.Subs.Data == null ? "Reading the fleet..." : "Nothing needs you right now.");
+        lines.Add("Click to open the Summary.");
+        var tooltip = string.Join("\n", lines);
+        // Only when changed, not every second.
+        if (text != infoBarText) { infoBar.Text = text; infoBarText = text; }
+        if (tooltip != infoBarTooltip) { infoBar.Tooltip = tooltip; infoBarTooltip = tooltip; }
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         NoteLogin();
+        UpdateInfoBar();
         if (!Configuration.Enabled) return;
 
         var now = DateTime.UtcNow;

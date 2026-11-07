@@ -36,7 +36,7 @@ public class CheckWindow : Window, IDisposable
         Run();
     }
 
-    private void Run()
+    public void Run()
     {
         if (running) return;
         running = true;
@@ -191,7 +191,10 @@ public class CheckWindow : Window, IDisposable
         return part;
     }
 
-    public override void Draw()
+    // 2.x: drawn as a page of the main window (Tools); also still a window of its own.
+    public override void Draw() => DrawPage();
+
+    public void DrawPage()
     {
         ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the character's " +
                           "items, each retainer's and the FC chest's (from Allagan Tools; each filled slot counts once, with where they " +
@@ -215,7 +218,7 @@ public class CheckWindow : Window, IDisposable
 
         using var child = ImRaii.Child("##checkresults", Vector2.Zero, true);
         if (!child.Success || text == null) return;
-        var amber = new Vector4(0.95f, 0.70f, 0.35f, 1f);
+        var amber = Theme.Status(plugin.Configuration.Theme, plugin.Configuration.ColourBlindStatus).Warn;
         foreach (var line in text.Split('\n'))
         {
             var trimmed = line.TrimEnd('\r');

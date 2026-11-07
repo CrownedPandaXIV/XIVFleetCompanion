@@ -61,54 +61,19 @@ namespace XIVFleetCompanion
             if (cred == null)
                 return null;
 
-            NpgsqlConnection? conn = await OpenAsync(cred);
-            try
-            {
-                // A database moved twice is followed twice; never more than that, in case two notes point at each other.
-                for (var hop = 0; hop < 3; hop++)
+            PostgresCredentialStore.PostgresCredential current = cred;
+            var conn = await OpenAsync(current);
+            return await DatabaseMove.FollowAsync(conn,
+                (host, port) => OpenAsync(new PostgresCredentialStore.PostgresCredential
                 {
-                    var note = await DatabaseMove.ReadAsync(conn!);
-                    switch (DatabaseMove.Decide(note))
-                    {
-                        case DatabaseMove.Next.Sync:
-                            var ready = conn;
-                            conn = null;
-                            return ready;
-                        case DatabaseMove.Next.Wait:
-                            throw new DatabaseMove.WaitException();
-                    }
-
-                    var moved = new PostgresCredentialStore.PostgresCredential
-                    {
-                        Host = note!.Host.Trim(),
-                        Port = note.Port,
-                        Database = cred.Database,
-                        Username = cred.Username,
-                        Password = cred.Password,
-                    };
-                    NpgsqlConnection next;
-                    try
-                    {
-                        next = await OpenAsync(moved);
-                    }
-                    catch (Exception ex) when (ex is NpgsqlException or TimeoutException or System.Net.Sockets.SocketException)
-                    {
-                        throw new DatabaseMove.UnreachableException($"{moved.Host}:{moved.Port}", ex.Message);
-                    }
-                    PostgresCredentialStore.Save(useRemote, moved.Host, moved.Port, moved.Database, moved.Username, moved.Password);
-                    Plugin.Log.Information($"Fleet Companion: the database moved from {cred.Host}:{cred.Port} to {moved.Host}:{moved.Port}. This PC now syncs there (saved in the plugin's settings).");
-                    await conn!.DisposeAsync();
-                    conn = next;
-                    cred = moved;
-                }
-                var last = conn;
-                conn = null;
-                return last;
-            }
-            finally
-            {
-                if (conn != null) await conn.DisposeAsync();
-            }
+                    Host = host, Port = port, Database = current.Database, Username = current.Username, Password = current.Password,
+                }),
+                (host, port) =>
+                {
+                    PostgresCredentialStore.Save(useRemote, host, port, current.Database, current.Username, current.Password);
+                    Plugin.Log.Information($"Fleet Companion: the database moved from {current.Host}:{current.Port} to {host}:{port}. This PC now uses it there (saved in the plugin's settings).");
+                    current = new PostgresCredentialStore.PostgresCredential { Host = host, Port = port, Database = current.Database, Username = current.Username, Password = current.Password };
+                });
         }
 
         // One value to record in companion_metric_history (see database version 1).

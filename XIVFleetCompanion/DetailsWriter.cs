@@ -93,6 +93,30 @@ namespace XIVFleetCompanion
             }
         }
 
+        // This PC's plugin read the database (plugin 2.0; database update 16, app 1.8.0): a PC that syncs no characters
+        // checks in too, with the login it uses, so the app's PCs tab lists it and a move checks it can follow. False
+        // when the database doesn't have the column yet.
+        public static async Task<bool> WritePcReadAsync(NpgsqlConnection conn, string pcName, string accountLabel, string pluginVersion)
+        {
+            try
+            {
+                await using var cmd = new NpgsqlCommand(@"
+                    INSERT INTO companion_pc_status (pc_name, account_label, plugin_version, db_user, last_read_at)
+                    VALUES (@pc, @account, @version, current_user, now())
+                    ON CONFLICT (pc_name, account_label) DO UPDATE SET
+                        plugin_version = EXCLUDED.plugin_version, db_user = EXCLUDED.db_user, last_read_at = EXCLUDED.last_read_at", conn);
+                cmd.Parameters.AddWithValue("pc", pcName);
+                cmd.Parameters.AddWithValue("account", accountLabel);
+                cmd.Parameters.AddWithValue("version", pluginVersion);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn || ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            {
+                return false;
+            }
+        }
+
         // How many characters this setup left to another setup this sync, because they last logged in there (database
         // update 12, app 1.6.0, for the app's PCs tab). A database without that column yet is left as it is.
         public static async Task WriteCharactersElsewhereAsync(NpgsqlConnection conn, string pcName, string accountLabel, int count)

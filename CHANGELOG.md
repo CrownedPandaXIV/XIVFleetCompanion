@@ -3,6 +3,246 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.0.0 - 2026-11-07
+
+The fleet inside the game: every page of the app in the plugin's own window (Summary, Subs, Route Optimization, Parts,
+Supplies, Salvage, Roster, Retainers, Free Companies, Inventory, Income, Gil & Market, Trends, PCs), the app's edits made
+from the game, and Fleet in the game's info bar. Needs app 1.8.0, which adds what the plugin reads to the database: open
+the app once after updating. Built in stages, each tried as a test build first:
+
+- **Stage 1: speed test.** Main window → **Speed test (2.0)** (or `/xivfleet speedtest`) times reading from the
+  database what the in-game Summary, Subs and Supplies windows will need: connecting, characters, subs, retainers,
+  ceruleum and repair kits in FC chests, their use over the last 14 days, and the PCs. Three rounds, with the first,
+  best and worst time of each, and the longest game frame meanwhile to show it doesn't stutter. It runs in the
+  background, only reads, and **Copy results** copies it all to share.
+- **Stage 2: the database views.** The speed test also times reading the ready-made views app 1.8.0 adds to the
+  database (subs, supplies and the summary), which work things out in the database instead of in the plugin. With an
+  older app they show as failed.
+- **Stage 3: one main window with tabs.** `/xivfleet` (or the plugin's button in Dalamud) opens one window with
+  **Summary**, **Subs**, **Supplies**, **Status** and **Settings** tabs; `/xivfleet subs` (or summary, supplies,
+  status, settings) opens it at that tab, and Dalamud's settings button opens the Settings tab. Look only for now.
+  - **Summary:** subs back and waiting, out (and when the next is back) and in port; ventures done and retainers
+    without one; characters below the low-supply warnings and the first to run out.
+  - **Subs:** every built sub with its character, rank, build and a live countdown, grouped by character, with a
+    filter.
+  - **Supplies:** each character's ceruleum and repair kits, use per day, days left (amber under a week, red under three
+    days) and how many to buy, as in the app.
+  - **Status** is the old main window (connections, Check what I can see, the speed test); **Settings** the old
+    settings window.
+  - Click a column's header in Subs or Supplies to sort by it, again to reverse it (Status: soonest back first; rows
+    with nothing to sort by, like a sub in port or a character without enough history, go last). Drag a column's edge
+    to make it wider; the columns still stretch with the window, and the game remembers the widths.
+  - The numbers come from the app's views in the database (app 1.8.0 or later), read in the background while the
+    window is open: subs every 30 seconds, supplies and the summary every 5 minutes, or on **Refresh**.
+- **Stage 4: what needs attention, and Fleet in the info bar.**
+  - The Summary starts with **Needs attention**: subs back and waiting, then Free Company houses not entered for a
+    while (red from 30 days), characters low on ceruleum or repair kits, characters no longer synced, and setups where
+    AutoRetainer wasn't running. The same rules as the app's Summary. No pop-ups and nothing in chat.
+  - **"Fleet" in the game's info bar** (top right, by the clock), always there so the window is one click away;
+    "Fleet: 4 back · 1 low · 2 to check" when something needs you. Hover for the list, click to open the Summary. On by
+    default; Settings → "Show Fleet in the game's info bar" turns it off. While it's shown it reads the subs and what
+    needs attention every 30 seconds (a few milliseconds each), never the heavier supplies.
+- **Stage 5: the sidebar, the looks and the new icon.**
+  - The tabs make way for a **sidebar**: the submarine at the top, then the pages in three groups that fold
+    (Fleet: Summary, Subs, Supplies; Tools: Check what I can see, Speed test; System: Status, Settings), each with an
+    icon and, beside it, what needs attention (Subs · 4 back, Supplies · 1 low, Summary · how many things). The
+    button at the top folds it down to its icons (hover one for its name and count). At its foot, when this PC last
+    synced, or why it isn't syncing.
+  - Check what I can see and the speed test are pages of the window now, not windows of their own; the credits are
+    on the Status page.
+  - **Looks** (Settings → Look): XIV Fleet Companion (the app's colors, the new default), Dalamud (like other
+    plugins) or High contrast; and **colour-blind friendly status colors** (blue, yellow and orange-red in place of
+    green, amber and red). Only this window changes.
+  - The **new submarine icon**, for the plugin's picture and its icon in Dalamud's plugin list.
+- **Stage 6: the rest of the tabs, part 1: Roster, Retainers and PCs.** Three more pages, sorted and filtered like
+  Subs, read every minute while shown (app 1.8.0's views, from its test.8):
+  - **Roster** (Fleet): every character with its Free Company, house, gil, ceruleum and repair kits (red below the
+    low-supply warnings), retainers and subs, when it last synced and which setup syncs it; "not synced" beside one
+    the plugin no longer syncs. The sidebar says how many aren't synced.
+  - **Retainers** (Fleet): every retainer with its owner, class and level, gil, average item level, venture and a
+    live countdown (Venture Complete in green, Idle in amber), and its gear target. The sidebar says how many ventures
+    are done.
+  - **PCs** (System): every setup of the plugin with its version (amber when older than another PC's), last sync,
+    characters, which plugins it found and what it couldn't see (hover); then each setup's last "Check what I can
+    see". The sidebar counts setups where AutoRetainer wasn't running.
+  - Class, venture and item names and item levels come from the game's own files, so they're right on patch day.
+  - These pages only show for now: reordering or removing characters, setting retainers' gear targets and removing a
+    PC stay in the app.
+  - `/xivfleet roster`, `/xivfleet retainers` and `/xivfleet pcs` open them.
+- **Stage 6, part 2: Free Companies and Inventory, and the app's table controls everywhere.**
+  - **Free Companies** (Fleet): every Free Company with its leader, world, points, members, house (or, without one,
+    when it can bid) and how long since a member entered it (amber from the house warning, red from 30 days or with
+    no date). The sidebar counts houses not entered for a while.
+  - **Inventory** (Fleet), as the app's: **Characters** (what chosen characters and their retainers hold),
+    **Free Companies** (chosen FC chests), **Fleet totals** (each item across the fleet, the most first) and
+    **Where is it?** (type part of an item's name: every place the fleet holds it, in the Roster's order, by account).
+    HQ items say so.
+  - **Every table** (Subs, Supplies, Roster, Retainers, Free Companies, PCs, Inventory) works like the app's:
+    click a heading to sort, again for the other way, a third time to go back; **Reset Sort** goes back at once;
+    **Columns** shows, hides and reorders the columns (remembered; Reset columns undoes it); **Group by account**
+    while not sorted. Long tables only draw the rows on screen.
+  - **Retainers in the app's order**: by their owner's place in the Roster, then hiring order. The Roster and the Free
+    Companies follow the Roster's saved order too.
+  - **The Summary's retainer line matches the app's** and updates every 30 seconds instead of every 5 minutes, so a
+    retainer caught between two ventures while AutoRetainer sends it out again no longer shows "without a venture" for
+    minutes. Retainers of characters no longer synced are left out, as in the app.
+  - `/xivfleet fcs` and `/xivfleet inventory` open the new pages.
+- **Fleet in the info bar keeps working after an update.** Right after the plugin updated, clicking "Fleet" could do
+  nothing until the plugin was turned off and on: the old copy's entry was still on screen. The plugin now asks again
+  every few seconds until "Fleet" is its own, and takes it back if it ever isn't (noted in /xllog).
+- **Stage 6, part 3: Salvage and Income** (with app 1.8.0's views). Salvage: the salvage each character holds, standard
+  and extravagant, with each piece on hover and its value at the fixed salvage prices. Income: each character's real
+  net income per day from its subs (salvage that came in, less repair kits used) and the venture rewards per character
+  at what a vendor pays (from the game's files), over the Income window set in the app. Read every 5 minutes while
+  shown. Fight Club's expected figures and Loot per Voyage come later in 2.x, with routes. `/xivfleet salvage` and
+  `/xivfleet income` open them.
+  Salvage leads with the Fleet-Wide Salvage Total, each hover ends with its total (pieces and gil), and the Summary
+  shows the Fleet-Wide Salvage Total too, as the app's. The Summary also shows the venture income per day (last days of
+  the Income window, at what a vendor pays), read with the supplies.
+- **Tables that read at a glance**: colours that mean something (green when fine, amber getting low, red well below a
+  warning: the Roster's ceruleum and repair kits against the app's warnings, Supplies' days left, Last synced, Income,
+  houses, the PCs' plugins), subs as dots out of the slots unlocked, numbers on the right, large gil as "5.86M" (the
+  full amount on hover), the world softer after each name, a band for each account with how many it has (and, on the
+  Roster, which setup syncs it, so Synced by is hidden by default; Columns brings it back), a little more room per row
+  and stronger stripes.
+- **Gil in gold, house addresses in blue and Free Company names in lavender** (Roster, Retainers, Free Companies,
+  Salvage). The warning colour is now orange rather than gold, so it's never mistaken for gil. With colour blind status
+  colours these three stay plain, so the only colours there are the ones that mean something. The app uses the same
+  colours.
+- **Every column can be resized, the last one too**: columns keep the width they're given (fitted to their contents at
+  first) instead of all stretching to fill the window, so the room left over sits after the last column, and a table
+  wider than the window scrolls sideways. Column widths saved before this start over once.
+- **Livelier Subs and Retainers.** Subs: each character is named once over its subs (while the table isn't sorted by a
+  column), a thin bar beside the rank shows how far to the next, and the dashes in builds are softer. Retainers: each
+  owner is named once, the class is in its role's colour (tanks blue, healers green, damage red, a base class such as
+  Gladiator or Conjurer a lighter shade; gatherers plain) with the level softer, Avg ilvl is green when the gear meets
+  the retainer's gear target and amber when it falls short (checked as the app does, from the game's files), and a
+  venture's countdown is followed by the time it's done.
+- FC points in aqua; ceruleum and repair kits that don't count toward the warnings (no sub built, or not synced) dim
+  rather than plain; Income's tables name each character with its world, as everywhere else; and salvage totals (the
+  Salvage page and the Summary) in gil's gold.
+- **Stage 6 part 4: Parts**, as the app's Parts tab. **Detail**: every part a sub needs for the build it should have at
+  its rank (its Sub Rules, or Fight Club's best build after repair kits for a sub ticked Craft? from rank 85), a new
+  workshop's first sub and every unlocked empty slot, and where each comes from: a spare in bags, a retainer or the FC
+  chest (a shared chest never promises one part twice), the part another sub gives up when upgraded, or crafting.
+  **To craft**: how many of each part. The Summary shows the parts to craft and the subs ready for new parts with what
+  each needs; the sidebar, the Summary's count and the info bar ("2 need parts") count them too. Worked out in the
+  plugin from the app's views, the same way as the app (its tests write made-up fleets and the app's answers, which the
+  plugin's tests check against). Sub Rules and Craft? are set in the app; Look ahead comes later in 2.x.
+- **New subs to build count as ready for parts too**: a sub not built yet in an open slot is counted and listed with
+  the subs ready for new parts ("7 subs are ready for new parts, 1 new sub to build") on the Summary, the Parts page,
+  the sidebar and the info bar, with its four parts on the Summary.
+- **Stage 7: market prices.** A **Gil & Market** page, as the app's tab: the fleet's gil (characters and retainers)
+  and gil per account, what's up for sale, and the listings unsold for a while (the app's days setting), oldest first.
+  With **Live Market Prices** on in the app's Settings, the plugin asks Universalis itself (only item numbers and
+  world, data center and region names are sent; answers kept 30 minutes): each listing's cheapest rival on its world,
+  data center and region, the **undercut listings** (someone sells cheaper on the same world; biggest gap first, and
+  a count beside the page in the sidebar), and venture rewards at market prices on the Income page and the Summary.
+  With it off, nothing is asked. The Summary shows the listings unsold for a while, as the app's tile. The app's tests
+  run its own Universalis code on canned listings, and the plugin's tests check it gets the same answers.
+- **Live prices no longer hold up the rest.** The prices are asked of Universalis in the background, apart from the
+  database reads, so the Summary, Supplies, Salvage and every other page keep updating while they come in (the Gil &
+  Market page says "Getting live prices from Universalis..." meanwhile). Each world, data center and region is asked
+  once, only for the items listed or earned on its worlds, up to 4 requests at a time instead of one after another.
+- **No more slowdown with live prices on.** The window worked out every listing's rivals and every venture reward at
+  market prices again on each frame, which took most of a second and dropped the game to about 1 FPS. It's now worked
+  out once per read, in the background, and kept (a test times it: about 2 microseconds a frame after).
+- **Stage 8: routes.** As the app's Subs tab, worked out by the plugin itself (from the new fleet_route_* views and the
+  game's own sea map data):
+  - The Subs page gains **Next Rank** (when it ranks up, "≈" when worked out from game data alone, how on hover),
+    **Next Build** (its next build from the Sub Rules or Fight Club, green when it can switch now), **Current Route**
+    (with the map's number), **Current Gil/Day** and **Target Gil/Day** in gold, and **Target Route** (green when it's on
+    it, amber when it isn't). Speed and Range can be added with Columns.
+  - A **Route Optimization** page: subs from rank 85 not on Fight Club's best route for their rank, biggest gain first,
+    with a count beside it in the sidebar and a line on the Summary.
+  - **Income** gains Fight Club's **Expected / day** and **Of expected** (amber under 90%, red under 75%), and the fleet's
+    total against expected.
+  - **Look ahead** on the Parts page (3, 7 or 14 days): the parts of each sub's next build due by then, after what's
+    needed now, with when each is due.
+  The app's tests write made-up fleets and the app's answers, and the plugin's tests check every sub's route, gil a day,
+  dates, next build and Look ahead come out the same.
+- **Loot per Voyage** on the Income page, as the app's: what each voyage really brought back over the Income window, from
+  Submarine Tracker, per sub (with its route, voyages, gil a voyage and a day, and Fight Club's expected) and per route;
+  with live prices, at the market on the sub's world, data center and region too (worked out in the background).
+- **Next Rank forecasts** on the Subs page: how close the dates the app saved came to the real rank-ups, each recent one
+  on hover. Both are checked against the app's answers for the same made-up fleets.
+- **Shopping List** on the Parts page, as the app's: the sub parts to craft (Look ahead's too), everything to craft on
+  the way in the order to make it, and the raw materials and crystals to gather or buy, less what the fleet holds in bags,
+  saddlebags, crystals, retainers and Free Company chests (where, on hover). Buy from vendors, Show items already held in
+  full and Copy as Text, as in the app. With Live Market Prices on, each part's cheapest listing against what making it
+  costs (each ingredient on hover), each material's cheapest way, and what buying instead costs, from the world, data
+  center or region chosen in Prices from (asked of Universalis in the background). The recipes come from the game's own
+  files, so it works without the app's game data. Parts ticked off in the app show as made; ticking them off in the game
+  comes later in 2.x. Checked against the app's answers for made-up fleets, recipes and listings, every way of asking.
+  Each of its tables is only as tall as its rows and the page scrolls as a whole, so every section shows. The Parts
+  page now remembers Look ahead, as the app does.
+  Market prices look at the 100 cheapest listings of each item (as the app now does), and "only 1,639 of 2,277 for
+  sale" says plainly what buying those costs and that the rest can't be bought there right now.
+  Craft first's market board prices have the same hover, for the ones still to make, as the app's.
+- **A PC that only reads follows a moved database.** When the app moves the database to another PC, the in-game pages
+  now follow it the same way syncing does, so a PC with syncing off switches by itself (it only needs the old database
+  PC to be on the first time it reads afterwards). While the move is copying, the pages say so and keep what they
+  read before.
+- **Trends**, as the app's Trends tab: any recorded value (gil, ceruleum, repair kits, retainers, subs, sub slots, FC
+  points, salvage value and items) for the whole fleet, or up to 8 characters or Free Companies side by side, over 24
+  hours to all time. Hover for the values at any time, drag across to zoom in, or show it as a table. Under the chart,
+  each line's value now, its change over the span (and its share), a day on average, and its lowest and highest. Also
+  the Summary's trend tiles for the last 30 days, a chart at the top of the Roster, Salvage and Free Companies pages
+  (folded away until opened, remembered), and each character's or Free Company's own trends from the chart button
+  beside its name. Read in the background with the same chart query as the app, and checked against the app's answers
+  for a made-up history.
+- **Changing things from the game**, as in the app (and saved for the app too): Craft? on the Subs page; Sub Rules on
+  the Parts page (their own tab: rank, slots, each part's class, one character or everyone; add, save, delete with a
+  second click to be sure); gear targets on the Retainers page (Edit beside each target); the Roster order (Change
+  order: up, down, to the top, then save); how many days counts as unsold on Gil & Market; the Income window; removing
+  a PC no longer used (PCs page, with a second click to be sure); and ticking parts off on the Shopping List. Each is
+  saved in the background, then everything is read again; "Saved" or why not shows for a few seconds. Checked against
+  the app's own edits on the same database (the same rows written, the same refusals). Removing a character stays in
+  the app.
+- **A tidier Summary:** Subs, Retainers and Supplies side by side, each with its main figure large; the subs ready for
+  new parts as a table with one part to a line; one "Updated" line at the top (each read on hover).
+- **The class, then the slot, everywhere** ("Shark Hull", "Whale Bridge"), and the Parts tables show Needed before Slot.
+- **Gil in gil's gold everywhere:** headings and notes on Income and Gil & Market, the Summary, and the Gil and Salvage
+  value trends.
+- **New columns show** for someone who chose a table's columns before they were added (Craft? on Subs, Remove on PCs):
+  each table now remembers which columns it had, and one added since shows until it's hidden.
+- Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
+  all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
+- **Settings shared with the app, from the game.** Settings has a **Shared with the app** section, saved in the
+  database so the app and every PC use the same: **What do you run?** (subs, retainers or both; pages and Summary
+  boxes for what you don't run are left out, as in the app), **Live Market Prices**, the **repair kit cost** and the
+  **Warnings** (low repair kits and ceruleum, the FC house warning, when a character counts as not synced). Each is
+  checked the same way as in the app (with app 1.8.0's fleet_settings_view).
+- **Import Fight Club Data from the game.** Settings → **Fight Club Data** → **Import Fight Club Data**: choose Fight
+  Club's route spreadsheet (.xlsx), check the rows (rows with a problem start unticked, as in the app), add a patch label
+  if you like, and import. It replaces the stored routes all at once, and leaves them as they were if anything fails.
+  It reads the spreadsheet the same way as the app (merged cells, numbers typed as text, columns moved or missing) and
+  works with the one-file SQLite database too. Old .xls files: save them as .xlsx first.
+- **A PC that only reads shows on the PCs page.** A PC whose plugin syncs no characters (syncing off, or none ticked)
+  now checks in every few minutes while the game runs, so the app's PCs tab and the plugin's PCs page list it ("Only
+  reads"), and moving the database checks it can follow (with app 1.8.0).
+- **Five new looks, chosen from a dropdown** (Settings → Look, with a strip of each look's colours and a line about it on
+  hover): **Princess** (neon and pastel pink on deep plum, pink headings and a glowing selected page), **Deep Sea**
+  (navy and teal with glowing cyan), **Sunset Harbor** (dusky purple with rose-gold), **Parchment** (a light look: cream
+  with dark brown text and ink blue) and **Evergreen** (forest green with soft teal), beside XIV Fleet Companion,
+  Dalamud and High contrast. The app has the same looks. **Colour-blind friendly status colors** work with every look:
+  each has its own shades of blue, yellow and orange-red for fine, a look and urgent, measured to stay readable on its
+  background and apart with every common kind of colour blindness (Parchment uses a raspberry red for urgent, as dark
+  orange and ochre look alike with red-blindness).
+- **The sidebar in groups**: Overview (Summary, Trends), Submarines (Subs, Route Optimization, Parts, Supplies, Salvage),
+  Characters (Roster, Retainers, Free Companies, Inventory) and Gil (Income, Gil & Market), then Tools and System, each
+  group folding away on its own. The app's sidebar has the same groups. With retainers only, Submarines is left out.
+- **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
+  finds every piece of Diadochos healing gear).
+- **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by
+  the characters and their retainers. One choice for all three, saved.
+- **Free Companies and Inventory read with real Free Company ids.** These ids are too big for the number the plugin
+  read them into, so the Free Companies list failed and took every other read down with it ("Could not reach the
+  database" everywhere until the next read, and again on every Refresh). They're read in full now, and a read that
+  fails for any reason other than the connection now fails alone, saying why, keeping what it read before.
+- **Where is it?'s columns line up.** Every item's table now has the same column widths (from the widest text shown),
+  instead of each sizing to its own rows.
+
 ## 1.0.3 - 2026-11-05
 
 Goes with app 1.7.0, which removes the Discord alerts.
