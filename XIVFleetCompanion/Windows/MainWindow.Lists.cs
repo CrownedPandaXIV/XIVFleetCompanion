@@ -286,7 +286,13 @@ public partial class MainWindow
             if (old) Colored(Amber, p.PluginVersion ?? "—"); else ImGui.TextUnformatted(p.PluginVersion ?? "—");
             if (old) Hover($"Older than {newest} on another PC: update it in /xlplugins there.");
         }, p => string.Join(".", (p.PluginVersion ?? "").Split('.').Select(n => n.PadLeft(5, '0'))), p => p.PluginVersion == null),
-        new("lastSync", "Last sync", p => ImGui.TextUnformatted(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, DateTime.Now) : "never"),
+        new("lastSync", "Last sync", p =>
+            {
+                // A PC whose plugin only reads (it syncs no characters) checks in too.
+                if (p.LastSync == null && p.LastRead is { } read) Colored(Dim, $"Only reads (seen {FleetReader.Ago(read, DateTime.Now)})");
+                else ImGui.TextUnformatted(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, DateTime.Now) : "never");
+                if (p.LastRead is { } seen) Hover($"Its plugin last read the database {FleetReader.Ago(seen, DateTime.Now)}.");
+            },
             p => p.LastSync ?? DateTime.MinValue, p => p.LastSync == null),
         new("characters", "Characters", p =>
         {

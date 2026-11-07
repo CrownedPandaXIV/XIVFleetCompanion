@@ -205,6 +205,19 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   each table now remembers which columns it had, and one added since shows until it's hidden.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
+- **Settings shared with the app, from the game.** Settings has a **Shared with the app** section, saved in the
+  database so the app and every PC use the same: **What do you run?** (subs, retainers or both; pages and Summary
+  boxes for what you don't run are left out, as in the app), **Live Market Prices**, the **repair kit cost** and the
+  **Warnings** (low repair kits and ceruleum, the FC house warning, when a character counts as not synced). Each is
+  checked the same way as in the app (with app 1.8.0's fleet_settings_view).
+- **Import Fight Club Data from the game.** Settings → **Fight Club Data** → **Import Fight Club Data**: choose Fight
+  Club's route spreadsheet (.xlsx), check the rows (rows with a problem start unticked, as in the app), add a patch label
+  if you like, and import. It replaces the stored routes all at once, and leaves them as they were if anything fails.
+  It reads the spreadsheet the same way as the app (merged cells, numbers typed as text, columns moved or missing) and
+  works with the one-file SQLite database too. Old .xls files: save them as .xlsx first.
+- **A PC that only reads shows on the PCs page.** A PC whose plugin syncs no characters (syncing off, or none ticked)
+  now checks in every few minutes while the game runs, so the app's PCs tab and the plugin's PCs page list it ("Only
+  reads"), and moving the database checks it can follow (with app 1.8.0).
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by

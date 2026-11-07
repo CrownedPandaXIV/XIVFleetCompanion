@@ -42,7 +42,7 @@ namespace XIVFleetCompanion
     /// <summary>One setup of the plugin (PC and account label), from fleet_pcs_view. Problems: what it couldn't see.</summary>
     public sealed record PcRow(string Pc, string Account, string? PluginVersion, DateTime? LastSync, bool? AutoRetainer, bool? AllaganTools,
         bool? FcTracker, bool? SubmarineTracker, bool? VentureLog, int? Characters, int? LeftOut, int? Elsewhere,
-        List<string> Problems, string? CheckText, int? CheckToFix, DateTime? CheckAt);
+        List<string> Problems, string? CheckText, int? CheckToFix, DateTime? CheckAt, DateTime? LastRead = null);
 
     /// <summary>The retainers with a class right now, from fleet_retainer_counts_view (as the app's Summary).</summary>
     public sealed record RetainerCountsRow(int Retainers, int VenturesDone, int Away, int Idle);
@@ -184,11 +184,40 @@ namespace XIVFleetCompanion
         /// calling thread; null when they can't be read).</param>
         /// <param name="open">Opens the database for a read (null: none set up), following it when the app has moved it to
         /// another PC (DatabaseMove), as a sync does, so a PC that only reads switches too; none: the connection string as it is.</param>
-        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null, Func<Task<NpgsqlConnection?>>? open = null)
+        /// <param name="checkIn">This PC, its account label and plugin version, recorded as it reads (every few minutes),
+        /// so a PC that syncs no characters is still on the app's PCs tab and in a move's checks; null: not recorded.</param>
+        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null, Func<Task<NpgsqlConnection?>>? open = null,
+            Func<(string Pc, string Account, string Version)>? checkIn = null)
         {
             this.connectionString = connectionString;
             this.subGame = subGame;
             this.open = open;
+            this.checkIn = checkIn;
+        }
+        private readonly Func<(string Pc, string Account, string Version)>? checkIn;
+        public static readonly TimeSpan CheckInEvery = TimeSpan.FromMinutes(5);
+        private DateTime checkedIn = DateTime.MinValue;
+        private bool checkInRefused;
+
+        // Records that this PC read the database (a database without update 16 yet, or a login that may only read: not
+        // again). Never stops a read.
+        private async Task CheckInIfDue(NpgsqlConnection conn)
+        {
+            if (checkIn == null || checkInRefused || DateTime.UtcNow - checkedIn < CheckInEvery) return;
+            checkedIn = DateTime.UtcNow;
+            try
+            {
+                var (pc, account, version) = checkIn();
+                checkInRefused = !await DetailsWriter.WritePcReadAsync(conn, pc, account, version);
+            }
+            catch (PostgresException)
+            {
+                checkInRefused = true;
+            }
+            catch (Exception)
+            {
+                // tried again next time
+            }
         }
         private readonly Func<Task<NpgsqlConnection?>>? open;
 
@@ -268,6 +297,7 @@ namespace XIVFleetCompanion
                 try
                 {
                     await using var conn = await OpenAsync(cs);
+                    await CheckInIfDue(conn);
                     if (subs)
                     {
                         Subs = await Read(conn, ReadSubs, Subs);
@@ -506,7 +536,8 @@ namespace XIVFleetCompanion
                     BoolOrNull(r, "submarinetracker_found"), BoolOrNull(r, "venture_stats_found"),
                     IntOrNull(r, "characters_synced"), IntOrNull(r, "characters_left_out"), IntOrNull(r, "characters_elsewhere"),
                     Text(r, "problems").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
-                    TextOrNull(r, "check_text"), IntOrNull(r, "check_to_fix"), Time(r, "check_at")));
+                    TextOrNull(r, "check_text"), IntOrNull(r, "check_to_fix"), Time(r, "check_at"),
+                    Has(r, "last_read_at") ? Time(r, "last_read_at") : null));
             return list;
         }
 

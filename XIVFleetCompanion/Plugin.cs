@@ -99,7 +99,8 @@ public sealed class Plugin : IDalamudPlugin
 
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
         Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame,
-            () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection));
+            () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection),
+            () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText));
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckPage = new CheckWindow(this);
         SpeedTestPage = new SpeedTestWindow(this);

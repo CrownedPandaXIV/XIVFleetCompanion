@@ -90,7 +90,7 @@ public partial class MainWindow
         if (ImGui.InputInt("##repairKitCost", ref costBox, 0)) costTyped = true;
         Hover("What one repair kit costs you, for the routes' profit (Route Optimization and Income).");
         ImGui.SameLine();
-        Colored(Palette.Gil, "gil");
+        Tinted(Palette.Gil, "gil");
         ImGui.SameLine();
         if (ImGui.Button("Save##repairKitCost"))
         {
@@ -238,7 +238,7 @@ public partial class MainWindow
                     ImGui.TableNextColumn();
                     if (row.Data["rec_build_notes"] is string build) ImGui.TextUnformatted(build); else Colored(Dim, "-");
                     ImGui.TableNextColumn();
-                    if (row.Data["gil_hr"] is double gil) Colored(Palette.Gil, gil.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)); else Colored(Dim, "-");
+                    if (row.Data["gil_hr"] is double gil) Tinted(Palette.Gil, gil.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)); else Colored(Dim, "-");
                     ImGui.TableNextColumn();
                     if (row.HasIssue)
                         using (ImRaii.PushColor(ImGuiCol.Text, Amber))

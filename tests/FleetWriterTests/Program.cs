@@ -654,6 +654,20 @@ internal static class Program
                   && st.PlayChoice == want.GetProperty("playChoice").GetString() && st.PlayStyle == want.GetProperty("playStyle").GetString()
                   && st.SubsBuilt == want.GetProperty("subs").GetInt32() && st.RetainersWithClass == want.GetProperty("retainers").GetInt32(),
                 $"settings: read as the app's Settings reads them: {st} vs {want.GetRawText()}");
+
+            // A PC whose plugin only reads checks in (database update 16), and shows on the PCs page as that.
+            Check(await DetailsWriter.WritePcReadAsync(db, "READER", "", "2.0.0.40"), "PCs: a PC that only reads checks in");
+            Check(await DetailsWriter.WritePcReadAsync(db, "DESKTOP-1", "A", "2.0.0.40"), "PCs: a PC that syncs checks in too");
+            var pcs = await FleetReader.ReadPcs(db);
+            var readerRow = pcs.Single(p => p.Pc == "READER");
+            var synced = pcs.Single(p => p.Pc == "DESKTOP-1");
+            Check(readerRow.LastSync == null && readerRow.LastRead is { } seen && Math.Abs((DateTime.Now - seen).TotalMinutes) < 1 && readerRow.PluginVersion == "2.0.0.40"
+                  && synced.PluginVersion == "2.0.0.40" && synced.LastRead != null,
+                $"PCs: the check-in is read back as when it last read: {readerRow}");
+            var login = await new NpgsqlCommand("SELECT db_user FROM companion_pc_status WHERE pc_name = 'READER'", db).ExecuteScalarAsync();
+            Check(login is string { Length: > 0 }, "PCs: the check-in records the login it uses, for a move's checks");
+            await Exec(db, "DROP VIEW fleet_pcs_view; ALTER TABLE companion_pc_status DROP COLUMN last_read_at");
+            Check(!await DetailsWriter.WritePcReadAsync(db, "READER", "", "2.0.0.40"), "PCs: a database without update 16 yet is left as it is");
         }
         // What do you run? worked out as the app's shared/play-style.js does.
         static string Style(string choice, int subs, int retainers) => new FleetSettings(0, 0, 7, 30, null, false, choice, subs, retainers).PlayStyle;
