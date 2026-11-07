@@ -11,8 +11,8 @@ namespace XIVFleetCompanion.Windows;
 
 // 2.x, the rest of the tabs: the Roster, Retainers, PCs, Free Companies and Inventory pages, from the database's views
 // (FleetReader). Each reads every minute while it's shown, in the app's order (the Roster's for characters), and has
-// the app's table controls (FleetTable: sorting, Reset Sort, Columns, Group by account). They only show; changing
-// things (reordering or removing characters, gear targets, removing a PC) stays in the app for now.
+// the app's table controls (FleetTable: sorting, Reset Sort, Columns, Group by account). The Roster order, gear targets
+// and removing a PC can be changed here too (MainWindow.Edits.cs); removing a character stays in the app.
 public partial class MainWindow
 {
     private string rosterFilter = "";
@@ -156,8 +156,16 @@ public partial class MainWindow
         FilterBox(ref rosterFilter, "roster");
         ReadLine(reader.Roster, FleetReader.ListsEvery);
         TrendCardSection("Gil, whole fleet", "gil");
+        EditLine();
+        if (rosterOrderDraft != null)
+        {
+            DrawRosterOrder();
+            return;
+        }
         var roster = reader.Roster.Data;
         if (roster == null) return;
+        if (ImGui.Button("Change order##roster")) rosterOrderDraft = FleetOrder.Roster(roster, c => c.SortIndex, c => c.Character).ToList();
+        Hover("Move characters up or down in the Roster order (used everywhere, in the game and the app).");
         RosterTable.Draw(roster.Where(c => Matches(rosterFilter, c.Character, c.World, c.Account, c.FcName)).ToList());
     }
 
@@ -207,12 +215,7 @@ public partial class MainWindow
                 Colored(Dim, FleetReader.FinishClock(x.R.VentureEndsAt, DateTime.Now));
             }
         }, x => x.R.VentureEndsAt, x => !x.R.HasVenture || x.R.VentureEndsAt <= 0),
-        new("target", "Gear target", x =>
-        {
-            if (x.R.TargetMode == null) Colored(Dim, "—");
-            else ImGui.TextUnformatted($"{(x.R.TargetMode == "level" ? "Level" : "ilvl")} {x.R.TargetValue}{(x.R.OnlyCrafted ? ", crafted only" : "")}");
-            Hover("Gear targets and the slot-by-slot check are set and shown in the app's Retainers tab for now.");
-        }, x => $"{x.R.TargetMode} {x.R.TargetValue:D4}", x => x.R.TargetMode == null),
+        new("target", "Gear target", x => TargetCell(x.R), x => $"{x.R.TargetMode} {x.R.TargetValue:D4}", x => x.R.TargetMode == null),
     }, x => x.R.Account, "retainers", runKey: x => $"{x.R.Owner}@{x.R.World}");
 
     // A class's colour by its role (tanks blue, healers green, damage red, a base class lighter); null for gatherers,
@@ -238,6 +241,7 @@ public partial class MainWindow
         RetainersTable.DrawControls();
         FilterBox(ref retainersFilter, "retainers");
         ReadLine(reader.Retainers, FleetReader.ListsEvery);
+        EditLine();
         var read = reader.Retainers.Data;
         if (read == null) return;
         var unseen = read.Retainers.Count(r => !r.ItemsSeen);
@@ -311,6 +315,7 @@ public partial class MainWindow
             Colored(Amber, $"{p.Problems.Count} thing{(p.Problems.Count == 1 ? "" : "s")}");
             Hover(string.Join("\n", p.Problems));
         }, p => p.Problems.Count),
+        new("remove", "Remove", RemovePcCell),
     });
 
     private void DrawPcs()
@@ -322,6 +327,7 @@ public partial class MainWindow
         ImGui.SameLine();
         Colored(Dim, "Each setup of the plugin (PC and account label), as of its last sync.");
         ReadLine(reader.Pcs, FleetReader.ListsEvery);
+        EditLine();
         var pcs = reader.Pcs.Data;
         if (pcs == null) return;
         if (pcs.Count == 0)

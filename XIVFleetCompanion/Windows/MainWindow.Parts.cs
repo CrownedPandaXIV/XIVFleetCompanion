@@ -8,8 +8,8 @@ namespace XIVFleetCompanion.Windows;
 // 2.x batch 4, the Parts page, as the app's Parts tab: every part a sub needs for the build it should have at its rank
 // (its Sub Rules, or Fight Club's best build for a sub ticked Craft? from rank 85), a new workshop's first sub and every
 // unlocked empty slot; and whether a spare covers it, the part another sub gives up when upgraded, or it needs crafting.
-// Worked out here (PartsPlanner) from the database's fleet_parts_* views, read every 5 minutes. Sub Rules and Craft? are
-// set in the app. Look ahead: also the parts of each sub's next build due within 3, 7 or 14 days (the Subs page's Next
+// Worked out here (PartsPlanner) from the database's fleet_parts_* views, read every 5 minutes. Sub Rules (their own tab)
+// and Craft? (the Subs page) can be changed here or in the app. Look ahead: also the parts of each sub's next build due within 3, 7 or 14 days (the Subs page's Next
 // Build), after what's needed now. The Shopping List tab is in MainWindow.Shopping.cs.
 public partial class MainWindow
 {
@@ -143,6 +143,11 @@ public partial class MainWindow
         using (var tab = ImRaii.TabItem("Shopping List"))
         {
             if (tab) DrawShopping(parts);
+        }
+        // The builds each sub should have from a rank (changed here or in the app).
+        using (var tab = ImRaii.TabItem("Sub Rules"))
+        {
+            if (tab) DrawSubRules(parts);
         }
     }
 }

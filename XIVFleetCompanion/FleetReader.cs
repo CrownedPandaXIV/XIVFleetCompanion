@@ -877,6 +877,64 @@ namespace XIVFleetCompanion
             return new ShoppingRead(held, progress, exclude, live, worlds.Select(kv => (kv.Key, kv.Value)).ToList());
         }
 
+        // --- In-game edits (2.x "ticking things off" stage): one at a time, in the background; once saved, everything is
+        // read again at the next chance, so every page shows the change. ---
+
+        private volatile bool editing;
+        /// <summary>True while an edit is being saved.</summary>
+        public bool Editing => editing;
+        /// <summary>The last edit: what it was, why it failed (null: saved) and when.</summary>
+        public (string What, string? Error, DateTime At)? LastEdit { get; private set; }
+
+        /// <summary>Saves an edit (FleetEdits): edit answers null when done, else why not. done is told the same, on a background thread.</summary>
+        public void Edit(string what, Func<NpgsqlConnection, Task<string?>> edit, Action<string?>? done = null)
+        {
+            if (editing)
+            {
+                LastEdit = (what, "Another change is still being saved. Try again in a moment.", DateTime.Now);
+                return;
+            }
+            var cs = connectionString();
+            if (cs == null)
+            {
+                LastEdit = (what, "The database isn't set up yet (Settings tab).", DateTime.Now);
+                return;
+            }
+            editing = true;
+            LastEdit = null;
+            Task.Run(async () =>
+            {
+                string? error;
+                try
+                {
+                    await using var conn = await OpenAsync(cs);
+                    error = await edit(conn);
+                }
+                catch (PostgresException ex)
+                {
+                    error = ex.MessageText;
+                }
+                catch (Exception ex)
+                {
+                    error = ReachFailure(ex);
+                }
+                finally
+                {
+                    editing = false;
+                }
+                LastEdit = (what, error, DateTime.Now);
+                if (error == null) ReadAgainSoon();
+                done?.Invoke(error);
+            });
+        }
+
+        /// <summary>Everything is read again at the next chance (after an edit).</summary>
+        public void ReadAgainSoon()
+        {
+            subsAsked = suppliesAsked = listsAsked = moneyAsked = partsAsked = marketAsked = DateTime.MinValue;
+            if (Shopping.At.HasValue) Shopping = Shopping with { At = DateTime.MinValue };
+        }
+
         // --- The Trends page's reads (2.x Trends stage): what's recorded and whose, every 5 minutes while charts are shown;
         // and each chart, in the background, one at a time, kept for 5 minutes (the page asks again each minute, as its span
         // moves on). While a chart is read again, whoever asked keeps showing the last one it had. ---

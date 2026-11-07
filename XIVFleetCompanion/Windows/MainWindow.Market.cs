@@ -136,7 +136,8 @@ public partial class MainWindow
         }
 
         Heading("Listings unsold for a while");
-        Colored(Dim, $"Up for {m.Settings.StaleDays} days or more (set in the app's Gil & Market tab), since the plugin first saw each listing (a repriced listing keeps its time). Oldest first.");
+        Colored(Dim, $"Up for {m.Settings.StaleDays} days or more, since the plugin first saw each listing (a repriced listing keeps its time). Oldest first.");
+        StaleDaysEditor(m.Settings.StaleDays);
         var unsold = kept.Unsold;
         if (unsold.Count == 0) { ImGui.TextUnformatted($"Nothing has been up for {m.Settings.StaleDays} days or more."); return; }
         // With live prices, the cheapest rivals too (a table of its own, so each keeps its own columns).

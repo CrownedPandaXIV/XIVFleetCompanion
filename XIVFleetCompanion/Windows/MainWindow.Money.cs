@@ -173,7 +173,8 @@ public partial class MainWindow
         var counted = income.Characters.Where(c => c.Enough).ToList();
         var notEnough = income.Characters.Count - counted.Count;
         Heading($"Fleet real net per day: {Gil(counted.Sum(c => c.PerDay))} gil");
-        Colored(Dim, $"{Gil(counted.Sum(c => c.SalvagePerDay))} salvage − {Gil(counted.Sum(c => c.KitPerDay))} repairs, over the last {income.WindowDays} days (set in the app's Income tab).");
+        Colored(Dim, $"{Gil(counted.Sum(c => c.SalvagePerDay))} salvage − {Gil(counted.Sum(c => c.KitPerDay))} repairs, over the last {income.WindowDays} days.");
+        IncomeWindowEditor(income.WindowDays);
         ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted). " +
                           (income.KitCost > 0 ? $"Repairs: repair kits used at {Gil(income.KitCost)} gil each." : "Repairs: set the repair kit cost in the app's Settings to count them.") +
                           (notEnough > 0 ? $" {notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history." : "") +

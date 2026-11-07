@@ -549,6 +549,97 @@ internal static class Program
             B(r, "buildAhead"), D(r, "maxRank"), N(D(r, "nextRank")), N(D(r, "nextRankAt")), N(D(r, "voyages")), build);
     }
 
+    // The in-game edits: the app's database (db/schema.sql) in a database of its own, the same starting rows, then each
+    // edit the app made, made the plugin's way; the answer and every edited table must come out the same each time.
+    private static async Task EditsAgainstTheApp(NpgsqlConnection conn)
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "edits-fixture.json");
+        using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var root = doc.RootElement;
+        await Exec(conn, "DROP DATABASE IF EXISTS fleet_edits_plugin");
+        await Exec(conn, "CREATE DATABASE fleet_edits_plugin");
+        var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
+        await using (var db = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(given) { Database = "fleet_edits_plugin", Pooling = false }.ConnectionString))
+        {
+            await db.OpenAsync();
+            await Exec(db, root.GetProperty("schema").GetString()!);
+            await Exec(db, root.GetProperty("seed").GetString()!);
+            var tables = root.GetProperty("tables").EnumerateObject().Select(t => (t.Name, Sql: t.Value.GetString()!)).ToList();
+            async Task<string> Tables()
+            {
+                var all = new JsonObject();
+                foreach (var (name, sql) in tables)
+                {
+                    var rows = new JsonArray();
+                    await using var cmd = new NpgsqlCommand(sql, db);
+                    await using var r = await cmd.ExecuteReaderAsync();
+                    while (await r.ReadAsync())
+                    {
+                        var row = new JsonObject();
+                        for (var i = 0; i < r.FieldCount; i++)
+                            row[r.GetName(i)] = r.IsDBNull(i) ? null : r.GetValue(i) switch
+                            {
+                                bool b => JsonValue.Create(b),
+                                int n => JsonValue.Create(n),
+                                long n => JsonValue.Create(n),
+                                var v => JsonValue.Create(Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)),
+                            };
+                        rows.Add(row);
+                    }
+                    all[name] = rows;
+                }
+                return all.ToJsonString();
+            }
+            using (var start = JsonDocument.Parse(await Tables()))
+                Check(JsonDiff(start.RootElement, root.GetProperty("start"), "") == null, "edits: the same starting rows as the app's");
+
+            static string? S(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            static double D(JsonElement e) => e.ValueKind == JsonValueKind.Number ? e.GetDouble() : double.NaN;
+            foreach (var edit in root.GetProperty("edits").EnumerateArray())
+            {
+                var call = edit.GetProperty("call").GetString()!;
+                var args = edit.GetProperty("args").EnumerateArray().ToList();
+                var a = args.FirstOrDefault();
+                FleetEdits.Rule Rule(JsonElement r) => new(r.TryGetProperty("id", out var id) ? id.GetInt64() : null, r.GetProperty("rank").GetInt32(), S(r, "cid_override"),
+                    S(r, "sub_filter"), S(r, "hull"), S(r, "stern"), S(r, "bow"), S(r, "bridge"));
+                var answer = new JsonObject { ["success"] = true };
+                string? error = null;
+                switch (call)
+                {
+                    case "add-sub-build-rule": answer["id"] = await FleetEdits.AddRule(db, Rule(a)); break;
+                    case "update-sub-build-rule": await FleetEdits.UpdateRule(db, Rule(a)); break;
+                    case "delete-sub-build-rule": await FleetEdits.DeleteRule(db, a.GetInt64()); break;
+                    case "set-craft-enabled": await FleetEdits.SetCraft(db, S(a, "cid")!, S(a, "subName")!, a.GetProperty("enabled").GetBoolean()); break;
+                    case "save-retainer-target":
+                        error = await FleetEdits.SaveTarget(db, S(a, "retainerId")!, S(a, "targetMode"),
+                            a.GetProperty("targetValue").ValueKind == JsonValueKind.Number ? a.GetProperty("targetValue").GetInt32() : null, a.GetProperty("onlyCrafted").GetBoolean());
+                        break;
+                    case "delete-retainer-target": error = await FleetEdits.DeleteTarget(db, a.GetString()!); break;
+                    case "update-sort-order": await FleetEdits.SaveOrder(db, a.EnumerateArray().Select(x => x.GetString()!).ToList()); break;
+                    case "save-market-settings": error = await FleetEdits.SaveStaleDays(db, D(a.GetProperty("minDays"))); break;
+                    case "save-income-settings": error = await FleetEdits.SaveIncomeWindow(db, a.GetProperty("windowDays").GetInt32()); break;
+                    case "remove-pc":
+                        var (removed, problem) = await FleetEdits.RemovePc(db, a.GetString()!, args[1].GetString());
+                        error = problem;
+                        if (problem == null) answer["removed"] = removed;
+                        break;
+                    case "save-shopping-progress":
+                        error = await FleetEdits.SaveShoppingProgress(db, D(a.GetProperty("itemId")), D(a.GetProperty("made")), D(a.GetProperty("crafts")), a.GetProperty("aheadDays").GetInt32());
+                        break;
+                    default: Check(false, $"edits: the plugin makes the app's {call}"); continue;
+                }
+                if (error != null) answer = new JsonObject { ["success"] = false, ["error"] = error };
+                using var mine = JsonDocument.Parse(answer.ToJsonString());
+                using var after = JsonDocument.Parse(await Tables());
+                var diff = JsonDiff(mine.RootElement, edit.GetProperty("answer"), "answer") ?? JsonDiff(after.RootElement, edit.GetProperty("after"), "tables");
+                Check(diff == null, $"edits: {call} {string.Join(" ", args.Select(x => x.GetRawText()))} leaves the database as the app's does" + (diff == null ? "" : $"\n   {diff}"));
+            }
+        }
+        await Exec(conn, "DROP DATABASE fleet_edits_plugin");
+        Check(FleetEdits.SetProgress("{\"5\":3,\"x\":{\"made\":1},\"2\":{\"made\":1,\"outOf\":2}}", 7, 1, 2, 3) == "{\"2\":{\"made\":1,\"outOf\":2},\"5\":3,\"7\":{\"made\":1,\"outOf\":2,\"ahead\":3},\"x\":{\"made\":1}}",
+            "edits: ticking keeps every other tick as it was, in the order the app reads them: " + FleetEdits.SetProgress("{\"5\":3,\"x\":{\"made\":1},\"2\":{\"made\":1,\"outOf\":2}}", 7, 1, 2, 3));
+    }
+
     // The fixture's made-up crafting data as the plugin reads the game's sheets.
     private static ShoppingGame ShopGameFrom(System.Text.Json.JsonElement shop)
     {
@@ -662,6 +753,8 @@ internal static class Program
                 return null;
             case JsonValueKind.Number:
                 return a.GetDouble() == b.GetDouble() ? null : $"{at}: plugin {a.GetRawText()}, app {b.GetRawText()}";
+            case JsonValueKind.String:
+                return a.GetString() == b.GetString() ? null : $"{at}: plugin {a.GetRawText()}, app {b.GetRawText()}";
             default:
                 return a.GetRawText() == b.GetRawText() ? null : $"{at}: plugin {a.GetRawText()}, app {b.GetRawText()}";
         }
@@ -1245,6 +1338,7 @@ internal static class Program
         await MarketReadFromTheDatabase(conn);
         await ShoppingReadFromTheDatabase(conn);
         await TrendsAgainstTheApp(conn);
+        await EditsAgainstTheApp(conn);
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

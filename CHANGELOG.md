@@ -188,6 +188,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   (folded away until opened, remembered), and each character's or Free Company's own trends from the chart button
   beside its name. Read in the background with the same chart query as the app, and checked against the app's answers
   for a made-up history.
+- **Changing things from the game**, as in the app (and saved for the app too): Craft? on the Subs page; Sub Rules on
+  the Parts page (their own tab: rank, slots, each part's class, one character or everyone; add, save, delete with a
+  second click to be sure); gear targets on the Retainers page (Edit beside each target); the Roster order (Change
+  order: up, down, to the top, then save); how many days counts as unsold on Gil & Market; the Income window; removing
+  a PC no longer used (PCs page, with a second click to be sure); and ticking parts off on the Shopping List. Each is
+  saved in the background, then everything is read again; "Saved" or why not shows for a few seconds. Checked against
+  the app's own edits on the same database (the same rows written, the same refusals). Removing a character stays in
+  the app.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

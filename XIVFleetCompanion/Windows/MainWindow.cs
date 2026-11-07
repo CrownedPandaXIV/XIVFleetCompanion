@@ -647,6 +647,8 @@ public partial class MainWindow : Window, IDisposable
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => sub.Rank),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
+        // Craft?: follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
+        new("craft", "Craft?", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0),
         // Status: back and waiting first, then the soonest back; in port last either way.
         new("status", "Status", sub =>
         {
@@ -704,6 +706,7 @@ public partial class MainWindow : Window, IDisposable
         SubsTable.DrawControls();
         FilterBox(ref subsFilter, "subs");
         ReadLine(reader.Subs, FleetReader.SubsEvery);
+        EditLine();
         ForecastLine();
         var subs = reader.Subs.Data;
         if (subs == null) return;

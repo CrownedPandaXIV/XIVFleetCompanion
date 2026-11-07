@@ -192,11 +192,7 @@ public partial class MainWindow
                 if (p.Cheaper != null) Colored(Green, p.Cheaper == "buy" ? "Buy" : "Make");
             }, p => p.Cheaper ?? ""));
         }
-        columns.Add(new("made", "Made", p =>
-        {
-            Colored(p.Made >= p.Crafts ? Green : p.Made > 0 ? Amber : Dim, $"{Number(p.Made)} of {Number(p.Crafts)}");
-            Hover("Ticked off in the app (Parts → Shopping List), shared by every PC. Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
-        }, p => p.Made));
+        columns.Add(new("made", "Made", MadeCell, p => MadeOf(p)));
         var table = new FleetTable<ShopRow>(priced ? "shoppingPartsPriced" : "shoppingParts", plugin.Configuration, columns);
         if (priced) shopPartsPricedTable = table; else shopPartsTable = table;
         return table;
@@ -408,7 +404,8 @@ public partial class MainWindow
         ImGui.Spacing();
         ImGui.TextUnformatted("Sub parts to craft");
         ImGui.Separator();
-        Note("Tick parts off as you craft them in the app (Parts → Shopping List); every PC sees it. Once the plugin sees a crafted part in bags, " +
+        EditLine();
+        Note("Tick parts off as you craft them (here or in the app); every PC sees it. Once the plugin sees a crafted part in bags, " +
                      "a retainer or the FC chest, it leaves the list by itself. The materials below are for every part on the list, made or not.");
         var partsTable = ShopPartsTable(priced);
         partsTable.DrawControls();
