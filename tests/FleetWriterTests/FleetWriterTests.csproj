@@ -29,6 +29,7 @@
     <Compile Include="..\..\XIVFleetCompanion\ShoppingList.cs" Link="ShoppingList.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Trends.cs" Link="Trends.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FleetEdits.cs" Link="FleetEdits.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\FightClubImport.cs" Link="FightClubImport.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- Made-up fleets and the app's Parts answers (the app's tests/db/parts-fixture.js), for PartsPlanner. -->
@@ -41,6 +42,8 @@
     <None Include="trends-fixture.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The app's edits and the tables after each (the app's tests/db/edits-fixture.js), for the in-game edits. -->
     <None Include="edits-fixture.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Route spreadsheets, the app's reading of them and its import (the app's tests/db/fight-club-fixture.js), for Import Fight Club Data. -->
+    <None Include="fight-club-fixture.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />

@@ -138,6 +138,64 @@ namespace XIVFleetCompanion
             return null;
         }
 
+        public const int DemolitionDays = 45;
+        public const int MinNotSyncedMinutes = 10, MaxNotSyncedMinutes = 1440;
+        public const int MaxLowSupply = 99999;
+        public const int MaxGil = 999999999;
+        public static readonly string[] PlayStyles = { "auto", "both", "subs", "retainers" };
+
+        private static bool WholeUpTo(double n, double max) => n == Math.Floor(n) && n >= 0 && n <= max;
+
+        /// <summary>Why the Warnings can't be saved (as the app's Settings → General → Warnings checks them), or null.</summary>
+        public static string? CheckWarnings(double repairKits, double ceruleum, double houseDays, double notSyncedMinutes)
+        {
+            if (!WholeUpTo(repairKits, MaxLowSupply)) return $"Low repair kits must be a whole number from 0 to {MaxLowSupply} (0 turns it off).";
+            if (!WholeUpTo(ceruleum, MaxLowSupply)) return $"Low ceruleum must be a whole number from 0 to {MaxLowSupply} (0 turns it off).";
+            if (!(houseDays == Math.Floor(houseDays) && houseDays >= 1 && houseDays < DemolitionDays))
+                return $"The house warning must be a whole number of days from 1 to {DemolitionDays - 1}.";
+            if (!(notSyncedMinutes == Math.Floor(notSyncedMinutes) && notSyncedMinutes >= MinNotSyncedMinutes && notSyncedMinutes <= MaxNotSyncedMinutes))
+                return $"Not synced must be a whole number of minutes from {MinNotSyncedMinutes} to {MaxNotSyncedMinutes}.";
+            return null;
+        }
+
+        /// <summary>The Warnings: low repair kits and ceruleum (below these; 0: off), the FC house warning (days not
+        /// entered) and when a character counts as not synced (minutes behind the rest of its account).</summary>
+        public static async Task<string?> SaveWarnings(NpgsqlConnection conn, double repairKits, double ceruleum, double houseDays, double notSyncedMinutes)
+        {
+            if (CheckWarnings(repairKits, ceruleum, houseDays, notSyncedMinutes) is { } problem) return problem;
+            await SaveEconomics(conn, "low_repair_kit_threshold", (decimal)repairKits);
+            await SaveEconomics(conn, "low_ceruleum_threshold", (decimal)ceruleum);
+            await SaveEconomics(conn, "house_warn_days", (decimal)houseDays);
+            await SaveEconomics(conn, "not_synced_after_minutes", (decimal)notSyncedMinutes);
+            return null;
+        }
+
+        /// <summary>What one repair kit costs, in whole gil (used for the routes' profit).</summary>
+        public static async Task<string?> SaveRepairKitCost(NpgsqlConnection conn, double gil)
+        {
+            if (!WholeUpTo(gil, MaxGil)) return "The repair kit cost must be a whole number of gil, 0 or more.";
+            await SaveEconomics(conn, "repair_kit_cost", (decimal)gil);
+            return null;
+        }
+
+        private static async Task SaveSetting(NpgsqlConnection conn, string key, string value)
+        {
+            await using var cmd = Command(conn, @"INSERT INTO tier3_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, now())
+                ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = now()", key, value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>Live Market Prices: whether to ask Universalis for prices.</summary>
+        public static Task SaveLivePrices(NpgsqlConnection conn, bool on) => SaveSetting(conn, "universalis_enabled", on ? "true" : "false");
+
+        /// <summary>"What do you run?": auto (work it out from the characters), both, subs or retainers.</summary>
+        public static async Task<string?> SavePlayStyle(NpgsqlConnection conn, string choice)
+        {
+            if (!PlayStyles.Contains(choice)) return "Unknown choice.";
+            await SaveSetting(conn, "play_style", choice);
+            return null;
+        }
+
         /// <summary>A PC no longer used: its row goes (it comes back if the plugin still runs there). How many went, or why not.</summary>
         public static async Task<(int Removed, string? Error)> RemovePc(NpgsqlConnection conn, string pcName, string? accountLabel)
         {

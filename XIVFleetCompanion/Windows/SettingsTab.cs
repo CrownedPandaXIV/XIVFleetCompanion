@@ -157,7 +157,8 @@ public class SettingsTab : IDisposable
         clearArmedUntil = DateTime.MinValue;
     }
 
-    public void Draw()
+    /// <summary>shared: the settings shared with the app (drawn by the main window, after the Characters list).</summary>
+    public void Draw(Action? shared = null)
     {
         // Can't ref a property, so use a local copy
         var enabled = configuration.Enabled;
@@ -236,6 +237,12 @@ public class SettingsTab : IDisposable
 
         ImGui.Spacing();
         DrawCharacters();
+
+        if (shared != null)
+        {
+            ImGui.Spacing();
+            shared();
+        }
 
         ImGui.Spacing();
         ImGui.Separator();

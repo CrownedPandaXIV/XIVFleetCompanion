@@ -127,13 +127,28 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Check: plugin.CheckPage.DrawPage(); break;
             case Tab.SpeedTest: plugin.SpeedTestPage.DrawPage(); break;
             case Tab.Status: DrawStatus(); break;
-            case Tab.Settings: settings.Draw(); break;
+            case Tab.Settings:
+                settings.Draw(() =>
+                {
+                    DrawSharedSettings();
+                    ImGui.Spacing();
+                    DrawFightClubImport();
+                });
+                break;
         }
     }
 
     // --- The sidebar: the submarine, the pages in groups with what needs attention beside them, and this PC's sync. ---
 
     private static readonly string[] Groups = { "Fleet", "Tools", "System" };
+
+    /// <summary>Whether a page is shown for what the player runs (the app's shared/play-style.js hiddenViews).</summary>
+    public static bool PageUsed(Tab tab, bool subs, bool retainers) => tab switch
+    {
+        Tab.Salvage or Tab.Subs or Tab.Supplies or Tab.Parts or Tab.Routes => subs,
+        Tab.Retainers => retainers,
+        _ => true,
+    };
 
     private void DrawSidebar(bool folded)
     {
@@ -176,6 +191,12 @@ public partial class MainWindow : Window, IDisposable
         var readyForParts = readyList.Count;
         attention += readyForParts;
 
+        // What do you run? (Settings): pages for what isn't run are left out, as in the app.
+        var uses = reader.Settings.Data;
+        var subsOn = uses?.UsesSubs ?? true;
+        var retainersOn = uses?.UsesRetainers ?? true;
+        if (!PageUsed(shown, subsOn, retainersOn)) shown = Tab.Summary;
+
         foreach (var group in Groups)
         {
             var open = true;
@@ -195,21 +216,21 @@ public partial class MainWindow : Window, IDisposable
                 case "Fleet":
                     Entry(Tab.Summary, FontAwesomeIcon.ClipboardList, "Summary", folded, attention > 0 ? attention.ToString() : null, attention > 0 ? p.Warn : p.Dim,
                         attention > 0 ? $"{attention} thing{(attention == 1 ? "" : "s")} need{(attention == 1 ? "s" : "")} attention" : "Nothing needs you");
-                    Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
-                    var toSwitch = reader.Routes.Data != null ? Suboptimal().Count : 0;
-                    Entry(Tab.Routes, FontAwesomeIcon.Route, "Route Optimization", folded, toSwitch > 0 ? $"{toSwitch} to switch" : null, p.Warn,
+                    if (subsOn) Entry(Tab.Subs, FontAwesomeIcon.Ship, "Subs", folded, back > 0 ? $"{back} back" : null, p.Good, back > 0 ? $"{back} back and waiting" : null);
+                    var toSwitch = subsOn && reader.Routes.Data != null ? Suboptimal().Count : 0;
+                    if (subsOn) Entry(Tab.Routes, FontAwesomeIcon.Route, "Route Optimization", folded, toSwitch > 0 ? $"{toSwitch} to switch" : null, p.Warn,
                         toSwitch > 0 ? $"{toSwitch} sub{(toSwitch == 1 ? " isn't" : "s aren't")} on the best route for {(toSwitch == 1 ? "its" : "their")} rank" : "Subs not on Fight Club's best route for their rank");
-                    Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
-                    Entry(Tab.Parts, FontAwesomeIcon.Wrench, "Parts", folded, readyForParts > 0 ? $"{readyForParts} ready" : null, p.Good,
+                    if (subsOn) Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
+                    if (subsOn) Entry(Tab.Parts, FontAwesomeIcon.Wrench, "Parts", folded, readyForParts > 0 ? $"{readyForParts} ready" : null, p.Good,
                         readyForParts > 0 ? PartsPlanner.ReadyText(readyList) : "What each sub's next build needs");
                     Entry(Tab.Roster, FontAwesomeIcon.Users, "Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
                         notSynced > 0 ? $"{notSynced} character{(notSynced == 1 ? "" : "s")} no longer synced" : null);
-                    Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
+                    if (retainersOn) Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
                         venturesDone > 0 ? $"{venturesDone} venture{(venturesDone == 1 ? "" : "s")} done" : null);
                     Entry(Tab.Fcs, FontAwesomeIcon.Home, "Free Companies", folded, housesAtRisk > 0 ? $"{housesAtRisk} house{(housesAtRisk == 1 ? "" : "s")}" : null, p.Warn,
                         housesAtRisk > 0 ? $"{housesAtRisk} house{(housesAtRisk == 1 ? "" : "s")} not entered for a while" : null);
                     Entry(Tab.Inventory, FontAwesomeIcon.BoxOpen, "Inventory", folded, null, p.Dim, "What the fleet holds, and Where is it?");
-                    Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
+                    if (subsOn) Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
                     Entry(Tab.Income, FontAwesomeIcon.Coins, "Income", folded, null, p.Dim, "Real income from the subs, and venture rewards");
                     var undercutNow = reader.Market.Data is { Live: { Error: null } } marketNow ? marketCache.Undercut(marketNow) : 0;
                     Entry(Tab.Market, FontAwesomeIcon.Store, "Gil & Market", folded, undercutNow > 0 ? $"{undercutNow} undercut" : null, p.Warn,
@@ -532,18 +553,35 @@ public partial class MainWindow : Window, IDisposable
         else if (reader.Alerts.Error == null) Colored(Dim, "Reading...");
 
         // Subs, Retainers and Supplies side by side: the main number large, the rest beneath it.
+        // Only what the player runs (Settings → What do you run?), as the app's Summary.
+        var subsOn = reader.Settings.Data?.UsesSubs ?? true;
+        var retainersOn = reader.Settings.Data?.UsesRetainers ?? true;
         ImGui.Spacing();
-        using (var boxes = ImRaii.Table("##summaryBoxes", 3, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.PadOuterX))
+        using (var boxes = ImRaii.Table("##summaryBoxes", (subsOn ? 2 : 0) + (retainersOn ? 1 : 0), ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.PadOuterX))
         {
             if (boxes)
             {
-                ImGui.TableNextColumn();
-                SummarySubsBox(back, now);
-                ImGui.TableNextColumn();
-                SummaryRetainersBox();
-                ImGui.TableNextColumn();
-                SummarySuppliesBox();
+                if (subsOn)
+                {
+                    ImGui.TableNextColumn();
+                    SummarySubsBox(back, now);
+                }
+                if (retainersOn)
+                {
+                    ImGui.TableNextColumn();
+                    SummaryRetainersBox();
+                }
+                if (subsOn)
+                {
+                    ImGui.TableNextColumn();
+                    SummarySuppliesBox();
+                }
             }
+        }
+        if (!subsOn)
+        {
+            DrawTrendTiles();
+            return;
         }
 
         // As the app's Summary: the subs ready for new parts, one part to a line.

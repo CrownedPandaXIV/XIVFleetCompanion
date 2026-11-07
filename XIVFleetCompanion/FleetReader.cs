@@ -100,6 +100,22 @@ namespace XIVFleetCompanion
     public sealed record ShoppingRead(List<HeldRow> Held, string? Progress, HashSet<string> Exclude, bool LivePrices, List<(string World, int Characters)> Worlds);
 
     /// <summary>What was last read, when, and why the last read failed (null when it didn't).</summary>
+    /// <summary>The settings the app and the plugin share (fleet_settings_view): the Warnings, the repair kit cost (null:
+    /// not set), Live Market Prices, and "What do you run?" with what "auto" decides from.</summary>
+    public sealed record FleetSettings(double RepairKitThreshold, double CeruleumThreshold, int HouseWarnDays, int NotSyncedMinutes,
+        double? RepairKitCost, bool LivePrices, string PlayChoice, int SubsBuilt, int RetainersWithClass)
+    {
+        /// <summary>What the player runs: "both", "subs" or "retainers" (auto: subs only with built subs and no retainer
+        /// with a class, retainers only the other way round, else both), as the app's shared/play-style.js.</summary>
+        public string PlayStyle => PlayChoice switch
+        {
+            "both" or "subs" or "retainers" => PlayChoice,
+            _ => SubsBuilt > 0 && RetainersWithClass == 0 ? "subs" : RetainersWithClass > 0 && SubsBuilt == 0 ? "retainers" : "both",
+        };
+        public bool UsesSubs => PlayStyle != "retainers";
+        public bool UsesRetainers => PlayStyle != "subs";
+    }
+
     public sealed record FleetRead<T>(T? Data, DateTime? At, string? Error) where T : class;
 
     /// <summary>
@@ -156,6 +172,8 @@ namespace XIVFleetCompanion
         /// <summary>How close the Next Rank dates came (the Subs page's forecast line): read with the routes.</summary>
         public FleetRead<ForecastAccuracy> Forecasts { get; private set; } = new(null, null, null);
         public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
+        /// <summary>The shared settings, read with the parts (every 5 minutes) and after an edit.</summary>
+        public FleetRead<FleetSettings> Settings { get; private set; } = new(null, null, null);
         public bool Busy => busy;
         private volatile bool askingUniversalis;
         /// <summary>True while live prices are being asked of Universalis (apart from the database reads).</summary>
@@ -234,6 +252,7 @@ namespace XIVFleetCompanion
                 Parts = Parts with { Error = notSetUp };
                 Routes = Routes with { Error = notSetUp };
                 Market = Market with { Error = notSetUp };
+                Settings = Settings with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -278,6 +297,7 @@ namespace XIVFleetCompanion
                     }
                     if (parts)
                     {
+                        Settings = await Read(conn, ReadSettings, Settings);
                         Parts = await Read(conn, ReadParts, Parts);
                         Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
                         Forecasts = await Read(conn, ReadForecasts, Forecasts);
@@ -291,7 +311,7 @@ namespace XIVFleetCompanion
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; Loot = Loot with { Error = text }; }
-                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; }
+                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; }
                     if (market) Market = Market with { Error = text };
                 }
                 finally
@@ -373,6 +393,16 @@ namespace XIVFleetCompanion
             return false;
         }
         private static DateTime? Time(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : r.GetFieldValue<DateTime>(i).ToLocalTime(); }
+
+        public static async Task<FleetSettings> ReadSettings(NpgsqlConnection conn)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_settings_view", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) throw new InvalidOperationException("No settings row.");
+            return new FleetSettings(Double(r, "repair_kit_threshold") ?? 0, Double(r, "ceruleum_threshold") ?? 0, Int(r, "house_warn_days", 7),
+                Int(r, "not_synced_minutes", 30), Double(r, "repair_kit_cost"), BoolOrNull(r, "live_prices") == true, Text(r, "play_style_choice"),
+                Int(r, "subs_built"), Int(r, "retainers_with_class"));
+        }
 
         public static async Task<List<SubRow>> ReadSubs(NpgsqlConnection conn)
         {

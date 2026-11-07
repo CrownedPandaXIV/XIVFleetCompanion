@@ -181,7 +181,7 @@ public partial class MainWindow
     }
 
     private const string NoCurrentGil = "Its route isn't in Fight Club, or its rank is below the route's builds.";
-    private const string NoTargetGil = "Fight Club recommends routes from rank 85 (and needs importing in the app's Settings).";
+    private const string NoTargetGil = "Fight Club recommends routes from rank 85 (import its data in Settings, here or in the app).";
 
     private FleetTable<SubRoute> RoutesTable => routesTable ??= new FleetTable<SubRoute>("routeOpt", plugin.Configuration, new List<FleetColumn<SubRoute>>
     {

@@ -626,6 +626,13 @@ internal static class Program
                     case "save-shopping-progress":
                         error = await FleetEdits.SaveShoppingProgress(db, D(a.GetProperty("itemId")), D(a.GetProperty("made")), D(a.GetProperty("crafts")), a.GetProperty("aheadDays").GetInt32());
                         break;
+                    case "settings:save-low-thresholds":
+                        error = await FleetEdits.SaveWarnings(db, D(a.GetProperty("repairKitThreshold")), D(a.GetProperty("ceruleumThreshold")),
+                            D(a.GetProperty("houseWarnDays")), D(a.GetProperty("notSyncedMinutes")));
+                        break;
+                    case "settings:save-repair-kit-cost": error = await FleetEdits.SaveRepairKitCost(db, D(a)); break;
+                    case "save-universalis-setting": await FleetEdits.SaveLivePrices(db, a.GetBoolean()); break;
+                    case "save-play-style": error = await FleetEdits.SavePlayStyle(db, a.GetString()!); break;
                     default: Check(false, $"edits: the plugin makes the app's {call}"); continue;
                 }
                 if (error != null) answer = new JsonObject { ["success"] = false, ["error"] = error };
@@ -634,7 +641,25 @@ internal static class Program
                 var diff = JsonDiff(mine.RootElement, edit.GetProperty("answer"), "answer") ?? JsonDiff(after.RootElement, edit.GetProperty("after"), "tables");
                 Check(diff == null, $"edits: {call} {string.Join(" ", args.Select(x => x.GetRawText()))} leaves the database as the app's does" + (diff == null ? "" : $"\n   {diff}"));
             }
+            // The shared settings as the plugin reads them (fleet_settings_view) after those edits, as the app's Settings reads them.
+            await Exec(db, root.GetProperty("views").GetString()!);
+            await Exec(db, "INSERT INTO companion_submarine_snapshot (cid, sub_name, level) VALUES (18014498578000001, 'Sub1', 50), (18014498578000002, 'Sub1', 0)");
+            await Exec(db, "UPDATE companion_retainer_lookup SET job = 3 WHERE retainer_id = 33777097243660301");
+            var st = await FleetReader.ReadSettings(db);
+            var want = root.GetProperty("settings");
+            var cost = want.GetProperty("repairKitCost");
+            Check(st.RepairKitThreshold == want.GetProperty("repairKitThreshold").GetDouble() && st.CeruleumThreshold == want.GetProperty("ceruleumThreshold").GetDouble()
+                  && st.HouseWarnDays == want.GetProperty("houseWarnDays").GetInt32() && st.NotSyncedMinutes == want.GetProperty("notSyncedMinutes").GetInt32()
+                  && st.RepairKitCost == (cost.ValueKind == JsonValueKind.Number ? cost.GetDouble() : null) && st.LivePrices == want.GetProperty("livePrices").GetBoolean()
+                  && st.PlayChoice == want.GetProperty("playChoice").GetString() && st.PlayStyle == want.GetProperty("playStyle").GetString()
+                  && st.SubsBuilt == want.GetProperty("subs").GetInt32() && st.RetainersWithClass == want.GetProperty("retainers").GetInt32(),
+                $"settings: read as the app's Settings reads them: {st} vs {want.GetRawText()}");
         }
+        // What do you run? worked out as the app's shared/play-style.js does.
+        static string Style(string choice, int subs, int retainers) => new FleetSettings(0, 0, 7, 30, null, false, choice, subs, retainers).PlayStyle;
+        Check(Style("auto", 3, 0) == "subs" && Style("auto", 0, 2) == "retainers" && Style("auto", 3, 2) == "both" && Style("auto", 0, 0) == "both"
+              && Style("subs", 0, 9) == "subs" && Style("retainers", 9, 0) == "retainers" && Style("both", 9, 0) == "both" && Style("x", 3, 0) == "subs",
+            "settings: What do you run? as the app works it out");
         await Exec(conn, "DROP DATABASE fleet_edits_plugin");
         Check(FleetEdits.SetProgress("{\"5\":3,\"x\":{\"made\":1},\"2\":{\"made\":1,\"outOf\":2}}", 7, 1, 2, 3) == "{\"2\":{\"made\":1,\"outOf\":2},\"5\":3,\"7\":{\"made\":1,\"outOf\":2,\"ahead\":3},\"x\":{\"made\":1}}",
             "edits: ticking keeps every other tick as it was, in the order the app reads them: " + FleetEdits.SetProgress("{\"5\":3,\"x\":{\"made\":1},\"2\":{\"made\":1,\"outOf\":2}}", 7, 1, 2, 3));
@@ -735,6 +760,142 @@ internal static class Program
     }
 
     // The first place two JSON answers differ (numbers as the same double, objects with the same fields), or null.
+    // Import Fight Club Data: the app's own reading of some awkward route spreadsheets and the table after its import
+    // (the app's tests/db/fight-club-fixture.js), against the plugin's reading and its import into PostgreSQL and SQLite.
+    private static async Task FightClubAgainstTheApp(NpgsqlConnection conn)
+    {
+        using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "fight-club-fixture.json")));
+        var root = doc.RootElement;
+        static JsonNode? Value(object? v) => v switch { null => null, double d => JsonValue.Create(d), string t => JsonValue.Create(t), var x => JsonValue.Create(x.ToString()) };
+        static JsonObject AsApp(FightClubImport.ReadResult r)
+        {
+            var o = new JsonObject { ["success"] = r.Success };
+            if (!r.Success)
+            {
+                o["stage"] = r.Stage;
+                o["error"] = r.Error;
+                o["actualHeaders"] = new JsonArray(r.ActualHeaders.Select(h => (JsonNode?)JsonValue.Create(h)).ToArray());
+                return o;
+            }
+            o["actualHeaders"] = new JsonArray(r.ActualHeaders.Select(h => (JsonNode?)JsonValue.Create(h)).ToArray());
+            o["missingOptional"] = new JsonArray(r.MissingOptional.Select(h => (JsonNode?)JsonValue.Create(h)).ToArray());
+            o["rows"] = new JsonArray(r.Rows.Select(row =>
+            {
+                var data = new JsonObject();
+                foreach (var (k, v) in row.Data) data[k] = Value(v);
+                return (JsonNode?)new JsonObject
+                {
+                    ["rowNumber"] = row.RowNumber, ["data"] = data,
+                    ["issues"] = new JsonArray(row.Issues.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()), ["hasIssue"] = row.HasIssue,
+                };
+            }).ToArray());
+            return o;
+        }
+
+        Check(FightClubImport.Columns.Select(c => $"{c.Header}|{c.DbColumn}|{(c.Numeric ? "numeric" : "text")}|{c.Required}").SequenceEqual(
+                root.GetProperty("columns").EnumerateArray().Select(c => $"{c.GetProperty("csvHeader").GetString()}|{c.GetProperty("dbColumn").GetString()}|{c.GetProperty("type").GetString()}|{c.GetProperty("required").GetBoolean()}")),
+            "fight club: the same columns as the app's import");
+
+        await Exec(conn, "DROP DATABASE IF EXISTS fleet_fight_club_plugin");
+        await Exec(conn, "CREATE DATABASE fleet_fight_club_plugin");
+        var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
+        await using (var db = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(given) { Database = "fleet_fight_club_plugin", Pooling = false }.ConnectionString))
+        await using (var lite = new System.Data.SQLite.SQLiteConnection("Data Source=:memory:"))
+        {
+            await db.OpenAsync();
+            await lite.OpenAsync();
+            await Exec(db, root.GetProperty("schema").GetString()!);
+            await Exec(db, "INSERT INTO fight_club_routes (route) VALUES ('OLD1'), ('OLD2')");
+            await using (var make = lite.CreateCommand())
+            {
+                make.CommandText = root.GetProperty("sqliteTables").GetString()! + "; INSERT INTO fight_club_routes (route) VALUES ('OLD1'), ('OLD2');";
+                await make.ExecuteNonQueryAsync();
+            }
+            var tableSql = root.GetProperty("table").GetString()!;
+            foreach (var book in root.GetProperty("books").EnumerateArray())
+            {
+                var about = book.GetProperty("about").GetString();
+                var read = FightClubImport.Read(Convert.FromBase64String(book.GetProperty("xlsx").GetString()!));
+                using (var mine = JsonDocument.Parse(AsApp(read).ToJsonString()))
+                {
+                    var diff = JsonDiff(mine.RootElement, book.GetProperty("read"), "read");
+                    Check(diff == null, $"fight club: {about}: read as the app reads it" + (diff == null ? "" : $"\n   {diff}"));
+                }
+                if (book.GetProperty("imported").ValueKind != JsonValueKind.Object) continue;
+                var imported = book.GetProperty("imported");
+                var label = imported.GetProperty("patchLabel").GetString();
+                var rows = read.Rows.Where(r => !r.HasIssue).ToList();
+                Check(rows.Select(r => r.RowNumber).SequenceEqual(imported.GetProperty("rowNumbers").EnumerateArray().Select(n => n.GetInt32())),
+                    $"fight club: {about}: the same rows ticked");
+                var count = await FightClubImport.Commit(db, rows, label);
+                var want = imported.GetProperty("table");
+                var table = new JsonArray();
+                await using (var cmd = new NpgsqlCommand(tableSql, db))
+                await using (var r = await cmd.ExecuteReaderAsync())
+                    while (await r.ReadAsync())
+                    {
+                        var row = new JsonObject();
+                        for (var i = 0; i < r.FieldCount; i++)
+                            row[r.GetName(i)] = r.IsDBNull(i) ? null : r.GetValue(i) is int n ? JsonValue.Create(n) : JsonValue.Create(Convert.ToString(r.GetValue(i), System.Globalization.CultureInfo.InvariantCulture));
+                        table.Add(row);
+                    }
+                using (var mine = JsonDocument.Parse(table.ToJsonString()))
+                {
+                    var diff = JsonDiff(mine.RootElement, want, "table");
+                    Check(count == imported.GetProperty("answer").GetProperty("imported").GetInt32() && diff == null,
+                        $"fight club: {about}: imported into PostgreSQL as the app imports it ({count} routes)" + (diff == null ? "" : $"\n   {diff}"));
+                }
+
+                // The one-file version: the same rows in SQLite, numbers as numbers.
+                await FightClubImport.Commit(lite, rows, label);
+                var liteRows = new List<string>();
+                var stamped = true;
+                await using (var cmd = lite.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT id, route, " + string.Join(", ", FightClubImport.Columns.Where(c => c.DbColumn != "route").Select(c => c.DbColumn)) + ", patch_label, imported_at FROM fight_club_routes ORDER BY id";
+                    await using var r = await cmd.ExecuteReaderAsync();
+                    while (await r.ReadAsync())
+                    {
+                        var cells = new List<string>();
+                        for (var i = 0; i < r.FieldCount - 1; i++)
+                            cells.Add(r.IsDBNull(i) ? "null" : r.GetValue(i) is double d ? d.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                                : r.GetValue(i) is long l ? l.ToString(System.Globalization.CultureInfo.InvariantCulture) : r.GetValue(i).ToString()!);
+                        stamped &= !r.IsDBNull(r.FieldCount - 1);
+                        liteRows.Add(string.Join("|", cells));
+                    }
+                }
+                var numeric = FightClubImport.Columns.Where(c => c.Numeric).Select(c => c.DbColumn).ToHashSet();
+                var wantRows = want.EnumerateArray().Select(w => string.Join("|", w.EnumerateObject().Select(p =>
+                    p.Value.ValueKind == JsonValueKind.Null ? "null"
+                    : p.Value.ValueKind == JsonValueKind.Number ? p.Value.GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : numeric.Contains(p.Name) ? double.Parse(p.Value.GetString()!, System.Globalization.CultureInfo.InvariantCulture).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                    : p.Value.GetString()!))).ToList();
+                var firstDiff = liteRows.Zip(wantRows).FirstOrDefault(x => x.First != x.Second);
+                Check(stamped && liteRows.SequenceEqual(wantRows), $"fight club: {about}: imported into SQLite the same, with when ({liteRows.Count} routes)"
+                    + (liteRows.SequenceEqual(wantRows) ? "" : $"\n   plugin {firstDiff.First ?? $"{liteRows.Count} rows"}\n   app    {firstDiff.Second ?? $"{wantRows.Count} rows"}"));
+            }
+            // A failed import leaves the routes as they were.
+            var before = await new NpgsqlCommand("SELECT count(*) FROM fight_club_routes", db).ExecuteScalarAsync();
+            var bad = new FightClubImport.Row(2, FightClubImport.Columns.ToDictionary(c => c.DbColumn, c => (object?)null), new List<string>());
+            var failed = false;
+            try { await FightClubImport.Commit(db, new[] { bad }, null); } catch (PostgresException) { failed = true; }
+            Check(failed && Equals(await new NpgsqlCommand("SELECT count(*) FROM fight_club_routes", db).ExecuteScalarAsync(), before),
+                "fight club: an import that fails part way leaves the routes there were");
+        }
+        await Exec(conn, "DROP DATABASE fleet_fight_club_plugin");
+        Check(!FightClubImport.Read(System.Text.Encoding.UTF8.GetBytes("just some text, not a spreadsheet")).Success && !root.GetProperty("notSpreadsheet").GetProperty("success").GetBoolean(),
+            "fight club: something that isn't a spreadsheet isn't read (nor by the app)");
+        Check(FightClubImport.JsNumberText(0.1 + 0.2) == "0.30000000000000004" && FightClubImport.JsNumberText(1.5e-7) == "1.5e-7" && FightClubImport.JsNumberText(1e21) == "1e+21"
+              && FightClubImport.JsNumberText(1e20) == "100000000000000000000" && FightClubImport.JsNumberText(-0.0015) == "-0.0015" && FightClubImport.JsNumberText(-0.0) == "0"
+              && FightClubImport.JsNumberText(123456.789) == "123456.789" && FightClubImport.JsNumberText(0.000001) == "0.000001" && FightClubImport.JsNumberText(1e-7) == "1e-7"
+              && FightClubImport.JsNumberText(2.5e25) == "2.5e+25" && FightClubImport.JsNumberText(5e-324) == "5e-324",
+            "fight club: numbers written as JavaScript writes them");
+        Check(FightClubImport.JsNumber(" 12 ") == 12 && FightClubImport.JsNumber("") == 0 && FightClubImport.JsNumber("0b101") == 5 && FightClubImport.JsNumber("0o17") == 15
+              && double.IsNaN(FightClubImport.JsNumber("-0x1")) && double.IsNaN(FightClubImport.JsNumber("12abc")) && FightClubImport.JsNumber("5.") == 5
+              && double.IsNaN(FightClubImport.JsNumber(".")) && FightClubImport.JsNumber("-Infinity") == double.NegativeInfinity && double.IsNaN(FightClubImport.JsNumber("infinity")),
+            "fight club: text read as a number as JavaScript reads it");
+    }
+
     private static string? JsonDiff(System.Text.Json.JsonElement a, System.Text.Json.JsonElement b, string at)
     {
         if (a.ValueKind != b.ValueKind && !(a.ValueKind is JsonValueKind.True or JsonValueKind.False && b.ValueKind is JsonValueKind.True or JsonValueKind.False))
@@ -1339,6 +1500,7 @@ internal static class Program
         await ShoppingReadFromTheDatabase(conn);
         await TrendsAgainstTheApp(conn);
         await EditsAgainstTheApp(conn);
+        await FightClubAgainstTheApp(conn);
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
