@@ -130,8 +130,7 @@ public partial class MainWindow
         }
         var ids = inventoryCharacters.ToArray();
         var key = "characters:" + Ids(ids);
-        reader.ReadHoldingsIfDue(key, "kind <> 'fc' AND container <> 2000 AND owner_cid = ANY(CAST(@ids AS numeric[]))",
-            p => p.AddWithValue("ids", ids));
+        reader.ReadHoldingsIfDue(key, "kind <> 'fc' AND container <> 2000", "owner_cid", ids.Cast<object>().ToList());
         DrawHoldings(key, CharacterInventoryTable, rows => rows
             .Where(h => !(plugin.Configuration.HideEquippedGear && h.Equipped))
             .OrderBy(h => h.SortIndex).ThenBy(h => h.Who).ThenBy(h => h.Kind == "retainer" ? 1 : 0).ThenBy(h => h.HireOrder)
@@ -152,8 +151,7 @@ public partial class MainWindow
         }
         var ids = inventoryFcs.ToArray();
         var key = "fcs:" + Ids(ids);
-        reader.ReadHoldingsIfDue(key, "kind = 'fc' AND container BETWEEN 20000 AND 20004 AND fc_id = ANY(CAST(@ids AS numeric[]))",
-            p => p.AddWithValue("ids", ids));
+        reader.ReadHoldingsIfDue(key, "kind = 'fc' AND container BETWEEN 20000 AND 20004", "fc_id", ids.Cast<object>().ToList());
         DrawHoldings(key, FcInventoryTable, rows => rows.OrderBy(h => h.Who).ThenBy(h => h.Container).ThenBy(h => ItemName(h.ItemId, h.Hq)).ToList());
     }
 
@@ -219,7 +217,7 @@ public partial class MainWindow
         var more = matches.Count > WhereIsItLimit;
         var ids = matches.Take(WhereIsItLimit).Select(x => x.Id).OrderBy(x => x).ToArray();
         var key = "where:" + string.Join(",", ids);
-        reader.ReadHoldingsIfDue(key, "NOT money AND item_id = ANY(@ids)", p => p.AddWithValue("ids", ids));
+        reader.ReadHoldingsIfDue(key, "NOT money", "item_id", ids.Cast<object>().ToList());
         if (reader.HoldingsKey != key || reader.Holdings.Data == null)
         {
             if (reader.HoldingsKey == key && reader.Holdings.Error != null) Colored(Amber, reader.Holdings.Error);

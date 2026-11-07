@@ -1,4 +1,5 @@
 using System;
+using System.Data.Common;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -204,7 +205,7 @@ namespace XIVFleetCompanion
 
         // Records that this PC read the database (a database without update 16 yet, or a login that may only read: not
         // again). Never stops a read.
-        private async Task CheckInIfDue(NpgsqlConnection conn)
+        private async Task CheckInIfDue(DbConnection conn)
         {
             if (checkIn == null || checkInRefused || DateTime.UtcNow - checkedIn < CheckInEvery) return;
             checkedIn = DateTime.UtcNow;
@@ -357,7 +358,7 @@ namespace XIVFleetCompanion
 
         // The Gil & Market page's database part now, keeping the live prices from before; then, with Live Market Prices
         // on, Universalis in the background (unless it's still being asked), so a slow answer holds up nothing else.
-        private async Task ReadMarketNow(NpgsqlConnection conn)
+        private async Task ReadMarketNow(DbConnection conn)
         {
             MarketAsk? ask = null;
             Market = await Read(conn, async c =>
@@ -387,7 +388,7 @@ namespace XIVFleetCompanion
         }
 
         // A failed read keeps what was read before, with the reason.
-        internal static async Task<FleetRead<T>> Read<T>(NpgsqlConnection conn, Func<NpgsqlConnection, Task<T>> read, FleetRead<T> before) where T : class
+        internal static async Task<FleetRead<T>> Read<T>(DbConnection conn, Func<DbConnection, Task<T>> read, FleetRead<T> before) where T : class
         {
             try
             {
@@ -409,28 +410,28 @@ namespace XIVFleetCompanion
         }
 
         // Values of whatever numeric type the view gives, and nulls.
-        private static string Text(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? "" : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture) ?? ""; }
-        private static long Long(NpgsqlDataReader r, string col, long fallback = 0) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? fallback : Convert.ToInt64(r.GetValue(i), CultureInfo.InvariantCulture); }
-        private static int Int(NpgsqlDataReader r, string col, int fallback = 0) => (int)Long(r, col, fallback);
-        private static double? Double(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToDouble(r.GetValue(i), CultureInfo.InvariantCulture); }
-        private static string? TextOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static string Text(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? "" : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture) ?? ""; }
+        private static long Long(DbDataReader r, string col, long fallback = 0) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? fallback : Convert.ToInt64(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static int Int(DbDataReader r, string col, int fallback = 0) => (int)Long(r, col, fallback);
+        private static double? Double(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToDouble(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static string? TextOrNull(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture); }
         // Free Company ids go past what a long holds (the game's are unsigned 64-bit numbers): read them as decimals.
-        private static decimal Decimal(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? 0 : Convert.ToDecimal(r.GetValue(i), CultureInfo.InvariantCulture); }
-        private static decimal? DecimalOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToDecimal(r.GetValue(i), CultureInfo.InvariantCulture); }
-        private static long? LongOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToInt64(r.GetValue(i), CultureInfo.InvariantCulture); }
-        private static int? IntOrNull(NpgsqlDataReader r, string col) => (int?)LongOrNull(r, col);
-        private static bool? BoolOrNull(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : r.GetBoolean(i); }
+        private static decimal Decimal(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? 0 : Convert.ToDecimal(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static decimal? DecimalOrNull(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToDecimal(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static long? LongOrNull(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToInt64(r.GetValue(i), CultureInfo.InvariantCulture); }
+        private static int? IntOrNull(DbDataReader r, string col) => (int?)LongOrNull(r, col);
+        private static bool? BoolOrNull(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Convert.ToBoolean(r.GetValue(i), CultureInfo.InvariantCulture); }
         // A column a newer app's views have (an older one's don't, until the app is updated): its value, or the fallback.
-        private static bool Has(NpgsqlDataReader r, string col)
+        private static bool Has(DbDataReader r, string col)
         {
             for (var i = 0; i < r.FieldCount; i++) if (r.GetName(i) == col) return true;
             return false;
         }
-        private static DateTime? Time(NpgsqlDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : r.GetFieldValue<DateTime>(i).ToLocalTime(); }
+        private static DateTime? Time(DbDataReader r, string col) { var i = r.GetOrdinal(col); return r.IsDBNull(i) ? null : Db.Time(r, i).ToLocalTime(); }
 
-        public static async Task<FleetSettings> ReadSettings(NpgsqlConnection conn)
+        public static async Task<FleetSettings> ReadSettings(DbConnection conn)
         {
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_settings_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_settings_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) throw new InvalidOperationException("No settings row.");
             return new FleetSettings(Double(r, "repair_kit_threshold") ?? 0, Double(r, "ceruleum_threshold") ?? 0, Int(r, "house_warn_days", 7),
@@ -438,10 +439,10 @@ namespace XIVFleetCompanion
                 Int(r, "subs_built"), Int(r, "retainers_with_class"));
         }
 
-        public static async Task<List<SubRow>> ReadSubs(NpgsqlConnection conn)
+        public static async Task<List<SubRow>> ReadSubs(DbConnection conn)
         {
             var list = new List<SubRow>();
-            await using var cmd = new NpgsqlCommand(
+            await using var cmd = Db.Cmd(
                 @"SELECT cid, character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
                   FROM fleet_subs_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, character_name, slot NULLS LAST, sub_name", conn);
             await using var r = await cmd.ExecuteReaderAsync();
@@ -452,10 +453,10 @@ namespace XIVFleetCompanion
             return list;
         }
 
-        public static async Task<List<SupplyRow>> ReadSupplies(NpgsqlConnection conn)
+        public static async Task<List<SupplyRow>> ReadSupplies(DbConnection conn)
         {
             var list = new List<SupplyRow>();
-            await using var cmd = new NpgsqlCommand(
+            await using var cmd = Db.Cmd(
                 "SELECT * FROM fleet_supplies_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
@@ -466,29 +467,29 @@ namespace XIVFleetCompanion
             return list;
         }
 
-        public static async Task<SummaryRow> ReadSummary(NpgsqlConnection conn)
+        public static async Task<SummaryRow> ReadSummary(DbConnection conn)
         {
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_summary_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_summary_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return new SummaryRow(0, 0, 0, 0, 0, null);
             return new SummaryRow(Int(r, "retainers"), Int(r, "ventures_done"), Int(r, "retainers_idle"),
                 Int(r, "low_ceruleum"), Int(r, "low_repair_kits"), Double(r, "soonest_runs_out_days"));
         }
 
-        public static async Task<List<AlertRow>> ReadAlerts(NpgsqlConnection conn)
+        public static async Task<List<AlertRow>> ReadAlerts(DbConnection conn)
         {
             var list = new List<AlertRow>();
-            await using var cmd = new NpgsqlCommand("SELECT level, kind, subject, detail FROM fleet_alerts_view", conn);
+            await using var cmd = Db.Cmd("SELECT level, kind, subject, detail FROM fleet_alerts_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new AlertRow(Text(r, "level"), Text(r, "kind"), Text(r, "subject"), Text(r, "detail")));
             return list;
         }
 
-        public static async Task<List<RosterRow>> ReadRoster(NpgsqlConnection conn)
+        public static async Task<List<RosterRow>> ReadRoster(DbConnection conn)
         {
             var list = new List<RosterRow>();
-            await using var cmd = new NpgsqlCommand(
+            await using var cmd = Db.Cmd(
                 "SELECT * FROM fleet_roster_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
@@ -502,10 +503,10 @@ namespace XIVFleetCompanion
             return FleetOrder.Roster(list);
         }
 
-        public static async Task<RetainersRead> ReadRetainers(NpgsqlConnection conn)
+        public static async Task<RetainersRead> ReadRetainers(DbConnection conn)
         {
             var list = new List<RetainerRow>();
-            await using (var cmd = new NpgsqlCommand(
+            await using (var cmd = Db.Cmd(
                 "SELECT * FROM fleet_retainers_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, owner_name, hire_order_index NULLS LAST, retainer_name", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
             {
@@ -516,7 +517,7 @@ namespace XIVFleetCompanion
                         TextOrNull(r, "target_mode"), IntOrNull(r, "target_value"), BoolOrNull(r, "only_crafted") == true, BoolOrNull(r, "items_seen") == true));
             }
             var gear = new Dictionary<long, List<int>>();
-            await using (var cmd = new NpgsqlCommand("SELECT retainer_id, item_id FROM fleet_retainer_gear_view", conn))
+            await using (var cmd = Db.Cmd("SELECT retainer_id, item_id FROM fleet_retainer_gear_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
             {
                 while (await r.ReadAsync())
@@ -529,10 +530,10 @@ namespace XIVFleetCompanion
             return new RetainersRead(FleetOrder.Retainers(list), gear);
         }
 
-        public static async Task<List<PcRow>> ReadPcs(NpgsqlConnection conn)
+        public static async Task<List<PcRow>> ReadPcs(DbConnection conn)
         {
             var list = new List<PcRow>();
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_pcs_view ORDER BY account_label, pc_name", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_pcs_view ORDER BY account_label, pc_name", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new PcRow(Text(r, "pc_name"), Text(r, "account_label"), TextOrNull(r, "plugin_version"), Time(r, "last_sync_at"),
@@ -545,18 +546,18 @@ namespace XIVFleetCompanion
             return list;
         }
 
-        public static async Task<RetainerCountsRow> ReadRetainerCounts(NpgsqlConnection conn)
+        public static async Task<RetainerCountsRow> ReadRetainerCounts(DbConnection conn)
         {
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_retainer_counts_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_retainer_counts_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return new RetainerCountsRow(0, 0, 0, 0);
             return new RetainerCountsRow(Int(r, "retainers"), Int(r, "ventures_done"), Int(r, "retainers_away"), Int(r, "retainers_idle"));
         }
 
-        public static async Task<List<FcRow>> ReadFcs(NpgsqlConnection conn)
+        public static async Task<List<FcRow>> ReadFcs(DbConnection conn)
         {
             var list = new List<FcRow>();
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_fcs_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_fcs_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new FcRow(Decimal(r, "fc_id"), Text(r, "fc_name"), TextOrNull(r, "fc_master"), IntOrNull(r, "fc_points"), IntOrNull(r, "total_members"),
@@ -568,11 +569,14 @@ namespace XIVFleetCompanion
 
         /// <summary>The stacks matching a condition on fleet_holdings_view (for example "owner_cid = ANY(@cids)"), with its
         /// parameters added by addParameters.</summary>
-        public static async Task<List<HoldingRow>> ReadHoldings(NpgsqlConnection conn, string where, Action<NpgsqlParameterCollection> addParameters)
+        /// <param name="idColumn">With ids: only the stacks whose idColumn is one of them (owner_cid, fc_id or item_id).</param>
+        public static async Task<List<HoldingRow>> ReadHoldings(DbConnection conn, string where, string? idColumn = null, IEnumerable<object>? ids = null)
         {
             var list = new List<HoldingRow>();
-            await using var cmd = new NpgsqlCommand($"SELECT * FROM fleet_holdings_view WHERE {where}", conn);
-            addParameters(cmd.Parameters);
+            await using var cmd = Db.Cmd("", conn);
+            // In the file a Free Company's id is text (see Db).
+            var values = (ids ?? Enumerable.Empty<object>()).Select(v => Db.IsFile(conn) && idColumn == "fc_id" ? (object)Convert.ToString(v, CultureInfo.InvariantCulture)! : v);
+            cmd.CommandText = $"SELECT * FROM fleet_holdings_view WHERE {where}" + (idColumn == null ? "" : $" AND {idColumn} IN {Db.In(cmd, "id", values)}");
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new HoldingRow(Text(r, "kind"), LongOrNull(r, "owner_cid"), DecimalOrNull(r, "fc_id"), Int(r, "container"), Int(r, "item_id"),
@@ -582,10 +586,10 @@ namespace XIVFleetCompanion
             return list;
         }
 
-        public static async Task<List<ItemTotalRow>> ReadItemTotals(NpgsqlConnection conn)
+        public static async Task<List<ItemTotalRow>> ReadItemTotals(DbConnection conn)
         {
             var list = new List<ItemTotalRow>();
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_item_totals_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_item_totals_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new ItemTotalRow(Int(r, "item_id"), BoolOrNull(r, "hq") == true, Long(r, "total"), Has(r, "equipped") ? Long(r, "equipped") : 0));
@@ -599,7 +603,7 @@ namespace XIVFleetCompanion
         /// answering doesn't fail the read: it says why instead. The window reads the two apart (ReadMarketData, then
         /// LivePrices in the background), so asking Universalis never holds up the database reads.
         /// </summary>
-        public static async Task<MarketRead> ReadMarket(NpgsqlConnection conn, Universalis? universalis)
+        public static async Task<MarketRead> ReadMarket(DbConnection conn, Universalis? universalis)
         {
             var (read, ask) = await ReadMarketData(conn);
             return ask != null && universalis != null ? read with { Live = await LivePrices(universalis, ask) } : read;
@@ -611,19 +615,19 @@ namespace XIVFleetCompanion
 
         /// <summary>The database's part of the Gil &amp; Market page (Live left empty), and what to ask Universalis when
         /// Live Market Prices is on (else null).</summary>
-        public static async Task<(MarketRead Read, MarketAsk? Ask)> ReadMarketData(NpgsqlConnection conn)
+        public static async Task<(MarketRead Read, MarketAsk? Ask)> ReadMarketData(DbConnection conn)
         {
             MarketSettings settings;
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_settings_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_market_settings_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 settings = await r.ReadAsync() ? new MarketSettings(Int(r, "stale_days", 7), BoolOrNull(r, "live_prices") == true) : new MarketSettings(7, false);
             var accounts = new List<MarketAccountRow>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_accounts_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_market_accounts_view ORDER BY account_label", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     accounts.Add(new MarketAccountRow(Text(r, "account_label"), Int(r, "characters"), Int(r, "retainers"), Long(r, "character_gil"), Long(r, "retainer_gil"), Long(r, "total")));
             var listings = new List<ListingRow>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_market_listings_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_market_listings_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     listings.Add(new ListingRow(Long(r, "retainer_id"), Long(r, "owner_cid"), Int(r, "slot"), Int(r, "item_id"), Int(r, "quantity"), BoolOrNull(r, "hq") == true,
@@ -632,7 +636,7 @@ namespace XIVFleetCompanion
             var read = new MarketRead(settings, accounts, listings, null);
             if (!settings.LivePrices) return (read, null);
             var exclude = new HashSet<string>();
-            await using (var cmd = new NpgsqlCommand("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
+            await using (var cmd = Db.Cmd("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
@@ -642,7 +646,7 @@ namespace XIVFleetCompanion
             var loot = new List<(string? World, int ItemId)>();
             try
             {
-                await using var cmd = new NpgsqlCommand(
+                await using var cmd = Db.Cmd(
                     @"SELECT DISTINCT ch.world, x.item FROM (SELECT fc_id, primary_item AS item FROM fleet_voyage_loot_view
                         UNION SELECT fc_id, additional_item FROM fleet_voyage_loot_view) x
                       JOIN fleet_parts_characters_view ch ON ch.fc_id = x.fc_id WHERE x.item IS NOT NULL AND x.item <> 0", conn);
@@ -666,46 +670,46 @@ namespace XIVFleetCompanion
             }
         }
 
-        private static double Ms(NpgsqlDataReader r, string col)
+        private static double Ms(DbDataReader r, string col)
         {
             var i = r.GetOrdinal(col);
-            return r.IsDBNull(i) ? 0 : (DateTime.SpecifyKind(r.GetFieldValue<DateTime>(i), DateTimeKind.Utc) - DateTime.UnixEpoch).TotalMilliseconds;
+            return r.IsDBNull(i) ? 0 : (Db.Time(r, i) - DateTime.UnixEpoch).TotalMilliseconds;
         }
 
         /// <summary>Every built sub's route answers (the fleet_route_* views, app 1.8.0 and later, and the game's own
         /// files), worked out here (SubRoutes) at `now` (milliseconds since 1970).</summary>
-        public static async Task<RoutesRead> ReadRoutes(NpgsqlConnection conn, SubGameData? game, double now)
+        public static async Task<RoutesRead> ReadRoutes(DbConnection conn, SubGameData? game, double now)
         {
             if (game == null) throw new InvalidOperationException("The game's sea map data couldn't be read.");
             return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn), game, now), now);
         }
 
-        public static async Task<RoutesInputs> ReadRoutesInputs(NpgsqlConnection conn)
+        public static async Task<RoutesInputs> ReadRoutesInputs(DbConnection conn)
         {
             var parts = await ReadPartsInputs(conn);
             var subs = new List<RouteSub>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_route_subs_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_route_subs_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                 {
                     var points = r.GetOrdinal("points");
                     subs.Add(new RouteSub(Long(r, "cid"), Text(r, "sub_name"), IntOrNull(r, "slot"), Int(r, "rank"), IntOrNull(r, "part1"), IntOrNull(r, "part2"),
-                        IntOrNull(r, "part3"), IntOrNull(r, "part4"), r.IsDBNull(points) ? null : r.GetFieldValue<byte[]>(points), LongOrNull(r, "return_time"),
+                        IntOrNull(r, "part3"), IntOrNull(r, "part4"), r.IsDBNull(points) ? null : (byte[])r.GetValue(points), LongOrNull(r, "return_time"),
                         LongOrNull(r, "current_exp"), LongOrNull(r, "next_level_exp"), BoolOrNull(r, "craft_enabled") == true, TextOrNull(r, "fc_id")));
                 }
             var fightClub = new List<FightClubRow>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_route_fight_club_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_route_fight_club_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     fightClub.Add(new FightClubRow(Long(r, "id"), Text(r, "route"), Double(r, "hours"), TextOrNull(r, "repair_times"), Double(r, "gil_sub_day"),
                         TextOrNull(r, "rec_build_notes"), TextOrNull(r, "unmod_min_rank"), TextOrNull(r, "min_rank_build"), Double(r, "repair_kit_cost") ?? 0));
             var history = new List<SubHistoryPoint>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_sub_history_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_sub_history_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     history.Add(new SubHistoryPoint(Long(r, "cid"), Text(r, "metric"), Ms(r, "recorded_at"), Double(r, "value") ?? 0));
             var voyages = new List<VoyageSector>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_voyage_sectors_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_voyage_sectors_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     voyages.Add(new VoyageSector(Text(r, "fc_id"), Long(r, "sub_register"), TextOrNull(r, "sub_name"), Ms(r, "returned_at"), Int(r, "sector"), IntOrNull(r, "leg")));
@@ -714,21 +718,21 @@ namespace XIVFleetCompanion
 
         /// <summary>How close the Next Rank dates the app saved came to the real rank-ups (fleet_rankup_forecast_view,
         /// fleet_rankup_history_view and fleet_voyage_returns_view, app 1.8.0 and later), worked out here (ForecastMath).</summary>
-        public static async Task<ForecastAccuracy> ReadForecasts(NpgsqlConnection conn)
+        public static async Task<ForecastAccuracy> ReadForecasts(DbConnection conn)
         {
             var saved = new List<SavedForecast>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_rankup_forecast_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_rankup_forecast_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     saved.Add(new SavedForecast(Long(r, "cid"), Int(r, "slot"), Int(r, "rank"), Ms(r, "made_at"), Ms(r, "predicted_at"), TextOrNull(r, "sub_name"),
                         TextOrNull(r, "fc_id"), TextOrNull(r, "character_name")));
             var history = new List<SubHistoryPoint>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_rankup_history_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_rankup_history_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     history.Add(new SubHistoryPoint(Long(r, "cid"), Text(r, "metric"), Ms(r, "recorded_at"), Double(r, "value") ?? 0));
             var returns = new List<VoyageReturn>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_voyage_returns_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_voyage_returns_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     returns.Add(new VoyageReturn(Text(r, "fc_id"), Text(r, "sub_name"), Ms(r, "returned_at")));
@@ -737,10 +741,10 @@ namespace XIVFleetCompanion
 
         /// <summary>Loot per Voyage: every sector of every voyage Submarine Tracker recorded over the Income window
         /// (fleet_voyage_loot_view, app 1.8.0 and later), worked out on the Income page (LootMath).</summary>
-        public static async Task<List<VoyageLootRow>> ReadLoot(NpgsqlConnection conn)
+        public static async Task<List<VoyageLootRow>> ReadLoot(DbConnection conn)
         {
             var rows = new List<VoyageLootRow>();
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_voyage_loot_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_voyage_loot_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 rows.Add(new VoyageLootRow(Text(r, "fc_id"), Long(r, "sub_register"), Ms(r, "returned_at"), Int(r, "sector"), TextOrNull(r, "sub_name"),
@@ -750,40 +754,40 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>The Parts page's inputs (the fleet_parts_* views, app 1.8.0 and later), worked out here (PartsPlanner).</summary>
-        public static async Task<PartsRead> ReadParts(NpgsqlConnection conn)
+        public static async Task<PartsRead> ReadParts(DbConnection conn)
         {
             var inputs = await ReadPartsInputs(conn);
             return new(PartsPlanner.Plan(inputs), inputs);
         }
 
-        public static async Task<PartsInputs> ReadPartsInputs(NpgsqlConnection conn)
+        public static async Task<PartsInputs> ReadPartsInputs(DbConnection conn)
         {
             var characters = new List<PartsCharacter>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_characters_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_parts_characters_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     characters.Add(new PartsCharacter(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), IntOrNull(r, "sort_index"),
                         TextOrNull(r, "fc_id"), Int(r, "num_sub_slots"), BoolOrNull(r, "has_house") == true));
             var subs = new List<PartsSub>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_subs_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_parts_subs_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     subs.Add(new PartsSub(Long(r, "cid"), Text(r, "sub_name"), IntOrNull(r, "slot"), Int(r, "rank"),
                         IntOrNull(r, "part1"), IntOrNull(r, "part2"), IntOrNull(r, "part3"), IntOrNull(r, "part4"), BoolOrNull(r, "craft_enabled") == true));
             var rules = new List<PartsRule>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_rules_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_parts_rules_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     rules.Add(new PartsRule(Long(r, "id"), Int(r, "rank"), DecimalOrNull(r, "cid_override")?.ToString("0", CultureInfo.InvariantCulture),
                         TextOrNull(r, "sub_filter"), TextOrNull(r, "hull"), TextOrNull(r, "stern"), TextOrNull(r, "bow"), TextOrNull(r, "bridge")));
             var routes = new List<PartsFightClubRoute>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_fight_club_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_parts_fight_club_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     routes.Add(new PartsFightClubRoute(Long(r, "id"), Text(r, "route"), Double(r, "hours"), TextOrNull(r, "repair_times"), Double(r, "gil_sub_day"),
                         TextOrNull(r, "rec_build_notes"), Double(r, "repair_kit_cost") ?? 0));
             var spares = new List<PartsSpare>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_parts_spares_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_parts_spares_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     spares.Add(new PartsSpare(LongOrNull(r, "cid"), TextOrNull(r, "fc_id"), BoolOrNull(r, "is_retainer") == true, LongOrNull(r, "retainer_id"),
@@ -791,10 +795,10 @@ namespace XIVFleetCompanion
             return new PartsInputs(characters, subs, rules, routes, spares);
         }
 
-        public static async Task<List<SalvageRow>> ReadSalvage(NpgsqlConnection conn)
+        public static async Task<List<SalvageRow>> ReadSalvage(DbConnection conn)
         {
             var list = new List<SalvageRow>();
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_salvage_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_salvage_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new SalvageRow(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
@@ -802,12 +806,12 @@ namespace XIVFleetCompanion
             return FleetOrder.Roster(list, x => x.SortIndex, x => x.Character);
         }
 
-        public static async Task<IncomeRead> ReadIncome(NpgsqlConnection conn)
+        public static async Task<IncomeRead> ReadIncome(DbConnection conn)
         {
             var characters = new List<IncomeRow>();
             var windowDays = 7;
             var kitCost = 0.0;
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_income_view", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_income_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
             {
                 while (await r.ReadAsync())
@@ -825,11 +829,11 @@ namespace XIVFleetCompanion
             return new IncomeRead(FleetOrder.Roster(characters, x => x.SortIndex, x => x.Character), ventures.Rows, windowDays, kitCost);
         }
 
-        public static async Task<VenturesRead> ReadVentures(NpgsqlConnection conn)
+        public static async Task<VenturesRead> ReadVentures(DbConnection conn)
         {
             var ventures = new List<VentureIncomeRow>();
             var windowDays = 7;
-            await using var cmd = new NpgsqlCommand("SELECT * FROM fleet_venture_income_view", conn);
+            await using var cmd = Db.Cmd("SELECT * FROM fleet_venture_income_view", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
@@ -860,10 +864,10 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>Every item the fleet holds (not gil), for searching by name in Where is it?.</summary>
-        public static async Task<List<int>> ReadHeldItems(NpgsqlConnection conn)
+        public static async Task<List<int>> ReadHeldItems(DbConnection conn)
         {
             var list = new List<int>();
-            await using var cmd = new NpgsqlCommand("SELECT DISTINCT item_id FROM fleet_holdings_view WHERE NOT money AND item_id IS NOT NULL", conn);
+            await using var cmd = Db.Cmd("SELECT DISTINCT item_id FROM fleet_holdings_view WHERE NOT money AND item_id IS NOT NULL", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) list.Add(Int(r, "item_id"));
             return list;
@@ -885,7 +889,7 @@ namespace XIVFleetCompanion
 
         /// <summary>Reads the stacks for key (say "characters:1,2") when it isn't what was last read, or that is over a
         /// minute old.</summary>
-        public void ReadHoldingsIfDue(string key, string where, Action<NpgsqlParameterCollection> addParameters, bool force = false)
+        public void ReadHoldingsIfDue(string key, string where, string idColumn, IEnumerable<object> ids, bool force = false)
         {
             if (!force && HoldingsKey == key && Holdings.At.HasValue && DateTime.Now - Holdings.At.Value < ListsEvery) return;
             RunInventoryRead(async conn =>
@@ -893,7 +897,7 @@ namespace XIVFleetCompanion
                 var before = HoldingsKey == key ? Holdings : new FleetRead<List<HoldingRow>>(null, null, null);
                 HoldingsKey = key;
                 Holdings = before;
-                Holdings = await Read(conn, c => ReadHoldings(c, where, addParameters), before);
+                Holdings = await Read(conn, c => ReadHoldings(c, where, idColumn, ids), before);
             }, text => Holdings = Holdings with { Error = text });
         }
 
@@ -911,30 +915,30 @@ namespace XIVFleetCompanion
             RunInventoryRead(async conn => Shopping = await Read(conn, ReadShopping, Shopping), text => Shopping = Shopping with { Error = text });
         }
 
-        public static async Task<ShoppingRead> ReadShopping(NpgsqlConnection conn)
+        public static async Task<ShoppingRead> ReadShopping(DbConnection conn)
         {
             var held = new List<HeldRow>();
-            await using (var cmd = new NpgsqlCommand("SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who, place", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who, place", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     held.Add(new HeldRow(Int(r, "item_id"), Text(r, "who"), Text(r, "place"), Long(r, "qty")));
             string? progress = null;
-            await using (var cmd = new NpgsqlCommand("SELECT progress FROM fleet_shopping_progress_view", conn))
+            await using (var cmd = Db.Cmd("SELECT progress FROM fleet_shopping_progress_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 if (await r.ReadAsync()) progress = TextOrNull(r, "progress");
             var live = false;
-            await using (var cmd = new NpgsqlCommand("SELECT live_prices FROM fleet_market_settings_view", conn))
+            await using (var cmd = Db.Cmd("SELECT live_prices FROM fleet_market_settings_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 if (await r.ReadAsync()) live = BoolOrNull(r, "live_prices") == true;
             var exclude = new HashSet<string>();
             var worlds = new Dictionary<string, int>();
             if (live)
             {
-                await using (var cmd = new NpgsqlCommand("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
+                await using (var cmd = Db.Cmd("SELECT retainer_name AS name, world FROM fleet_retainers_view", conn))
                 await using (var r = await cmd.ExecuteReaderAsync())
                     while (await r.ReadAsync())
                         if (Text(r, "name").Length > 0) exclude.Add(Universalis.RetainerKey(Text(r, "name"), TextOrNull(r, "world")));
-                await using (var cmd = new NpgsqlCommand("SELECT world FROM fleet_parts_characters_view", conn))
+                await using (var cmd = Db.Cmd("SELECT world FROM fleet_parts_characters_view", conn))
                 await using (var r = await cmd.ExecuteReaderAsync())
                     while (await r.ReadAsync())
                         if (TextOrNull(r, "world") is { Length: > 0 } world) worlds[world] = worlds.GetValueOrDefault(world) + 1;
@@ -952,7 +956,7 @@ namespace XIVFleetCompanion
         public (string What, string? Error, DateTime At)? LastEdit { get; private set; }
 
         /// <summary>Saves an edit (FleetEdits): edit answers null when done, else why not. done is told the same, on a background thread.</summary>
-        public void Edit(string what, Func<NpgsqlConnection, Task<string?>> edit, Action<string?>? done = null)
+        public void Edit(string what, Func<DbConnection, Task<string?>> edit, Action<string?>? done = null)
         {
             if (editing)
             {
@@ -1113,9 +1117,10 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>One chart (db/metric-series.js runSeries, in one go).</summary>
-        public static async Task<TrendResult> ReadSeries(NpgsqlConnection conn, TrendRequest r)
+        public static async Task<TrendResult> ReadSeries(DbConnection conn, TrendRequest r)
         {
-            await using var cmd = new NpgsqlCommand(TrendsMath.SeriesSql, conn);
+            if (Db.IsFile(conn)) return await FileReadSeries(conn, r);
+            await using var cmd = new NpgsqlCommand(TrendsMath.SeriesSql, (NpgsqlConnection)conn);
             var at = (double ms) => DateTime.SpecifyKind(DateTime.UnixEpoch.AddTicks((long)Math.Round(ms * TimeSpan.TicksPerMillisecond)), DateTimeKind.Utc);
             cmd.Parameters.Add(new NpgsqlParameter { Value = at(r.From) });
             cmd.Parameters.Add(new NpgsqlParameter { Value = at(r.To) });
@@ -1136,26 +1141,49 @@ namespace XIVFleetCompanion
             return TrendsMath.Shape(rows, r);
         }
 
-        /// <summary>What's recorded and whose (ipc/trends.js get-metric-catalog and get-metric-subjects).</summary>
-        public static async Task<TrendsMeta> ReadTrendsMeta(NpgsqlConnection conn)
+        private static async Task<TrendResult> FileReadSeries(DbConnection conn, TrendRequest r)
         {
-            static double? Ms(NpgsqlDataReader r, string col)
+            await using var cmd = Db.Cmd(TrendsMath.FileSeriesSql(r.Parts.Count, r.SubjectIds?.Count ?? 0), conn);
+            Db.Add(cmd, "from", r.From / 1000.0);
+            Db.Add(cmd, "to", r.To / 1000.0);
+            Db.Add(cmd, "n", r.Points - 1);
+            Db.Add(cmd, "first", 0);
+            Db.Add(cmd, "last", r.Points - 1);
+            Db.Add(cmd, "split", r.Split);
+            for (var k = 0; k < r.Parts.Count; k++)
+            {
+                Db.Add(cmd, $"m{k}", r.Parts[k].Metric);
+                Db.Add(cmd, $"t{k}", r.Parts[k].SubjectType);
+                Db.Add(cmd, $"w{k}", (double)r.Parts[k].Weight);
+            }
+            for (var k = 0; k < (r.SubjectIds?.Count ?? 0); k++) Db.Add(cmd, $"s{k}", r.SubjectIds![k]);
+            var rows = new List<(int, string?, double?)>();
+            await using (var reader = await cmd.ExecuteReaderAsync())
+                while (await reader.ReadAsync())
+                    rows.Add((Int(reader, "i"), DecimalOrNull(reader, "subject_id")?.ToString(CultureInfo.InvariantCulture), Double(reader, "value")));
+            return TrendsMath.Shape(rows, r);
+        }
+
+        /// <summary>What's recorded and whose (ipc/trends.js get-metric-catalog and get-metric-subjects).</summary>
+        public static async Task<TrendsMeta> ReadTrendsMeta(DbConnection conn)
+        {
+            static double? Ms(DbDataReader r, string col)
             {
                 var i = r.GetOrdinal(col);
-                return r.IsDBNull(i) ? null : (DateTime.SpecifyKind(r.GetFieldValue<DateTime>(i), DateTimeKind.Utc) - DateTime.UnixEpoch).TotalMilliseconds;
+                return r.IsDBNull(i) ? null : (Db.Time(r, i) - DateTime.UnixEpoch).TotalMilliseconds;
             }
             var catalog = new List<TrendCatalogRow>();
-            await using (var cmd = new NpgsqlCommand(TrendsMath.CatalogSql, conn))
+            await using (var cmd = Db.Cmd(Db.IsFile(conn) ? TrendsMath.FileCatalogSql : TrendsMath.CatalogSql, conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     catalog.Add(new TrendCatalogRow(Text(r, "metric"), Text(r, "subject_type"), Int(r, "subjects"), Ms(r, "first_recorded"), Ms(r, "last_recorded")));
             var characters = new List<TrendCharacter>();
-            await using (var cmd = new NpgsqlCommand(TrendsMath.CharactersSql, conn))
+            await using (var cmd = Db.Cmd(TrendsMath.CharactersSql, conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     characters.Add(new TrendCharacter(Decimal(r, "cid").ToString(CultureInfo.InvariantCulture), Text(r, "name"), TextOrNull(r, "world"), TextOrNull(r, "account_label"), IntOrNull(r, "sort_index")));
             var fcs = new List<TrendFc>();
-            await using (var cmd = new NpgsqlCommand(TrendsMath.FcsSql, conn))
+            await using (var cmd = Db.Cmd(Db.IsFile(conn) ? TrendsMath.FileFcsSql : TrendsMath.FcsSql, conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     fcs.Add(new TrendFc(Decimal(r, "fc_id").ToString(CultureInfo.InvariantCulture), TextOrNull(r, "fc_name"), TextOrNull(r, "fc_master")));
@@ -1168,7 +1196,7 @@ namespace XIVFleetCompanion
             RunInventoryRead(async conn => HeldItems = await Read(conn, ReadHeldItems, HeldItems), text => HeldItems = HeldItems with { Error = text });
         }
 
-        private void RunInventoryRead(Func<NpgsqlConnection, Task> read, Action<string> failed)
+        private void RunInventoryRead(Func<DbConnection, Task> read, Action<string> failed)
         {
             if (inventoryBusy) return;
             var cs = connectionString();

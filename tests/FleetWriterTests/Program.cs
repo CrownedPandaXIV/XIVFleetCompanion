@@ -1353,6 +1353,258 @@ internal static class Program
         await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_partial WITH (FORCE)");
     }
 
+    // 2.2 groundwork ("Just this PC"): everything the plugin writes and reads also works on the one-file database (SQLite,
+    // the app's db/sqlite/). The same made-up fleet is synced and edited into a PostgreSQL database and a file, the same
+    // way, and every page's read must give the same answers (times may differ by the moments between the two).
+    private static async Task TwinAgainstTheFile(NpgsqlConnection admin)
+    {
+        var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
+        await Exec(admin, "DROP DATABASE IF EXISTS twin_pg WITH (FORCE)");
+        await Exec(admin, "CREATE DATABASE twin_pg");
+        var file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"twin-{Guid.NewGuid():N}.db");
+        await using var pg = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(given) { Database = "twin_pg", Pooling = false }.ConnectionString);
+        await pg.OpenAsync();
+        await DatabaseUpkeep.EnsureAsync(pg, DatabaseUpkeep.Files.Embedded(), "twin test", wait: true);
+        await using var lite = new System.Data.SQLite.SQLiteConnection($"Data Source={file};Pooling=False");
+        await lite.OpenAsync();
+        foreach (var f in new[] { "tables.sql", "views.sql" })
+            await Db.Exec(lite, System.IO.File.ReadAllText(RepoFile($"XIVFleetCompanion/Database/sqlite/{f}")));
+        var both = new System.Data.Common.DbConnection[] { pg, lite };
+        async Task Each(Func<System.Data.Common.DbConnection, Task> work) { foreach (var c in both) await work(c); }
+
+        // ---- A made-up fleet, synced the way the plugin does ----
+        const ulong bigFc = 9232379236109516865;   // past a signed 64-bit number, as the game's are
+        var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var chars = new List<FleetWriter.CharacterSnapshot>
+        {
+            new() { Cid = 1001, Name = "Aki", World = "Maduin", Gil = 1_234_567, Ceruleum = 900, RepairKits = 40, RetainerCount = 2, SubmarineCount = 2, AccountLabel = "acct1", FcId = bigFc, NumSubSlots = 4 },
+            new() { Cid = 1002, Name = "Bex", World = "Golem", Gil = 50, Ceruleum = 3, RepairKits = 0, AccountLabel = null, FcId = 0 },
+            new() { Cid = 1003, Name = "Cal", World = "Maduin", Gil = 999_999_999, Ceruleum = 10, RepairKits = 2, AccountLabel = "acct2", FcId = 77 },
+        };
+        await Each(c => FleetWriter.WriteCurrentCharactersAsync(c, chars));
+        await Each(c => FleetWriter.RecordLoginsAsync(c, "DESKTOP-1", "acct1", new Dictionary<ulong, DateTime> { [1001] = DateTime.UtcNow.AddMinutes(-5), [1002] = DateTime.UtcNow.AddMinutes(-4) }));
+        await Each(c => FleetWriter.RecordLoginsAsync(c, "LAPTOP", "acct1", new Dictionary<ulong, DateTime> { [1001] = DateTime.UtcNow.AddMinutes(-60) }));
+        await Each(c => FleetWriter.ReleaseLoginsAsync(c, "DESKTOP-1", "acct1", new ulong[] { 1002 }));
+        await Each(c => FleetWriter.RenameLoginSetupAsync(c, "DESKTOP-1", "acct1", "acct1"));
+        var plan = FleetWriter.PlanInventory(1001, new List<FleetWriter.InventorySource>
+        {
+            new() { Id = 1001, Name = "Aki", SeenItems = new() { new() { SortedContainer = 0, SortedSlotIndex = 0, ItemId = 10155, Quantity = 120 },
+                new() { SortedContainer = 3500, SortedSlotIndex = 0, ItemId = 22500, Quantity = 1, GearSetIds = new uint[] { 1, 4 } },
+                new() { SortedContainer = 2001, SortedSlotIndex = 3, ItemId = 2, Quantity = 999 } } },
+            new() { Id = 5001, Name = "Retainer A", SeenItems = new() { new() { SortedContainer = 10000, SortedSlotIndex = 2, ItemId = 10373, Quantity = 15 } } },
+            new() { Id = 5002, Name = "Retainer B", SeenItems = null },
+        }, retainerListKnown: true);
+        await Each(c => FleetWriter.WriteInventoryAsync(c, 1001, plan));
+        var fcItems = new List<FleetWriter.InventoryItem> { new() { SortedContainer = 20000, SortedSlotIndex = 0, ItemId = 10155, Quantity = 500 }, new() { SortedContainer = 20001, SortedSlotIndex = 1, ItemId = 22500, Quantity = 3 } };
+        await Each(c => FleetWriter.WriteFcInventoryAsync(c, bigFc, fcItems));
+        await Each(c => FleetWriter.WriteFcInventoryAsync(c, 12345, fcItems));
+        await Each(c => FleetWriter.RemoveOrphanFcChestsAsync(c));
+        List<FleetWriter.SubmarineRecord> Subs(string first) => new()
+        {
+            new() { SubName = first, Level = 85, Part1 = 21794, Part2 = 21795, Part3 = 21796, Part4 = 21797, Points = new byte[] { 15, 10, 13 }, ReturnTime = nowUnix + 3600, CurrentExp = 1000, NextLevelExp = 50000, Slot = 1 },
+            new() { SubName = "Submersible-2", Level = 40, Part1 = 21794, Part2 = 21795, Part3 = 21796, Part4 = 21797, Points = Array.Empty<byte>(), ReturnTime = nowUnix - 600, CurrentExp = 5, NextLevelExp = 100, Slot = 2 },
+        };
+        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 1001, Subs("Submersible-1")));
+        await Each(c => FleetEdits.SetCraft(c, "1001", "Submersible-1", true));
+        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 1001, Subs("Renamed")));
+        var retainers = new List<FleetWriter.RetainerRecord>
+        {
+            new() { RetainerId = 5001, Name = "Retainer A", Job = 19, Gil = 7000, HasVenture = true, VentureId = 395, VentureBeginsAt = nowUnix - 3600, VentureEndsAt = nowUnix + 600, Level = 90, HireOrderIndex = 0 },
+            new() { RetainerId = 5002, Name = "Retainer B", Job = 17, Gil = 0, HasVenture = false, Level = 12, HireOrderIndex = 1 },
+            new() { RetainerId = 5003, Name = "Gone Soon", Job = 1, Level = 1, HireOrderIndex = 2 },
+        };
+        await Each(c => FleetWriter.WriteRetainersAsync(c, 1001, retainers));
+        await Each(c => FleetWriter.WriteRetainersAsync(c, 1001, retainers.Take(2).ToList()));
+        await Each(c => FleetWriter.MarkRetainersSeenAsync(c, new ulong[] { 5001 }));
+        var house = new FCTrackerConnector.HousingInfo { FcId = bigFc, FcName = "Kittehs", FcPoints = 52000, FcRank = 8, TotalMembers = 3, HasHouse = true, HouseCity = 8, HouseWard = 7, HousePlot = 28,
+            HouseLastVisited = DateTime.UtcNow.AddDays(-40), FcMaster = "Aki", FcHomeWorldId = 34, FcFoundingDate = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc) };
+        await Each(c => FleetWriter.WriteHousingAsync(c, 1001, house));
+        await Each(c => FleetWriter.WriteHousingAsync(c, 1003, new FCTrackerConnector.HousingInfo { FcId = 77, FcName = "Young", FcPoints = 10, FcRank = 1, TotalMembers = 1, FcMaster = "Cal",
+            FcEligibilityOverride = DateTime.UtcNow.AddDays(3) }));
+        await Each(c => FleetWriter.WriteHousingAsync(c, 1002, new FCTrackerConnector.HousingInfo { FcId = 88, FcName = "Left" }));
+        await Each(c => FleetWriter.RemoveHousingAsync(c, new ulong[] { 1002 }));
+        var status = new DetailsWriter.PcStatus { PcName = "DESKTOP-1", AccountLabel = "acct1", PluginVersion = "2.2.0", AutoRetainerReady = true, AllaganToolsReady = true, FcTrackerFound = true,
+            SubmarineTrackerFound = false, VentureStatsFound = true, CharactersSynced = 2, CharactersLeftOut = 1, Problems = new() { "Bex: no FC chest", "Aki: open Retainer B" } };
+        await Each(c => DetailsWriter.WritePcStatusAsync(c, status));
+        await Each(c => DetailsWriter.WriteCharactersElsewhereAsync(c, "DESKTOP-1", "acct1", 1));
+        await Each(c => DetailsWriter.WritePcReadAsync(c, "LAPTOP", "", "2.2.0"));
+        await Each(c => DetailsWriter.WritePcCheckAsync(c, "LAPTOP", "", "2.2.0", "All good\nNothing to fix", 0));
+        await Each(c => DetailsWriter.WriteAutoRetainerNotRunningAsync(c, "OLD-PC", "x", "1.0.0"));
+        await Each(async c => await FleetEdits.RemovePc(c, "OLD-PC", "x"));
+        var loot = new List<DetailsWriter.LootRow>
+        {
+            new() { FcId = bigFc, Register = 1, Return = (uint)(nowUnix - 86400), Sector = 15, Leg = 1, SubName = "Renamed", PrimaryItem = 22500, PrimaryCount = 3, PrimaryHq = false, AdditionalItem = 22501, AdditionalCount = 1, Valid = true },
+            new() { FcId = bigFc, Register = 1, Return = (uint)(nowUnix - 86400), Sector = 10, Leg = 2, SubName = "Renamed", PrimaryItem = 22505, PrimaryCount = 2, PrimaryHq = true, Valid = true },
+            new() { FcId = 77, Register = 2, Return = (uint)(nowUnix - 3600), Sector = 1, Leg = 1, SubName = "Sub", PrimaryItem = 22500, PrimaryCount = 1, Valid = true },
+        };
+        await Each(c => DetailsWriter.WriteVoyageLootAsync(c, loot));
+        var ventures = new List<DetailsWriter.VentureRow>
+        {
+            new() { OwnerCid = 1001, RetainerName = "Retainer A", At = nowUnix - 7200, ItemId = 5111, Hq = false, Quantity = 20, VentureId = 395 },
+            new() { OwnerCid = 1001, RetainerName = "Retainer A", At = nowUnix - 3600, ItemId = 22500, Hq = true, Quantity = 1, VentureId = 395 },
+        };
+        await Each(c => DetailsWriter.WriteVenturesAsync(c, ventures));
+        var listings = new List<DetailsWriter.Listing> { new() { RetainerId = 5001, Slot = 0, ItemId = 22500, Quantity = 1, Hq = false, UnitPrice = 90000 }, new() { RetainerId = 5001, Slot = 1, ItemId = 5111, Quantity = 99, Hq = true, UnitPrice = 120 } };
+        await Each(c => DetailsWriter.WriteListingsAsync(c, 1001, new ulong[] { 5001 }, listings));
+        await Each(c => DetailsWriter.WriteListingsAsync(c, 1001, new ulong[] { 5001 }, listings.Take(1).ToList()));
+        var metrics = new List<MetricWriter.MetricPoint>
+        {
+            new() { SubjectType = "character", SubjectId = 1001, Metric = "gil", Value = 1_234_567 },
+            new() { SubjectType = "character", SubjectId = 1003, Metric = "gil", Value = 999_999_999 },
+            new() { SubjectType = "fc", SubjectId = bigFc, Metric = "fc_points", Value = 52000, Label = "Aki" },
+        };
+        var recorded = new List<string>();
+        await Each(async c => recorded.Add(await MetricWriter.WriteMetricsAsync(c, metrics)));
+        await Each(async c => recorded.Add(await MetricWriter.WriteMetricsAsync(c, metrics)));
+        metrics[0].Value = 2_000_000;
+        await Each(async c => recorded.Add(await MetricWriter.WriteMetricsAsync(c, metrics)));
+        Check(recorded.SequenceEqual(new[] { "Success — 3 of 3 metrics recorded.", "Success — 3 of 3 metrics recorded.", "Success — 0 of 3 metrics recorded.", "Success — 0 of 3 metrics recorded.",
+                "Success — 1 of 3 metrics recorded.", "Success — 1 of 3 metrics recorded." }),
+            "file: Trends values are recorded only when they change, on both: " + string.Join(" / ", recorded));
+
+        // ---- The edits made from the game ----
+        var ruleIds = new List<long>();
+        await Each(async c => ruleIds.Add(await FleetEdits.AddRule(c, new FleetEdits.Rule(null, 50, null, null, "S", "S", "C", "C"))));
+        await Each(async c => await FleetEdits.UpdateRule(c, new FleetEdits.Rule(ruleIds[c == pg ? 0 : 1], 60, "1001", "Renamed", "S", "S", "S", "C")));
+        await Each(async c => await FleetEdits.AddRule(c, new FleetEdits.Rule(null, 90, null, null, "Y", "Y", "Y", "Y")));
+        await Each(async c => await FleetEdits.SaveTarget(c, "5001", "level", 90, false));
+        await Each(async c => await FleetEdits.SaveTarget(c, "5002", "ilvl", 600, true));
+        await Each(async c => await FleetEdits.DeleteTarget(c, "5002"));
+        await Each(c => FleetEdits.SaveOrder(c, new[] { "1003", "1001", "1002" }));
+        var answers = new List<string?>();
+        await Each(async c => answers.Add(await FleetEdits.SaveStaleDays(c, 5)));
+        await Each(async c => answers.Add(await FleetEdits.SaveIncomeWindow(c, 7)));
+        await Each(async c => answers.Add(await FleetEdits.SaveWarnings(c, 20, 100, 30, 45)));
+        await Each(async c => answers.Add(await FleetEdits.SaveRepairKitCost(c, 2000)));
+        await Each(c => FleetEdits.SaveLivePrices(c, false));
+        await Each(async c => answers.Add(await FleetEdits.SavePlayStyle(c, "both")));
+        await Each(async c => answers.Add(await FleetEdits.SaveShoppingProgress(c, 21794, 1, 2, 3)));
+        await Each(async c => answers.Add(await FleetEdits.SaveShoppingProgress(c, 21795, 2, 2, 0)));
+        Check(answers.All(a => a == null), "file: every edit is accepted on both: " + string.Join(", ", answers.Where(a => a != null)));
+
+        // ---- Every read, compared ----
+        var options = new JsonSerializerOptions { IncludeFields = true };
+        // unordered: a list the views give in no set order (what reads it sorts it itself): the same rows, in any order.
+        static JsonNode? Sorted(JsonNode? n) => n switch
+        {
+            JsonArray a => new JsonArray(a.Select(Sorted).OrderBy(x => x?.ToJsonString(), StringComparer.Ordinal).ToArray()),
+            JsonObject o => new JsonObject(o.Select(kv => KeyValuePair.Create(kv.Key, Sorted(kv.Value)))),
+            null => null,
+            _ => JsonNode.Parse(n.ToJsonString()),
+        };
+        async Task Same<T>(string what, Func<System.Data.Common.DbConnection, Task<T>> read, bool unordered = false)
+        {
+            string a, b;
+            try
+            {
+                a = JsonSerializer.Serialize(await read(pg), options);
+                b = JsonSerializer.Serialize(await read(lite), options);
+            }
+            catch (Exception ex)
+            {
+                Check(false, $"file: {what} reads on both: {ex.GetType().Name}: {ex.Message.Replace("\r", " ").Replace("\n", " ")}");
+                return;
+            }
+            var diff = unordered ? JsonDiff(Sorted(JsonNode.Parse(a)), Sorted(JsonNode.Parse(b)), "") : JsonDiff(JsonNode.Parse(a), JsonNode.Parse(b), "");
+            Check(diff == null, $"file: {what} the same on both" + (diff == null ? $" ({a.Length} characters)" : $": {diff}"));
+        }
+        await Same("logins", c => FleetWriter.ReadLoginOwnersAsync(c, new ulong[] { 1001, 1002, 1003 }));
+        await Same("item totals of a character", c => FleetWriter.ReadItemTotalsAsync(c, 1001, new uint[] { 10155, 10373, 5 }));
+        await Same("sources stored", c => FleetWriter.ReadStoredSourceCountAsync(c, 1001));
+        await Same("how long ago things were stored", async c =>
+        {
+            var ages = await FleetWriter.ReadStoredAgesAsync(c, new ulong[] { 1001, 1002 }, new ulong[] { bigFc });
+            return new { Synced = ages.Synced.Keys.OrderBy(k => k).ToList(), Inventory = ages.Inventory.Keys.Select(k => $"{k.Owner}/{k.Source}").OrderBy(k => k).ToList(),
+                Chest = ages.Chest.Keys.ToList(), Recent = ages.Synced.Values.Concat(ages.Inventory.Values).Concat(ages.Chest.Values).All(t => t < TimeSpan.FromMinutes(5)) };
+        });
+        await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToList());
+        await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 1001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
+        await Same("settings", FleetReader.ReadSettings);
+        await Same("Subs", FleetReader.ReadSubs);
+        await Same("Supplies", FleetReader.ReadSupplies);
+        await Same("Summary", FleetReader.ReadSummary);
+        await Same("what needs attention", FleetReader.ReadAlerts);
+        await Same("Roster", FleetReader.ReadRoster);
+        await Same("Retainers", FleetReader.ReadRetainers);
+        await Same("PCs", FleetReader.ReadPcs);
+        await Same("retainer counts", FleetReader.ReadRetainerCounts);
+        await Same("Free Companies", FleetReader.ReadFcs);
+        await Same("Inventory", c => FleetReader.ReadHoldings(c, "true"));
+        await Same("a character's stacks", c => FleetReader.ReadHoldings(c, "kind <> 'fc'", "owner_cid", new object[] { 1001L }), unordered: true);
+        await Same("a Free Company's chest", c => FleetReader.ReadHoldings(c, "kind = 'fc'", "fc_id", new object[] { (decimal)bigFc }));
+        await Same("Where is it?", c => FleetReader.ReadHoldings(c, "NOT money", "item_id", new object[] { 10155, 22500 }), unordered: true);
+        await Same("item totals", FleetReader.ReadItemTotals, unordered: true);
+        await Same("Gil & Market", async c => (await FleetReader.ReadMarketData(c)).Read);
+        await Same("what to ask Universalis", async c => { var ask = (await FleetReader.ReadMarketData(c)).Ask; return ask == null ? null : new { Exclude = ask.Exclude.OrderBy(x => x).ToList(), Wanted = ask.Wanted.Select(w => $"{w.World}:{w.ItemId}").OrderBy(x => x).ToList() }; });
+        await Same("routes' inputs", FleetReader.ReadRoutesInputs, unordered: true);
+        await Same("forecast accuracy", FleetReader.ReadForecasts);
+        await Same("Loot per Voyage", FleetReader.ReadLoot);
+        await Same("Parts", async c => (await FleetReader.ReadParts(c)).Needs);
+        await Same("Parts' inputs", FleetReader.ReadPartsInputs, unordered: true);
+        await Same("Salvage", FleetReader.ReadSalvage);
+        await Same("Income", FleetReader.ReadIncome, unordered: true);
+        await Same("venture income", FleetReader.ReadVentures, unordered: true);
+        await Same("items held", FleetReader.ReadHeldItems, unordered: true);
+        await Same("Shopping List", FleetReader.ReadShopping);
+        await Same("Trends: what's recorded", FleetReader.ReadTrendsMeta);
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await Same("Trends: gil, whole fleet", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, null)));
+        await Same("Trends: gil, each character", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, new() { "1001", "1003" })));
+        await Same("Trends: a Free Company's points", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 5, new() { new("fc_points", "fc") }, new() { bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture) })));
+        await Same("Trends: a sum of two", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 6, new() { new("gil", "character"), new("fc_points", "fc", 2) }, null)));
+
+        await lite.CloseAsync();
+        System.Data.SQLite.SQLiteConnection.ClearAllPools();
+        try { System.IO.File.Delete(file); } catch (System.IO.IOException) { }
+        await pg.CloseAsync();
+        await Exec(admin, "DROP DATABASE IF EXISTS twin_pg WITH (FORCE)");
+    }
+
+    // Where two reads' answers differ (null: they don't). Times may differ by the moments between the two writes and
+    // reads: a date within 10 minutes, a Unix time (seconds or milliseconds) within 10 minutes, any other fraction to
+    // one part in a million or a thousandth (an age in days, a minute and a half); whole numbers and text exactly.
+    private static string? JsonDiff(JsonNode? a, JsonNode? b, string path)
+    {
+        if (a == null || b == null) return a == null && b == null ? null : $"{path}: {a?.ToJsonString() ?? "null"} / {b?.ToJsonString() ?? "null"}";
+        if (a is JsonObject oa && b is JsonObject ob)
+        {
+            foreach (var key in oa.Select(p => p.Key).Union(ob.Select(p => p.Key)))
+            {
+                var d = JsonDiff(oa[key], ob[key], $"{path}.{key}");
+                if (d != null) return d;
+            }
+            return null;
+        }
+        if (a is JsonArray xa && b is JsonArray xb)
+        {
+            if (xa.Count != xb.Count) return $"{path}: {xa.Count} / {xb.Count} items";
+            for (var i = 0; i < xa.Count; i++)
+            {
+                var d = JsonDiff(xa[i], xb[i], $"{path}[{i}]");
+                if (d != null) return d;
+            }
+            return null;
+        }
+        var va = a.AsValue();
+        var vb = b.AsValue();
+        if (va.TryGetValue<double>(out var na) && vb.TryGetValue<double>(out var nb))
+        {
+            if (na == nb) return null;
+            var big = Math.Max(Math.Abs(na), Math.Abs(nb));
+            if (big > 1e12 ? Math.Abs(na - nb) <= 600_000 : big > 1e9 ? Math.Abs(na - nb) <= 600 : (na % 1 != 0 || nb % 1 != 0) && Math.Abs(na - nb) <= Math.Max(1e-6 * big, 1e-3)) return null;
+            return $"{path}: {na} / {nb}";
+        }
+        if (va.TryGetValue<string>(out var sa) && vb.TryGetValue<string>(out var sb))
+        {
+            if (sa == sb) return null;
+            if (DateTime.TryParse(sa, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var ta)
+                && DateTime.TryParse(sb, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var tb)
+                && Math.Abs((ta.ToUniversalTime() - tb.ToUniversalTime()).TotalMinutes) <= 10) return null;
+            return $"{path}: \"{sa}\" / \"{sb}\"";
+        }
+        return a.ToJsonString() == b.ToJsonString() ? null : $"{path}: {a.ToJsonString()} / {b.ToJsonString()}";
+    }
+
     private static void Check(bool ok, string what)
     {
         if (ok) passes++; else failures++;
@@ -1634,10 +1886,10 @@ internal static class Program
         Check(fcs.Count == 2 && fcs[0].FcId == 9232379236109516865m && fcs[0].Name == "Kittehs" && fcs[0].HasHouse && fcs[0].HouseLevel == "warn" && fcs[0].HomeWorld == 34 && fcs[0].Points == 52000
               && fcs[1].Name == "Young" && !fcs[1].HasHouse && fcs[1].Eligibility == "Eligible in 3 days" && fcs[1].SortIndex == int.MaxValue && fcs[1].Account == "",
             "batch 2: the Free Companies read, in the Roster's order: " + string.Join(" | ", fcs));
-        var holdings = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 1 }));
+        var holdings = await FleetReader.ReadHoldings(conn, "true", "owner_cid", new object[] { 1L });
         Check(holdings.Count == 2 && holdings[0].Hq && holdings[0].Place == "Bags" && holdings[0].ContainerName == "Inventory 1" && holdings[1].Money && holdings[1].FcId == 9232379236109516865m && holdings[1].World == "",
             "batch 2: stacks read with a condition: " + string.Join(" | ", holdings));
-        var none = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 2 }));
+        var none = await FleetReader.ReadHoldings(conn, "true", "owner_cid", new object[] { 2L });
         Check(none.Count == 0, "batch 2: only the stacks asked for");
         var totals = await FleetReader.ReadItemTotals(conn);
         Check(totals.Count == 1 && totals[0] == new ItemTotalRow(10155, true, 5), "batch 2: the fleet's totals read");
@@ -1676,7 +1928,7 @@ internal static class Program
               (1, 'Aki', 'Maduin', 'A', 5, 6000, 4, NULL, 3, 2, 3),
               (1, 'Aki', 'Maduin', 'A', 5, 6001, 1, NULL, 3, 2, 3))
               AS t(owner_cid, name, world, account_label, sort_index, item_id, quantity, salvage_price, rewards, retainers, window_days);");
-        var worn = await FleetReader.ReadHoldings(conn, "true", _ => { });
+        var worn = await FleetReader.ReadHoldings(conn, "true");
         Check(worn.Count == 2 && worn[0].Equipped && !worn[1].Equipped, "batch 3: equipped gear marked: " + string.Join(" | ", worn));
         var wornTotals = await FleetReader.ReadItemTotals(conn);
         Check(wornTotals.Single() == new ItemTotalRow(40000, false, 3, 1), "batch 3: the fleet's totals say how many are worn: " + wornTotals.Single());
@@ -1735,6 +1987,7 @@ internal static class Program
         await FightClubAgainstTheApp(conn);
         LooksAgainstTheApp();
         await DatabaseAgainstTheApp(conn);
+        await TwinAgainstTheFile(conn);
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

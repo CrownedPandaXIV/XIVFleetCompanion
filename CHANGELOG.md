@@ -3,6 +3,16 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.2.0 - 2026-11-07
+
+Groundwork for **Just this PC**, the coming mode where the fleet lives in one file on your PC instead of a PostgreSQL
+database, with nothing to install. Nothing changes for anyone yet: every PC keeps using its database as before.
+
+- Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) now also works on
+  the one-file database. The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and
+  every page must read the same from both.
+- Gil & Market lists accounts by name.
+
 ## 2.1.0 - 2026-11-07
 
 - **The plugin keeps the database up to date itself**, as the app does, so after an update nobody needs to open the

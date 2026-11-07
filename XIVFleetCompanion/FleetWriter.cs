@@ -1,5 +1,6 @@
 using Npgsql;
 using System;
+using System.Data.Common;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -14,7 +15,7 @@ namespace XIVFleetCompanion
     /// instead of one statement per row. Kept free of Dalamud so it can be tested on its own
     /// against a database (see tests/FleetWriterTests).
     /// </summary>
-    public static class FleetWriter
+    public static partial class FleetWriter
     {
         public class CharacterSnapshot
         {
@@ -119,8 +120,10 @@ namespace XIVFleetCompanion
 
         // Every character's current row (database version 4), in one statement. Changes of
         // name, world, account label or Free Company are logged by a trigger on that table.
-        public static async Task<int> WriteCurrentCharactersAsync(NpgsqlConnection conn, IReadOnlyList<CharacterSnapshot> rows)
+        public static async Task<int> WriteCurrentCharactersAsync(DbConnection db, IReadOnlyList<CharacterSnapshot> rows)
         {
+            if (Db.IsFile(db)) { return await FileWriteCurrentCharacters(db, rows); }
+            var conn = (NpgsqlConnection)db;
             if (rows.Count == 0) return 0;
             const string sql = @"
                 INSERT INTO companion_character_current
@@ -163,9 +166,11 @@ namespace XIVFleetCompanion
 
         // Records logins seen on this setup (cid -> when, in UTC). A row only changes when the login is newer than the
         // one stored, so the setup that saw the latest login wins. False when the database doesn't have the table yet.
-        public static async Task<bool> RecordLoginsAsync(NpgsqlConnection conn, string pcName, string accountLabel,
+        public static async Task<bool> RecordLoginsAsync(DbConnection db, string pcName, string accountLabel,
             IReadOnlyCollection<KeyValuePair<ulong, DateTime>> logins)
         {
+            if (Db.IsFile(db)) { if (logins.Count > 0) await FileRecordLogins(db, pcName, accountLabel, logins); return true; }
+            var conn = (NpgsqlConnection)db;
             if (logins.Count == 0) return true;
             const string sql = @"
                 INSERT INTO companion_character_login (cid, pc_name, account_label, logged_in_at)
@@ -194,8 +199,10 @@ namespace XIVFleetCompanion
 
         // After this setup's account label is changed, its characters' logins move to the new label, so they keep
         // syncing. Returns how many moved; 0 when the database doesn't have the table yet.
-        public static async Task<int> RenameLoginSetupAsync(NpgsqlConnection conn, string pcName, string oldLabel, string newLabel)
+        public static async Task<int> RenameLoginSetupAsync(DbConnection db, string pcName, string oldLabel, string newLabel)
         {
+            if (Db.IsFile(db)) { return oldLabel == newLabel ? 0 : await Db.Exec(db, "UPDATE companion_character_login SET account_label = @new WHERE pc_name = @pc AND account_label = @old", null, ("pc", pcName), ("old", oldLabel), ("new", newLabel)); }
+            var conn = (NpgsqlConnection)db;
             if (oldLabel == newLabel) return 0;
             try
             {
@@ -214,8 +221,10 @@ namespace XIVFleetCompanion
 
         // The setup each of these characters last logged in on (characters with no login recorded are left out).
         // Null when the database doesn't have the table yet.
-        public static async Task<Dictionary<ulong, LoginOwner>?> ReadLoginOwnersAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids)
+        public static async Task<Dictionary<ulong, LoginOwner>?> ReadLoginOwnersAsync(DbConnection db, IReadOnlyCollection<ulong> cids)
         {
+            if (Db.IsFile(db)) { return cids.Count == 0 ? new Dictionary<ulong, LoginOwner>() : await FileReadLoginOwners(db, cids); }
+            var conn = (NpgsqlConnection)db;
             var owners = new Dictionary<ulong, LoginOwner>();
             if (cids.Count == 0) return owners;
             try
@@ -236,8 +245,10 @@ namespace XIVFleetCompanion
 
         // A setup gives up the characters it no longer syncs (unticked in its settings): its login rows for them go,
         // so a setup that does sync them takes over. Returns how many; 0 when the database doesn't have the table yet.
-        public static async Task<int> ReleaseLoginsAsync(NpgsqlConnection conn, string pcName, string accountLabel, IReadOnlyCollection<ulong> cids)
+        public static async Task<int> ReleaseLoginsAsync(DbConnection db, string pcName, string accountLabel, IReadOnlyCollection<ulong> cids)
         {
+            if (Db.IsFile(db)) { return cids.Count == 0 ? 0 : await FileReleaseLogins(db, pcName, accountLabel, cids); }
+            var conn = (NpgsqlConnection)db;
             if (cids.Count == 0) return 0;
             try
             {
@@ -313,8 +324,10 @@ namespace XIVFleetCompanion
 
         // Writes one character's inventory plan in one transaction: the read sources' stored items are
         // replaced, unread sources keep theirs, and (with plan.Current) a source no longer there loses its.
-        public static async Task WriteInventoryAsync(NpgsqlConnection conn, ulong ownerCid, InventoryPlan plan)
+        public static async Task WriteInventoryAsync(DbConnection db, ulong ownerCid, InventoryPlan plan)
         {
+            if (Db.IsFile(db)) { await FileWriteInventory(db, ownerCid, plan); return; }
+            var conn = (NpgsqlConnection)db;
             await using var tx = await conn.BeginTransactionAsync();
             await using (var delete = new NpgsqlCommand(@"
                 DELETE FROM companion_inventory_snapshot
@@ -357,8 +370,10 @@ namespace XIVFleetCompanion
         // How many of each item one character has stored across its bags and retainers (including the
         // last stored items of retainers AllaganTools did not see this time). Items it has none of are
         // returned as 0.
-        public static async Task<Dictionary<uint, long>> ReadItemTotalsAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyCollection<uint> itemIds)
+        public static async Task<Dictionary<uint, long>> ReadItemTotalsAsync(DbConnection db, ulong ownerCid, IReadOnlyCollection<uint> itemIds)
         {
+            if (Db.IsFile(db)) { return await FileReadItemTotals(db, ownerCid, itemIds); }
+            var conn = (NpgsqlConnection)db;
             var totals = itemIds.ToDictionary(id => id, _ => 0L);
             await using var cmd = new NpgsqlCommand(@"
                 SELECT item_id, sum(quantity)::bigint FROM companion_inventory_snapshot
@@ -374,8 +389,10 @@ namespace XIVFleetCompanion
 
         // Replaces one Free Company's stored chest in one transaction. Several characters in the
         // same FC write the same rows, so this is an overwrite of the same chest, not a copy each.
-        public static async Task WriteFcInventoryAsync(NpgsqlConnection conn, ulong fcId, IReadOnlyList<InventoryItem> items)
+        public static async Task WriteFcInventoryAsync(DbConnection db, ulong fcId, IReadOnlyList<InventoryItem> items)
         {
+            if (Db.IsFile(db)) { await FileWriteFcInventory(db, fcId, items); return; }
+            var conn = (NpgsqlConnection)db;
             await using var tx = await conn.BeginTransactionAsync();
             await using (var delete = new NpgsqlCommand("DELETE FROM companion_fc_inventory_snapshot WHERE fc_id = @fc", conn, tx))
             {
@@ -402,8 +419,10 @@ namespace XIVFleetCompanion
         // with a different name and the old name is gone (the sub was renamed), the app's Craft?
         // setting (sub_craft_toggle, kept per name) moves to the new name. The slot column comes from
         // database version 6; without it the subs are written as before, without slots.
-        public static async Task WriteSubmarinesAsync(NpgsqlConnection conn, ulong cid, IReadOnlyList<SubmarineRecord> subs)
+        public static async Task WriteSubmarinesAsync(DbConnection db, ulong cid, IReadOnlyList<SubmarineRecord> subs)
         {
+            if (Db.IsFile(db)) { await FileWriteSubmarines(db, cid, subs); return; }
+            var conn = (NpgsqlConnection)db;
             await using var tx = await conn.BeginTransactionAsync();
 
             bool hasSlot, hasCraftToggle;
@@ -496,8 +515,10 @@ namespace XIVFleetCompanion
         // Inserts or updates every retainer of one character, and removes that character's retainers
         // that are no longer in the list (dismissed), in one transaction. An empty list changes
         // nothing: it is more likely missing data than a character who dismissed every retainer.
-        public static async Task WriteRetainersAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyList<RetainerRecord> retainers)
+        public static async Task WriteRetainersAsync(DbConnection db, ulong ownerCid, IReadOnlyList<RetainerRecord> retainers)
         {
+            if (Db.IsFile(db)) { if (retainers.Count > 0) await FileWriteRetainers(db, ownerCid, retainers); return; }
+            var conn = (NpgsqlConnection)db;
             if (retainers.Count == 0) return;
             await using var tx = await conn.BeginTransactionAsync();
             const string sql = @"
@@ -544,8 +565,10 @@ namespace XIVFleetCompanion
 
         // Removes the Free Company and housing rows of characters that are no longer in any Free
         // Company. Returns how many were removed.
-        public static async Task<int> RemoveHousingAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids)
+        public static async Task<int> RemoveHousingAsync(DbConnection db, IReadOnlyCollection<ulong> cids)
         {
+            if (Db.IsFile(db)) { return cids.Count == 0 ? 0 : await FileRemoveHousing(db, cids); }
+            var conn = (NpgsqlConnection)db;
             if (cids.Count == 0) return 0;
             await using var cmd = new NpgsqlCommand("DELETE FROM companion_character_housing WHERE cid = ANY(@cids)", conn);
             cmd.Parameters.AddWithValue("cids", cids.Select(c => (decimal)c).ToArray());
@@ -555,8 +578,10 @@ namespace XIVFleetCompanion
         // Removes the chests of Free Companies that no tracked character belongs to any more (a
         // character left, or the FC was disbanded), going by companion_character_current, which
         // holds every account's characters. Returns how many chest slots were removed.
-        public static async Task<int> RemoveOrphanFcChestsAsync(NpgsqlConnection conn)
+        public static async Task<int> RemoveOrphanFcChestsAsync(DbConnection db)
         {
+            if (Db.IsFile(db)) { return await FileRemoveOrphanFcChests(db); }
+            var conn = (NpgsqlConnection)db;
             const string sql = @"
                 DELETE FROM companion_fc_inventory_snapshot f
                 WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = f.fc_id)";
@@ -565,8 +590,10 @@ namespace XIVFleetCompanion
         }
 
         // Inserts or updates one character's Free Company and housing details.
-        public static async Task WriteHousingAsync(NpgsqlConnection conn, ulong cid, FCTrackerConnector.HousingInfo housing)
+        public static async Task WriteHousingAsync(DbConnection db, ulong cid, FCTrackerConnector.HousingInfo housing)
         {
+            if (Db.IsFile(db)) { await FileWriteHousing(db, cid, housing); return; }
+            var conn = (NpgsqlConnection)db;
             const string sql = @"
                 INSERT INTO companion_character_housing
                     (cid, fc_id, fc_name, fc_points, fc_rank, total_members,
@@ -617,8 +644,10 @@ namespace XIVFleetCompanion
         // How many sources (bags, retainers) have items stored for one character. When it goes up, items
         // were stored for a source for the first time (a retainer seen on this PC for the first time), so
         // the app does not count those items as new income.
-        public static async Task<int> ReadStoredSourceCountAsync(NpgsqlConnection conn, ulong ownerCid)
+        public static async Task<int> ReadStoredSourceCountAsync(DbConnection db, ulong ownerCid)
         {
+            if (Db.IsFile(db)) { return await FileReadStoredSourceCount(db, ownerCid); }
+            var conn = (NpgsqlConnection)db;
             await using var cmd = new NpgsqlCommand(
                 "SELECT count(DISTINCT retainer_id)::int FROM companion_inventory_snapshot WHERE owner_cid = @owner", conn);
             cmd.Parameters.AddWithValue("owner", (decimal)ownerCid);
@@ -627,8 +656,10 @@ namespace XIVFleetCompanion
 
         // Records that AllaganTools saw these retainers' items just now (database version 7), even when they hold
         // nothing. Returns false when the column is not there yet (the database is older than version 7); nothing else changes.
-        public static async Task<bool> MarkRetainersSeenAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> retainerIds)
+        public static async Task<bool> MarkRetainersSeenAsync(DbConnection db, IReadOnlyCollection<ulong> retainerIds)
         {
+            if (Db.IsFile(db)) { if (retainerIds.Count > 0) await FileMarkRetainersSeen(db, retainerIds); return true; }
+            var conn = (NpgsqlConnection)db;
             if (retainerIds.Count == 0) return true;
             try
             {
@@ -654,8 +685,10 @@ namespace XIVFleetCompanion
             public Dictionary<ulong, TimeSpan> Chest = new();
         }
 
-        public static async Task<StoredAges> ReadStoredAgesAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids, IReadOnlyCollection<ulong> fcIds)
+        public static async Task<StoredAges> ReadStoredAgesAsync(DbConnection db, IReadOnlyCollection<ulong> cids, IReadOnlyCollection<ulong> fcIds)
         {
+            if (Db.IsFile(db)) { return await FileReadStoredAges(db, cids, fcIds); }
+            var conn = (NpgsqlConnection)db;
             var ages = new StoredAges();
             var cidArray = cids.Select(c => (decimal)c).ToArray();
             async Task Read(string sql, decimal[] ids, Action<NpgsqlDataReader> add)

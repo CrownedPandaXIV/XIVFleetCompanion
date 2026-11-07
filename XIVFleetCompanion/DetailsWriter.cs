@@ -1,5 +1,6 @@
 using Npgsql;
 using System;
+using System.Data.Common;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -12,7 +13,7 @@ namespace XIVFleetCompanion
     /// market listings (from AllaganTools). Until the database has version 8, each write answers false and
     /// changes nothing. No Dalamud here, so it is tested on its own (tests/FleetWriterTests).
     /// </summary>
-    public static class DetailsWriter
+    public static partial class DetailsWriter
     {
         // ---- PCs ----
 
@@ -35,8 +36,10 @@ namespace XIVFleetCompanion
         // One row per PC and account label, rewritten every sync, with the login this plugin uses (db_user,
         // database update 10, so the app can check a move to another PC will let every PC in). A database
         // without update 10 yet gets the rest.
-        public static async Task<bool> WritePcStatusAsync(NpgsqlConnection conn, PcStatus s)
+        public static async Task<bool> WritePcStatusAsync(DbConnection db, PcStatus s)
         {
+            if (Db.IsFile(db)) { await FileWritePcStatus(db, s); return true; }
+            var conn = (NpgsqlConnection)db;
             try
             {
                 return await WritePcStatusAsync(conn, s, withLogin: true);
@@ -96,8 +99,10 @@ namespace XIVFleetCompanion
         // This PC's plugin read the database (plugin 2.0; database update 16, app 1.8.0): a PC that syncs no characters
         // checks in too, with the login it uses, so the app's PCs tab lists it and a move checks it can follow. False
         // when the database doesn't have the column yet.
-        public static async Task<bool> WritePcReadAsync(NpgsqlConnection conn, string pcName, string accountLabel, string pluginVersion)
+        public static async Task<bool> WritePcReadAsync(DbConnection db, string pcName, string accountLabel, string pluginVersion)
         {
+            if (Db.IsFile(db)) { await FileWritePcRead(db, pcName, accountLabel, pluginVersion); return true; }
+            var conn = (NpgsqlConnection)db;
             try
             {
                 await using var cmd = new NpgsqlCommand(@"
@@ -119,8 +124,10 @@ namespace XIVFleetCompanion
 
         // How many characters this setup left to another setup this sync, because they last logged in there (database
         // update 12, app 1.6.0, for the app's PCs tab). A database without that column yet is left as it is.
-        public static async Task WriteCharactersElsewhereAsync(NpgsqlConnection conn, string pcName, string accountLabel, int count)
+        public static async Task WriteCharactersElsewhereAsync(DbConnection db, string pcName, string accountLabel, int count)
         {
+            if (Db.IsFile(db)) { await Db.Exec(db, "UPDATE companion_pc_status SET characters_elsewhere = @n WHERE pc_name = @pc AND account_label = @account", null, ("pc", pcName), ("account", accountLabel), ("n", count)); return; }
+            var conn = (NpgsqlConnection)db;
             try
             {
                 await using var cmd = new NpgsqlCommand(
@@ -140,8 +147,10 @@ namespace XIVFleetCompanion
         // and counts (they are what the app still shows).
         public const string AutoRetainerNotRunning = "AutoRetainer is not running: nothing can be synced.";
 
-        public static async Task<bool> WriteAutoRetainerNotRunningAsync(NpgsqlConnection conn, string pcName, string accountLabel, string pluginVersion)
+        public static async Task<bool> WriteAutoRetainerNotRunningAsync(DbConnection db, string pcName, string accountLabel, string pluginVersion)
         {
+            if (Db.IsFile(db)) { await FileWriteAutoRetainerNotRunning(db, pcName, accountLabel, pluginVersion); return true; }
+            var conn = (NpgsqlConnection)db;
             return await IfTableExists(async () =>
             {
                 await using var cmd = new NpgsqlCommand(@"
@@ -158,8 +167,10 @@ namespace XIVFleetCompanion
         }
 
         // The last "Check what I can see" result, so the app can show it.
-        public static async Task<bool> WritePcCheckAsync(NpgsqlConnection conn, string pcName, string accountLabel, string pluginVersion, string text, int toFix)
+        public static async Task<bool> WritePcCheckAsync(DbConnection db, string pcName, string accountLabel, string pluginVersion, string text, int toFix)
         {
+            if (Db.IsFile(db)) { await FileWritePcCheck(db, pcName, accountLabel, pluginVersion, text, toFix); return true; }
+            var conn = (NpgsqlConnection)db;
             return await IfTableExists(async () =>
             {
                 await using var cmd = new NpgsqlCommand(@"
@@ -200,8 +211,10 @@ namespace XIVFleetCompanion
         // The newest voyage already stored per FC (Unix seconds), so only newer ones are read. With database version 9,
         // only voyages whose sector order is stored count, so the first sync after it fills in the order of
         // those already stored.
-        public static async Task<Dictionary<ulong, long>?> ReadNewestVoyagesAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> fcIds)
+        public static async Task<Dictionary<ulong, long>?> ReadNewestVoyagesAsync(DbConnection db, IReadOnlyCollection<ulong> fcIds)
         {
+            if (Db.IsFile(db)) { return await FileReadNewestVoyages(db, fcIds); }
+            var conn = (NpgsqlConnection)db;
             var newest = new Dictionary<ulong, long>();
             var ok = await IfTableExists(async () =>
             {
@@ -227,8 +240,10 @@ namespace XIVFleetCompanion
 
         // Adds voyages; one already stored (same FC, sub, return time and sector) is left as is, except that
         // its sector order is filled in when missing (database version 9; without it, voyages are stored without it).
-        public static async Task<bool> WriteVoyageLootAsync(NpgsqlConnection conn, IReadOnlyList<LootRow> rows)
+        public static async Task<bool> WriteVoyageLootAsync(DbConnection db, IReadOnlyList<LootRow> rows)
         {
+            if (Db.IsFile(db)) { if (rows.Count > 0) await FileWriteVoyageLoot(db, rows); return true; }
+            var conn = (NpgsqlConnection)db;
             if (rows.Count == 0) return true;
             return await IfTableExists(async () =>
             {
@@ -276,8 +291,10 @@ namespace XIVFleetCompanion
         }
 
         // The newest reward already stored per character and retainer name (Unix seconds).
-        public static async Task<Dictionary<(ulong Owner, string Retainer), long>?> ReadNewestVenturesAsync(NpgsqlConnection conn, IReadOnlyCollection<ulong> cids)
+        public static async Task<Dictionary<(ulong Owner, string Retainer), long>?> ReadNewestVenturesAsync(DbConnection db, IReadOnlyCollection<ulong> cids)
         {
+            if (Db.IsFile(db)) { return await FileReadNewestVentures(db, cids); }
+            var conn = (NpgsqlConnection)db;
             var newest = new Dictionary<(ulong, string), long>();
             var ok = await IfTableExists(async () =>
             {
@@ -291,8 +308,10 @@ namespace XIVFleetCompanion
             return ok ? newest : null;
         }
 
-        public static async Task<bool> WriteVenturesAsync(NpgsqlConnection conn, IReadOnlyList<VentureRow> rows)
+        public static async Task<bool> WriteVenturesAsync(DbConnection db, IReadOnlyList<VentureRow> rows)
         {
+            if (Db.IsFile(db)) { if (rows.Count > 0) await FileWriteVentures(db, rows); return true; }
+            var conn = (NpgsqlConnection)db;
             if (rows.Count == 0) return true;
             return await IfTableExists(async () =>
             {
@@ -344,8 +363,10 @@ namespace XIVFleetCompanion
 
         // Replaces the listings of the retainers AllaganTools saw this sync (an unseen retainer keeps its
         // stored listings, as with its items).
-        public static async Task<bool> WriteListingsAsync(NpgsqlConnection conn, ulong ownerCid, IReadOnlyCollection<ulong> seenRetainers, IReadOnlyList<Listing> listings)
+        public static async Task<bool> WriteListingsAsync(DbConnection db, ulong ownerCid, IReadOnlyCollection<ulong> seenRetainers, IReadOnlyList<Listing> listings)
         {
+            if (Db.IsFile(db)) { if (seenRetainers.Count > 0) await FileWriteListings(db, ownerCid, seenRetainers, listings); return true; }
+            var conn = (NpgsqlConnection)db;
             if (seenRetainers.Count == 0) return true;
             return await IfTableExists(async () =>
             {

@@ -32,8 +32,13 @@
     <Compile Include="..\..\XIVFleetCompanion\FightClubImport.cs" Link="FightClubImport.cs" />
     <Compile Include="..\..\XIVFleetCompanion\ThemeLooks.cs" Link="ThemeLooks.cs" />
     <Compile Include="..\..\XIVFleetCompanion\DatabaseUpkeep.cs" Link="DatabaseUpkeep.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Db.cs" Link="Db.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\MetricWriter.cs" Link="MetricWriter.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\FleetWriter.File.cs" Link="FleetWriter.File.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\DetailsWriter.File.cs" Link="DetailsWriter.File.cs" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\*.sql;..\..\XIVFleetCompanion\Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\sqlite\*.sql" LogicalName="Database/sqlite/%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <!-- Made-up fleets and the app's Parts answers (the app's tests/db/parts-fixture.js), for PartsPlanner. -->

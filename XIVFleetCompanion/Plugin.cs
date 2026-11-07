@@ -778,7 +778,7 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
-        var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint
+        var metricPoints = metrics.Select(kv => new MetricWriter.MetricPoint
         {
             SubjectType = kv.Key.Type,
             SubjectId = kv.Key.Id,
@@ -787,7 +787,7 @@ public sealed class Plugin : IDalamudPlugin
             Label = kv.Value.Label
         }).ToList();
 
-        var metricResult = await PostgresWriter.WriteMetricsAsync(conn, metricPoints);
+        var metricResult = await MetricWriter.WriteMetricsAsync(conn, metricPoints);
         if (!metricResult.StartsWith("Success"))
             Log.Warning($"Fleet Companion: failed to write metric history — {metricResult}");
 
