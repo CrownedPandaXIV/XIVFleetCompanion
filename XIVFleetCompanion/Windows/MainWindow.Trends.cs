@@ -27,6 +27,9 @@ public partial class MainWindow
     private static Vector4 Hex(int rgb) => new(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f, 1f);
 
     private string trendScope = "fleet"; // fleet | characters | fcs
+
+    // Values that are gil (gil, salvage value) show in gil's gold, as everywhere else.
+    private Vector4? TrendValueColor(string metricKey) => metricKey is "gil" or "salvage_value" ? Palette.Gil : null;
     private readonly List<(string Id, int Slot)> trendSelection = new();
     private (double From, double To)? trendZoom;
     private bool trendTable;
@@ -422,7 +425,7 @@ public partial class MainWindow
         {
             var s = TrendsMath.Stats(lines[0].Item3, result.Timestamps);
             ImGui.Spacing();
-            ImGui.TextUnformatted($"Now {TrendsMath.Full(s.Current)}");
+            Runs(T("Now "), T(TrendsMath.Full(s.Current), TrendValueColor(metric.Key)));
             ImGui.SameLine(0, 24 * scale);
             ImGui.TextUnformatted($"Change over this span {Signed(s.Change)}");
             ImGui.SameLine();
@@ -539,7 +542,7 @@ public partial class MainWindow
         if (stats?.Current != null)
         {
             ImGui.SameLine(0, 14 * ImGuiHelpers.GlobalScale);
-            ImGui.TextUnformatted(TrendsMath.Full(stats.Current));
+            Tinted(TrendValueColor(metricKey), TrendsMath.Full(stats.Current));
             ImGui.SameLine();
             ChangeText(stats);
         }
@@ -640,7 +643,7 @@ public partial class MainWindow
             var (result, _, _) = request != null ? reader.Trend($"tile:{metric.Key}", request) : (null, null, false);
             var values = result?.Series.FirstOrDefault()?.Values;
             var stats = values != null ? TrendsMath.Stats(values, result!.Timestamps) : null;
-            ImGui.TextUnformatted(TrendsMath.Full(stats?.Current));
+            Tinted(TrendValueColor(metric.Key), TrendsMath.Full(stats?.Current));
             if (stats?.Change != null) ChangeText(stats);
             else Colored(Dim, result == null ? " " : "No history yet");
             Sparkline(values ?? new List<double?>(), ImGui.GetContentRegionAvail().X, 40 * ImGuiHelpers.GlobalScale, TrendColors[0]);

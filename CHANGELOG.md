@@ -196,6 +196,13 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   saved in the background, then everything is read again; "Saved" or why not shows for a few seconds. Checked against
   the app's own edits on the same database (the same rows written, the same refusals). Removing a character stays in
   the app.
+- **A tidier Summary:** Subs, Retainers and Supplies side by side, each with its main figure large; the subs ready for
+  new parts as a table with one part to a line; one "Updated" line at the top (each read on hover).
+- **The class, then the slot, everywhere** ("Shark Hull", "Whale Bridge"), and the Parts tables show Needed before Slot.
+- **Gil in gil's gold everywhere:** headings and notes on Income and Gil & Market, the Summary, and the Gil and Salvage
+  value trends.
+- **New columns show** for someone who chose a table's columns before they were added (Craft? on Subs, Remove on PCs):
+  each table now remembers which columns it had, and one added since shows until it's hidden.
 - Free Companies name each FC with its world after it, softer, instead of a separate World column (its members are
   all on it); a sub's rank sits right after its bar, both on the left, so stretching the column doesn't pull them apart.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"

@@ -56,8 +56,9 @@ public partial class MainWindow
             if (n.Rank > 0) RightNumber(n.Rank);
             else { TableCells.Right("new", Dim); Hover("A sub not built yet: its first build."); }
         }, n => n.Rank),
-        new("slot", "Slot", n => ImGui.TextUnformatted(n.Slot), n => System.Array.IndexOf(PartsPlanner.Slots, n.Slot)),
+        // The class, then the slot ("Shark Hull").
         new("needed", "Needed", n => ImGui.TextUnformatted(n.Needed), n => n.Needed),
+        new("slot", "Slot", n => ImGui.TextUnformatted(n.Slot), n => System.Array.IndexOf(PartsPlanner.Slots, n.Slot)),
         // Look ahead: when a build coming up is due (needed now: blank).
         new("due", "Due", n =>
         {
@@ -80,8 +81,8 @@ public partial class MainWindow
     private FleetTable<(string Slot, string Needed, int Count)> PartsCraftTable => partsCraftTable ??= new FleetTable<(string Slot, string Needed, int Count)>("partsCraft",
         plugin.Configuration, new List<FleetColumn<(string Slot, string Needed, int Count)>>
         {
-            new("slot", "Slot", x => ImGui.TextUnformatted(x.Slot), x => System.Array.IndexOf(PartsPlanner.Slots, x.Slot), Locked: true),
-            new("needed", "Needed", x => ImGui.TextUnformatted(x.Needed), x => x.Needed),
+            new("needed", "Needed", x => ImGui.TextUnformatted(x.Needed), x => x.Needed, Locked: true),
+            new("slot", "Slot", x => ImGui.TextUnformatted(x.Slot), x => System.Array.IndexOf(PartsPlanner.Slots, x.Slot)),
             new("count", "Still to craft", x => RightNumber(x.Count, Amber), x => x.Count),
         });
 

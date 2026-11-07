@@ -315,7 +315,7 @@ public partial class MainWindow
             Colored(Amber, $"{p.Problems.Count} thing{(p.Problems.Count == 1 ? "" : "s")}");
             Hover(string.Join("\n", p.Problems));
         }, p => p.Problems.Count),
-        new("remove", "Remove", RemovePcCell),
+        new("remove", "Remove", RemovePcCell, New: true),
     });
 
     private void DrawPcs()

@@ -92,11 +92,11 @@ public partial class MainWindow
         var retainerGil = m.Accounts.Sum(a => a.RetainerGil);
         ImGui.Spacing();
         GilLine("Fleet gil:", characterGil + retainerGil);
-        Colored(Dim, $"{Gil(characterGil)} on {m.Accounts.Sum(a => a.Characters)} characters · {Gil(retainerGil)} on {m.Accounts.Sum(a => a.Retainers)} retainers");
+        Runs(GilRun(characterGil, ""), T($" on {m.Accounts.Sum(a => a.Characters)} characters · ", Dim), GilRun(retainerGil, ""), T($" on {m.Accounts.Sum(a => a.Retainers)} retainers", Dim));
         var stale = m.Listings.Where(l => l.Stale).ToList();
         GilLine($"Up for sale: {Number(m.Listings.Count)} listing{(m.Listings.Count == 1 ? "" : "s")} ·", m.Listings.Sum(l => l.Value));
-        var staleText = $"{Number(stale.Count)} up for {m.Settings.StaleDays}+ days ({Gil(stale.Sum(l => l.Value))} gil)";
-        if (stale.Count > 0) Colored(Amber, staleText); else ImGui.TextUnformatted(staleText);
+        Vector4? staleTone = stale.Count > 0 ? Amber : null;
+        Runs(T($"{Number(stale.Count)} up for {m.Settings.StaleDays}+ days (", staleTone), GilRun(stale.Sum(l => l.Value)), T(")", staleTone));
         ImGui.Separator();
 
         Heading("Gil per account");

@@ -172,13 +172,14 @@ public partial class MainWindow
     {
         var counted = income.Characters.Where(c => c.Enough).ToList();
         var notEnough = income.Characters.Count - counted.Count;
-        Heading($"Fleet real net per day: {Gil(counted.Sum(c => c.PerDay))} gil");
-        Colored(Dim, $"{Gil(counted.Sum(c => c.SalvagePerDay))} salvage − {Gil(counted.Sum(c => c.KitPerDay))} repairs, over the last {income.WindowDays} days.");
+        HeadingRuns(T("Fleet real net per day: "), GilRun(counted.Sum(c => c.PerDay)));
+        Runs(GilRun(counted.Sum(c => c.SalvagePerDay), ""), T(" salvage − ", Dim), GilRun(counted.Sum(c => c.KitPerDay), ""), T($" repairs, over the last {income.WindowDays} days.", Dim));
         IncomeWindowEditor(income.WindowDays);
-        ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted). " +
-                          (income.KitCost > 0 ? $"Repairs: repair kits used at {Gil(income.KitCost)} gil each." : "Repairs: set the repair kit cost in the app's Settings to count them.") +
-                          (notEnough > 0 ? $" {notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history." : "") +
-                          " Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current Gil/Day).");
+        ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted).");
+        if (income.KitCost > 0) Runs(T("Repairs: repair kits used at "), GilRun(income.KitCost), T(" each."));
+        else ImGui.TextWrapped("Repairs: set the repair kit cost in the app's Settings to count them.");
+        ImGui.TextWrapped((notEnough > 0 ? $"{notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history. " : "") +
+                          "Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current Gil/Day).");
         // As the app's Against expected and Below expected tiles.
         var compared = counted.Where(c => Share(c) != null).ToList();
         if (compared.Count > 0)
@@ -186,9 +187,9 @@ public partial class MainWindow
             var real = compared.Sum(c => c.PerDay);
             var expected = compared.Sum(c => ExpectedOf(c.Cid)!.Value.Expected!.Value);
             var share = real / expected;
-            var line = $"Against expected: {SubRoutes.Round(share * 100):0}% of {Gil(expected)} gil a day ({compared.Count} character{(compared.Count == 1 ? "" : "s")} compared: " +
-                       $"{(real - expected >= 0 ? "+" : "−")}{Gil(Math.Abs(real - expected))} gil a day)";
-            if (share < 0.75) Colored(Red, line); else if (share < 0.9) Colored(Amber, line); else ImGui.TextUnformatted(line);
+            Vector4? tone = share < 0.75 ? Red : share < 0.9 ? Amber : null;
+            Runs(T($"Against expected: {SubRoutes.Round(share * 100):0}% of ", tone), GilRun(expected), T($" a day ({compared.Count} character{(compared.Count == 1 ? "" : "s")} compared: {(real - expected >= 0 ? "+" : "−")}", tone),
+                GilRun(Math.Abs(real - expected)), T(" a day)", tone));
             var below = compared.Count(c => Share(c) < 0.9);
             if (below > 0) Colored(Amber, $"{below} character{(below == 1 ? " is" : "s are")} below expected (amber under 90%, red under 75%).");
         }
@@ -274,10 +275,13 @@ public partial class MainWindow
         if (loot == null) { ImGui.TextUnformatted("Working out..."); return; }
         lootMarket = marketCache.LootMarketFor(reader.Market.Data, loot, lootLetters, id => ListingVendor(id));
         var live = lootMarket != null;
-        Heading($"Loot per Voyage: {Gil(loot.PerDay)} gil a day");
+        HeadingRuns(T("Loot per Voyage: "), GilRun(loot.PerDay), T(" a day"));
         Colored(Dim, $"What each voyage really brought back over the last {loot.WindowDays} days, from Submarine Tracker (items at what a vendor pays; salvage at the " +
-                     $"Salvage page's prices). {Number(loot.VoyageCount)} voyage{(loot.VoyageCount == 1 ? "" : "s")}, {Gil(loot.Gil)} gil, {Number(loot.Salvage)} pieces of salvage.");
-        if (live) Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(sc => $"{Gil(lootMarket![sc].PerDay)} a day ({ScopeLabel(sc)})")) + ", from Universalis.");
+                     "Salvage page's prices).");
+        Runs(T($"{Number(loot.VoyageCount)} voyage{(loot.VoyageCount == 1 ? "" : "s")}, ", Dim), GilRun(loot.Gil), T($", {Number(loot.Salvage)} pieces of salvage.", Dim));
+        if (live)
+            Runs(new[] { T("At market prices: ", Dim) }.Concat(Universalis.Scopes.SelectMany((sc, i) => new[] { T(i > 0 ? ", " : "", Dim), GilRun(lootMarket![sc].PerDay, ""), T($" a day ({ScopeLabel(sc)})", Dim) }))
+                .Append(T(", from Universalis.", Dim)).ToArray());
         else if (reader.Market.Data?.Settings.LivePrices == true && marketCache.Working) Colored(Dim, "Working out market prices...");
         if (loot.Subs.Count == 0)
         {
@@ -301,12 +305,13 @@ public partial class MainWindow
     private void DrawVentureIncome(IncomeRead income)
     {
         var ventures = FleetOrder.Roster(marketCache.VentureSummaries(income.Ventures, income.WindowDays, VendorPrice), v => v.SortIndex, v => v.Character);
-        Heading($"Retainer ventures: {Gil(ventures.Sum(v => v.PerDay))} gil a day");
-        Colored(Dim, $"Venture rewards AutoRetainer recorded over the last {income.WindowDays} days, at what a vendor pays (items are often worth more on the market board). " +
-                     $"{Number(ventures.Sum(v => (long)v.Rewards))} rewards, {Gil(ventures.Sum(v => v.Gil))} gil.");
+        HeadingRuns(T("Retainer ventures: "), GilRun(ventures.Sum(v => v.PerDay)), T(" a day"));
+        Colored(Dim, $"Venture rewards AutoRetainer recorded over the last {income.WindowDays} days, at what a vendor pays (items are often worth more on the market board).");
+        Runs(T($"{Number(ventures.Sum(v => (long)v.Rewards))} rewards, ", Dim), GilRun(ventures.Sum(v => v.Gil)), T(".", Dim));
         ventureMarket = VentureMarketPerDay(income.Ventures, income.WindowDays);
         if (ventureMarket != null)
-            Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(s => $"{Gil(ventureMarket.Values.Sum(v => v[s]))} ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})")) + " a day, from Universalis.");
+            Runs(new[] { T("At market prices: ", Dim) }.Concat(Universalis.Scopes.SelectMany((s, i) => new[] { T(i > 0 ? ", " : "", Dim), GilRun(ventureMarket.Values.Sum(v => v[s]), ""),
+                T($" ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})", Dim) })).Append(T(" a day, from Universalis.", Dim)).ToArray());
         var table = ventureMarket != null ? VenturesLiveTable : VenturesTable;
         table.DrawControls();
         var rows = ventures.Where(v => Matches(incomeFilter, v.Character, v.World, v.Account)).ToList();

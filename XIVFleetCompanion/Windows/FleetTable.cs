@@ -15,8 +15,10 @@ namespace XIVFleetCompanion.Windows;
 /// sort by (none: not sortable). Missing: rows with nothing to sort by, which go last either way. Locked: always shown.
 /// Hidden: not shown until added with the Columns button.
 /// </summary>
+/// <param name="New">Added after tables began remembering which columns they had (2.x tidy-up): shown to someone who
+/// chose their columns before then, as any column added since their choice is.</param>
 public sealed record FleetColumn<T>(string Key, string Label, Action<T> Draw, Func<T, IComparable>? SortKey = null,
-    Func<T, bool>? Missing = null, bool Locked = false, bool Hidden = false);
+    Func<T, bool>? Missing = null, bool Locked = false, bool Hidden = false, bool New = false);
 
 /// <summary>
 /// 2.x's tables, as the app's: click a heading to sort by it (again: the other way; a third time: back to the table's
@@ -77,7 +79,19 @@ public sealed class FleetTable<T>
     {
         var list = new List<FleetColumn<T>>();
         if (config.TableColumns.TryGetValue(id, out var keys))
+        {
             list.AddRange(keys.Select(k => columns.FirstOrDefault(c => c.Key == k)).OfType<FleetColumn<T>>().Distinct());
+            // A column added since the columns were chosen shows (where it sits by default), unless it's one that's
+            // hidden to begin with; one hidden on purpose stays hidden.
+            var known = config.TableColumnsKnown.TryGetValue(id, out var k2) ? new HashSet<string>(k2) : null;
+            for (var i = 0; i < columns.Count; i++)
+            {
+                var c = columns[i];
+                if (c.Hidden || list.Contains(c) || (known != null ? known.Contains(c.Key) : !c.New)) continue;
+                var before = columns.Take(i).LastOrDefault(list.Contains);
+                list.Insert(before == null ? 0 : list.IndexOf(before) + 1, c);
+            }
+        }
         else
             list.AddRange(columns.Where(c => !c.Hidden));
         foreach (var locked in columns.Where(c => c.Locked && !list.Contains(c)).Reverse()) list.Insert(0, locked);
@@ -87,6 +101,7 @@ public sealed class FleetTable<T>
     private void Save(List<FleetColumn<T>> shown)
     {
         config.TableColumns[id] = shown.Select(c => c.Key).ToList();
+        config.TableColumnsKnown[id] = columns.Select(c => c.Key).ToList();
         config.Save();
     }
 

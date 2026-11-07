@@ -457,6 +457,26 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    // A line made of pieces, each in its own colour (null: plain): gil amounts in gil's gold among other text.
+    private static void Runs(params (string Text, Vector4? Color)[] runs)
+    {
+        for (var i = 0; i < runs.Length; i++)
+        {
+            if (i > 0) ImGui.SameLine(0, 0);
+            Tinted(runs[i].Color, runs[i].Text);
+        }
+    }
+    private static (string, Vector4?) T(string text, Vector4? color = null) => (text, color);
+    // "1,234 gil" (or with another ending) in gil's gold.
+    private (string, Vector4?) GilRun(double gil, string ending = " gil") => ($"{Number((long)Math.Round(gil))}{ending}", Palette.Gil);
+    // A heading made of pieces (a gil amount in gold).
+    private static void HeadingRuns(params (string Text, Vector4? Color)[] runs)
+    {
+        ImGui.Spacing();
+        Runs(runs);
+        ImGui.Separator();
+    }
+
     // When it was read, and why the last read failed (the last good numbers stay shown).
     private void ReadLine<T>(FleetRead<T> read, TimeSpan every) where T : class
     {
@@ -489,14 +509,17 @@ public partial class MainWindow : Window, IDisposable
         reader.ReadIfDue();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         RefreshButton();
+        // When each part was read, on one line (each on hover), and anything that couldn't be read.
+        ImGui.SameLine();
+        SummaryReadLine();
 
         // What needs you, worst first: subs back and waiting (counted live), then the database's alerts.
         Heading("Needs attention");
         var back = FleetReader.SubsBack(reader.Subs.Data, now);
         var alerts = reader.Alerts.Data;
-        if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs tab)");
+        if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs page)");
         var ready = reader.Parts.Data is { } partsNow ? PartsPlanner.SubsReady(partsNow.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
-        if (ready.Count > 0) Colored(Green, $"{PartsPlanner.ReadyText(ready)} (Parts tab)");
+        if (ready.Count > 0) Colored(Green, $"{PartsPlanner.ReadyText(ready)} (Parts page)");
         if (alerts != null)
         {
             foreach (var alert in alerts)
@@ -504,118 +527,159 @@ public partial class MainWindow : Window, IDisposable
                 using (ImRaii.PushColor(ImGuiCol.Text, alert.Level == "danger" ? Red : Amber))
                     ImGui.TextWrapped($"{alert.Subject}: {alert.Detail}");
             }
-            if (back == 0 && ready.Count == 0 && alerts.Count == 0) ImGui.TextUnformatted("Nothing needs you right now.");
+            if (back == 0 && ready.Count == 0 && alerts.Count == 0) Colored(Green, "Nothing needs you right now.");
         }
-        else if (reader.Alerts.Error == null) ImGui.TextUnformatted("Reading...");
-        if (reader.Alerts.Error != null)
+        else if (reader.Alerts.Error == null) Colored(Dim, "Reading...");
+
+        // Subs, Retainers and Supplies side by side: the main number large, the rest beneath it.
+        ImGui.Spacing();
+        using (var boxes = ImRaii.Table("##summaryBoxes", 3, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.PadOuterX))
         {
-            using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped(reader.Alerts.Error);
+            if (boxes)
+            {
+                ImGui.TableNextColumn();
+                SummarySubsBox(back, now);
+                ImGui.TableNextColumn();
+                SummaryRetainersBox();
+                ImGui.TableNextColumn();
+                SummarySuppliesBox();
+            }
         }
 
-        Heading("Subs");
-        var subs = reader.Subs.Data;
-        if (subs == null && reader.Subs.Error == null) ImGui.TextUnformatted("Reading...");
-        if (subs != null)
+        // As the app's Summary: the subs ready for new parts, one part to a line.
+        var partsData = reader.Parts.Data;
+        var craft = partsData?.Needs.Count(n => n.ToCraft) ?? 0;
+        HeadingRuns(T("Subs ready for new parts"), T(craft > 0 ? $"  ·  {craft} part{(craft == 1 ? "" : "s")} to craft" : "", Amber));
+        if (partsData == null) Colored(Dim, reader.Parts.Error == null ? "Reading..." : "");
+        else if (ready.Count == 0) ImGui.TextUnformatted("No sub has reached the rank of its next build, and no new sub to build.");
+        else
         {
-            var outNow = subs.Where(x => x.ReturnTime > now).ToList();
-            var inPort = subs.Count(x => x.ReturnTime <= 0);
-            if (back > 0) Colored(Green, $"{back} back and waiting to be collected");
-            else ImGui.TextUnformatted("None back and waiting");
-            ImGui.TextUnformatted(outNow.Count == 0 ? "None out" :
-                $"{outNow.Count} out; the next is back in {FleetReader.Countdown(outNow.Min(x => x.ReturnTime) - now)}");
-            if (inPort > 0) ImGui.TextUnformatted($"{inPort} in port (not sent out)");
+            using var table = ImRaii.Table("##summaryParts", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
+            if (table)
+            {
+                foreach (var h in new[] { "Character", "Sub", "Rank", "New parts" }) ImGui.TableSetupColumn(h);
+                ImGui.TableHeadersRow();
+                foreach (var (sub, subParts) in ready)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    CharacterCell(sub.Character, sub.World);
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted(sub.SubName);
+                    ImGui.TableNextColumn();
+                    if (sub.IsNew) Colored(Dim, "new"); else RightNumber(sub.Rank);
+                    ImGui.TableNextColumn();
+                    // The class, then the slot ("Shark Hull"), and where it comes from, softer.
+                    foreach (var x in subParts)
+                    {
+                        ImGui.TextUnformatted($"{x.Needed} {x.Slot}");
+                        ImGui.SameLine();
+                        var from = x.ToCraft ? "to craft" : $"spare in {x.SpareLocation}";
+                        Colored(x.ToCraft ? Amber : Dim, $"({from})");
+                    }
+                }
+            }
         }
-        ReadLine(reader.Subs, FleetReader.SubsEvery);
+
+        // As the app's Summary: a small trend line for each fleet-wide value (Trends page).
+        DrawTrendTiles();
+    }
+
+    // A box's title (softer), then its main figure large.
+    private static void BoxTitle(string title, string figure, Vector4? color)
+    {
+        Colored(new Vector4(0.62f, 0.64f, 0.68f, 1f), title);
+        ImGui.SetWindowFontScale(1.35f);
+        Tinted(color, figure);
+        ImGui.SetWindowFontScale(1f);
+    }
+
+    private void SummarySubsBox(int back, long now)
+    {
+        var subs = reader.Subs.Data;
+        if (subs == null) { BoxTitle("Subs", "—", null); if (reader.Subs.Error != null) Colored(Amber, "Couldn't read the subs."); return; }
+        BoxTitle("Subs", back > 0 ? $"{back} back" : "None back", back > 0 ? Green : null);
+        var outNow = subs.Where(x => x.ReturnTime > now).ToList();
+        var inPort = subs.Count(x => x.ReturnTime <= 0);
+        ImGui.TextUnformatted(outNow.Count == 0 ? "None out" : $"{outNow.Count} out, the next back in {FleetReader.Countdown(outNow.Min(x => x.ReturnTime) - now)}");
+        if (inPort > 0) Colored(Amber, $"{inPort} in port (not sent out)");
         // As the app's Route Optimizations Possible tile.
         if (reader.Routes.Data != null)
         {
             var switchable = Suboptimal();
-            if (switchable.Count > 0)
-                Colored(Amber, $"{switchable.Count} route optimization{(switchable.Count == 1 ? "" : "s")} possible" +
-                               (switchable.Sum(x => x.Gain > 0 ? x.Gain!.Value : 0) is var more && more > 0 ? $", about {Gil(more)} more gil a day" : "") + " (Route Optimization page)");
-            else ImGui.TextUnformatted("Every sub from rank 85 is on its Target Route");
+            if (switchable.Count == 0) Colored(Dim, "Every sub from rank 85 is on its Target Route");
+            else
+            {
+                var more = switchable.Sum(x => x.Gain > 0 ? x.Gain!.Value : 0);
+                Runs(T($"{switchable.Count} route{(switchable.Count == 1 ? "" : "s")} to switch", Amber), T(more > 0 ? ", about " : ""), more > 0 ? GilRun(more) : T(""), T(more > 0 ? " more a day" : ""));
+            }
         }
-        else if (reader.Routes.Error is { } routesError) Colored(Amber, $"Routes: {routesError}");
+        // As the app's Summary: the fleet-wide salvage total (the Salvage page has each character's).
+        if (reader.Salvage.Data is { } salvage) Runs(T("Salvage held: "), GilRun(salvage.Sum(x => x.Gil)));
+    }
 
-        Heading("Retainers");
+    private void SummaryRetainersBox()
+    {
         var counts = reader.RetainerCounts.Data;
-        if (counts == null && reader.RetainerCounts.Error == null) ImGui.TextUnformatted("Reading...");
-        if (counts != null)
-        {
-            if (counts.VenturesDone > 0) Colored(Green, $"{counts.VenturesDone} venture{(counts.VenturesDone == 1 ? "" : "s")} done");
-            else ImGui.TextUnformatted("No ventures done yet");
-            if (counts.Idle > 0) Colored(Amber, $"{counts.Idle} retainer{(counts.Idle == 1 ? "" : "s")} without a venture");
-            ImGui.TextUnformatted($"{counts.Retainers} retainer{(counts.Retainers == 1 ? "" : "s")} with a class");
-        }
-        ReadLine(reader.RetainerCounts, FleetReader.SubsEvery);
+        if (counts == null) { BoxTitle("Retainers", "—", null); return; }
+        BoxTitle("Retainers", counts.VenturesDone > 0 ? $"{counts.VenturesDone} venture{(counts.VenturesDone == 1 ? "" : "s")} done" : "No ventures done",
+            counts.VenturesDone > 0 ? Green : null);
+        ImGui.TextUnformatted($"{counts.Retainers} retainer{(counts.Retainers == 1 ? "" : "s")} with a class");
+        if (counts.Idle > 0) Colored(Amber, $"{counts.Idle} without a venture");
         // As the app's Venture Income tile: the rewards over the Income window, at what a vendor pays.
         var ventures = reader.Ventures.Data;
-        if (ventures != null && ventures.Rows.Count == 0) ImGui.TextUnformatted("Venture income: no rewards recorded in the Income window (AutoRetainer: \"Record statistics\")");
+        if (ventures != null && ventures.Rows.Count == 0) Colored(Dim, "No venture rewards recorded yet (AutoRetainer: \"Record statistics\")");
         else if (ventures != null)
         {
             var perDay = marketCache.VentureSummaries(ventures.Rows, ventures.WindowDays, VendorPrice).Sum(v => v.PerDay);
-            ImGui.TextUnformatted($"Venture income: {Gil(perDay)} gil a day");
-            Colored(Dim, $"Last {ventures.WindowDays} days, at what a vendor pays (Income page)");
+            Runs(T("Ventures: "), GilRun(perDay), T(" a day"));
+            Hover($"The last {ventures.WindowDays} days of venture rewards, at what a vendor pays (Income page).");
             // With live prices, the same rewards at the cheapest listing on each character's world, data center and region.
             if (VentureMarketPerDay(ventures.Rows, ventures.WindowDays) is { } market)
-                Colored(Dim, "At market prices: " + string.Join(", ", Universalis.Scopes.Select(s => $"{Gil(market.Values.Sum(v => v[s]))} ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})")) + " a day");
+                Runs(new[] { T("Market: ", Dim) }.Concat(Universalis.Scopes.SelectMany((sc, i) => new[] { T(i > 0 ? ", " : "", Dim), GilRun(market.Values.Sum(v => v[sc]), ""),
+                    T($" ({(sc == "world" ? "World" : sc == "dc" ? "DC" : "Region")})", Dim) })).ToArray());
         }
-        if (reader.Ventures.Error != null) Colored(Amber, reader.Ventures.Error);
         // As the app's Listings Unsold for a While tile.
         if (reader.Market.Data is { } marketRead)
         {
             var unsold = marketRead.Listings.Where(l => l.Stale).ToList();
             var undercut = marketCache.Undercut(marketRead);
-            var text = $"Listings unsold for a while: {Number(unsold.Count)} (up for {marketRead.Settings.StaleDays}+ days, {Gil(unsold.Sum(l => l.Value))} gil{(undercut > 0 ? $" · {undercut} undercut" : "")}) (Gil & Market page)";
-            if (unsold.Count > 0 || undercut > 0) Colored(Amber, text); else ImGui.TextUnformatted(text);
+            Vector4? tone = unsold.Count > 0 || undercut > 0 ? Amber : null;
+            Runs(T($"{Number(unsold.Count)} unsold for {marketRead.Settings.StaleDays}+ days (", tone), GilRun(unsold.Sum(l => l.Value)), T(")", tone),
+                T(undercut > 0 ? $" · {undercut} undercut" : "", Amber));
         }
-        else if (reader.Market.Error != null) Colored(Amber, reader.Market.Error);
+    }
 
+    private void SummarySuppliesBox()
+    {
         var summary = reader.Summary.Data;
-        Heading("Supplies");
-        if (summary != null)
+        if (summary == null) { BoxTitle("Supplies", "—", null); return; }
+        var low = summary.LowCeruleum + summary.LowRepairKits;
+        BoxTitle("Supplies", low == 0 ? "Nobody low" : $"{low} low", low == 0 ? Green : Amber);
+        if (summary.LowCeruleum > 0) Colored(Amber, $"{summary.LowCeruleum} character{(summary.LowCeruleum == 1 ? "" : "s")} low on ceruleum");
+        if (summary.LowRepairKits > 0) Colored(Amber, $"{summary.LowRepairKits} character{(summary.LowRepairKits == 1 ? "" : "s")} low on repair kits");
+        if (summary.SoonestRunsOutDays is double soonest)
+            Tinted(DaysColor(soonest), $"The first runs out in {Days(soonest, 1)} days");
+        Colored(Dim, "Warnings are set in the app (Settings → General → Warnings).");
+    }
+
+    // "Updated 19s ago" for the Summary's reads together (the oldest), each on hover; anything that couldn't be read, in amber.
+    private void SummaryReadLine()
+    {
+        var reads = new (string Name, DateTime? At, string? Error)[]
         {
-            if (summary.LowCeruleum > 0) Colored(Amber, $"{summary.LowCeruleum} character{(summary.LowCeruleum == 1 ? "" : "s")} low on ceruleum");
-            if (summary.LowRepairKits > 0) Colored(Amber, $"{summary.LowRepairKits} character{(summary.LowRepairKits == 1 ? "" : "s")} low on repair kits");
-            if (summary.LowCeruleum == 0 && summary.LowRepairKits == 0) ImGui.TextUnformatted("Nobody is below the low-supply warnings (set in the app: Settings → General → Warnings)");
-            if (summary.SoonestRunsOutDays is double soonest)
-            {
-                var text = $"The first to run out does in {Days(soonest, 1)} days (Supplies tab)";
-                if (DaysColor(soonest) is Vector4 color) Colored(color, text); else ImGui.TextUnformatted(text);
-            }
-        }
-        ReadLine(reader.Summary, FleetReader.SuppliesEvery);
-
-        // As the app's Summary: Parts That Need Crafting, and Subs Ready for New Parts with what each needs.
-        Heading("Parts");
-        var partsData = reader.Parts.Data;
-        if (partsData != null)
-        {
-            var craft = partsData.Needs.Count(n => n.ToCraft);
-            if (craft > 0) Colored(Amber, $"{craft} part{(craft == 1 ? "" : "s")} need crafting (Parts tab)");
-            else ImGui.TextUnformatted("No parts need crafting");
-            if (ready.Count == 0) ImGui.TextUnformatted("No sub has reached the rank of its next build, and no new sub to build");
-            foreach (var (sub, subParts) in ready.Take(10))
-            {
-                ImGui.TextUnformatted($"{sub.Character} · {sub.SubName} ({(sub.IsNew ? "new" : $"rank {sub.Rank}")}):");
-                ImGui.SameLine();
-                Colored(Dim, string.Join(", ", subParts.Select(x => $"{x.Slot} {x.Needed} ({(x.ToCraft ? "to craft" : x.RecycledFrom != null ? "reuse" : "spare")})")));
-            }
-            if (ready.Count > 10) Colored(Dim, $"...and {ready.Count - 10} more (Parts tab)");
-        }
-        else if (reader.Parts.Error == null) ImGui.TextUnformatted("Reading...");
-        ReadLine(reader.Parts, FleetReader.PartsEvery);
-
-        // As the app's Summary: the fleet-wide salvage total (the Salvage page has each character's).
-        Heading("Salvage");
-        var salvage = reader.Salvage.Data;
-        if (salvage != null) GilLine("Fleet-Wide Salvage Total:", salvage.Sum(x => x.Gil));
-        else if (reader.Salvage.Error == null) ImGui.TextUnformatted("Reading...");
-        ReadLine(reader.Salvage, FleetReader.SuppliesEvery);
-
-        // As the app's Summary: a small trend line for each fleet-wide value (Trends page).
-        DrawTrendTiles();
+            ("Subs", reader.Subs.At, reader.Subs.Error), ("Needs attention", reader.Alerts.At, reader.Alerts.Error),
+            ("Retainers", reader.RetainerCounts.At, reader.RetainerCounts.Error), ("Venture income", reader.Ventures.At, reader.Ventures.Error),
+            ("Supplies", reader.Summary.At, reader.Summary.Error), ("Parts", reader.Parts.At, reader.Parts.Error),
+            ("Salvage", reader.Salvage.At, reader.Salvage.Error), ("Market", reader.Market.At, reader.Market.Error),
+        };
+        var at = reads.Where(r => r.At.HasValue).Select(r => r.At!.Value).DefaultIfEmpty(DateTime.Now).Min();
+        Colored(Dim, reads.Any(r => r.At.HasValue) ? $"Updated {FleetReader.Ago(at, DateTime.Now)}" : "Reading...");
+        Hover(string.Join("\n", reads.Select(r => $"{r.Name}: {(r.At.HasValue ? FleetReader.Ago(r.At.Value, DateTime.Now) : "not read yet")}")) +
+              "\n\nSubs and what needs attention every 30 seconds; the rest every 5 minutes.");
+        foreach (var (name, _, error) in reads.Where(r => r.Error != null))
+            using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                ImGui.TextWrapped($"{name}: {error}");
     }
 
     private FleetTable<SubRow>? subsTable;
@@ -648,7 +712,7 @@ public partial class MainWindow : Window, IDisposable
         }, sub => sub.Rank),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
         // Craft?: follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
-        new("craft", "Craft?", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0),
+        new("craft", "Craft?", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
         // Status: back and waiting first, then the soonest back; in port last either way.
         new("status", "Status", sub =>
         {
