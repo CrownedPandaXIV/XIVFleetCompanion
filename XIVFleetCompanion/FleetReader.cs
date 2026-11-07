@@ -186,15 +186,18 @@ namespace XIVFleetCompanion
         /// another PC (DatabaseMove), as a sync does, so a PC that only reads switches too; none: the connection string as it is.</param>
         /// <param name="checkIn">This PC, its account label and plugin version, recorded as it reads (every few minutes),
         /// so a PC that syncs no characters is still on the app's PCs tab and in a move's checks; null: not recorded.</param>
+        /// <param name="keeper">Brings the database up to date before reading, when it's due (DatabaseUpkeep); null: never.</param>
         public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null, Func<Task<NpgsqlConnection?>>? open = null,
-            Func<(string Pc, string Account, string Version)>? checkIn = null)
+            Func<(string Pc, string Account, string Version)>? checkIn = null, DatabaseKeeper? keeper = null)
         {
+            this.keeper = keeper;
             this.connectionString = connectionString;
             this.subGame = subGame;
             this.open = open;
             this.checkIn = checkIn;
         }
         private readonly Func<(string Pc, string Account, string Version)>? checkIn;
+        private readonly DatabaseKeeper? keeper;
         public static readonly TimeSpan CheckInEvery = TimeSpan.FromMinutes(5);
         private DateTime checkedIn = DateTime.MinValue;
         private bool checkInRefused;
@@ -297,6 +300,7 @@ namespace XIVFleetCompanion
                 try
                 {
                     await using var conn = await OpenAsync(cs);
+                    if (keeper != null) await keeper.RunIfDueAsync(conn);
                     await CheckInIfDue(conn);
                     if (subs)
                     {

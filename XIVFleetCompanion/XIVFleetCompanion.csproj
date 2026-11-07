@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
       <NoWarn>$(NoWarn);CS0618</NoWarn>
     <!-- Manifest fields (see https://github.com/goatcorp/DalamudPackager/blob/827d88dc/DalamudPackager/DalamudPackager.cs#L420) -->
     <Author>CrownedPandaXIV</Author>
@@ -61,6 +61,12 @@
     <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\VesselTaskType.cs" Link="Configuration\VesselTaskType.cs" />
     <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Configuration\WorkshopFailAction.cs" Link="Configuration\WorkshopFailAction.cs" />
       <Compile Include="..\AutoRetainerAPI\AutoRetainerAPI\Delegates.cs" Link="Delegates.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The app's own database files (copied by its tests/db/plugin-database-fixture.js), for DatabaseUpkeep. -->
+    <EmbeddedResource Include="Database\*.sql;Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

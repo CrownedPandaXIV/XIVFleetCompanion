@@ -31,6 +31,8 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>2.0: the fleet from the database's views, shared by the main window and the info bar line.</summary>
     public FleetReader Fleet { get; }
+    // Keeps the database's tables and views up to date (DatabaseUpkeep).
+    public DatabaseKeeper Keeper { get; }
     // "Fleet" in the game's info bar (top right): what needs attention; click opens the Summary.
     private IDtrBarEntry? infoBar;
     private DateTime infoBarCheckedAt = DateTime.MinValue;
@@ -97,10 +99,12 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
+        // Brings the database up to date with the app's own update files (DatabaseUpkeep), before reads and syncs.
+        Keeper = new DatabaseKeeper(DatabaseUpkeep.Files.Embedded, $"plugin {VersionText}", text => Log.Information($"Fleet Companion: {text}"));
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
         Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame,
             () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection),
-            () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText));
+            () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText), Keeper);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckPage = new CheckWindow(this);
         SpeedTestPage = new SpeedTestWindow(this);
@@ -519,6 +523,7 @@ public sealed class Plugin : IDalamudPlugin
         if (openConnection == null) return;
         NpgsqlConnection conn = openConnection;
         SyncingAgain();
+        await Keeper.RunIfDueAsync(conn);
 
         // Characters that last logged in on another setup are that setup's to sync.
         characters = await KeepOwnCharactersAsync(conn, characters, leftOutCids);

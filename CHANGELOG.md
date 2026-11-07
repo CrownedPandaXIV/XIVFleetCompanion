@@ -3,6 +3,19 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.1.0 - 2026-11-07
+
+- **The plugin keeps the database up to date itself**, as the app does, so after an update nobody needs to open the
+  app first. It carries the app's own update files (from app 1.9.0) and does exactly what the app does with them:
+  - an empty database gets every table;
+  - an older one gets each update it's missing, in order, each all or nothing;
+  - the fleet's views are replaced when they changed, never with an older copy's.
+- **The app and the plugin take turns.** Only one of them updates at a time; a game that finds another copy updating
+  leaves it to that one and looks again a minute later. A database a newer app or plugin already updated is left alone,
+  and the Status page says to update this plugin.
+- It looks the first time the plugin reads or syncs, then every 10 minutes. The Status page shows the database's version
+  and anything that stopped an update (such as a login that may only read), and the plugin's log says what changed.
+
 ## 2.0.0 - 2026-11-07
 
 The fleet inside the game: every page of the app in the plugin's own window (Summary, Subs, Route Optimization, Parts,

@@ -1179,6 +1179,180 @@ internal static class Program
         }
     }
 
+    // 2.1: the plugin updates the database itself (DatabaseUpkeep), with the app's own files. Each way the app updated a
+    // made-up database (the app's tests/db/plugin-database-fixture.js), done again here with the plugin's own code, must
+    // leave exactly the same tables, columns, indexes, views and version records.
+    private static async Task DatabaseAgainstTheApp(NpgsqlConnection conn)
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "database-fixture.json");
+        using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var root = doc.RootElement;
+        var files = DatabaseUpkeep.Files.Embedded();
+        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 16 && files.Updates.Count == 7 && files.Views != null,
+            $"database: the plugin carries the app's files (app {files.AppVersion}, updates to {files.Latest})");
+        var signature = root.GetProperty("signature").EnumerateObject().Select(p => (p.Name, Sql: p.Value.GetString()!)).ToList();
+        var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
+        string Cs(string db) => new NpgsqlConnectionStringBuilder(given) { Database = db, Pooling = false }.ConnectionString;
+        async Task<NpgsqlConnection> Fresh(string db)
+        {
+            await Exec(conn, $"DROP DATABASE IF EXISTS {db} WITH (FORCE)");
+            await Exec(conn, $"CREATE DATABASE {db}");
+            var c = new NpgsqlConnection(Cs(db));
+            await c.OpenAsync();
+            return c;
+        }
+        async Task<string> Signature(NpgsqlConnection c)
+        {
+            var all = new JsonObject();
+            foreach (var (name, sql) in signature)
+            {
+                try
+                {
+                    all[name] = new JsonArray((await Rows(c, sql)).Select(r => (JsonNode?)JsonValue.Create(Convert.ToString(r[0], System.Globalization.CultureInfo.InvariantCulture))).ToArray());
+                }
+                catch (PostgresException)
+                {
+                    all[name] = null;
+                }
+            }
+            return all.ToJsonString();
+        }
+        static string Differs(string mine, JsonElement app)
+        {
+            var a = JsonNode.Parse(mine)!.AsObject();
+            foreach (var p in app.EnumerateObject())
+            {
+                var m = a[p.Name]?.ToJsonString() ?? "null";
+                var x = p.Value.ValueKind == JsonValueKind.Null ? "null" : JsonNode.Parse(p.Value.GetRawText())!.ToJsonString();
+                if (m == x) continue;
+                var mineList = a[p.Name]?.AsArray().Select(v => v!.ToString()).ToHashSet() ?? new HashSet<string>();
+                var appList = p.Value.ValueKind == JsonValueKind.Array ? p.Value.EnumerateArray().Select(v => v.GetString()!).ToHashSet() : new HashSet<string>();
+                return $"{p.Name}: only the plugin's: [{string.Join("; ", mineList.Except(appList).Take(3))}], only the app's: [{string.Join("; ", appList.Except(mineList).Take(3))}]";
+            }
+            return "";
+        }
+
+        foreach (var sc in root.GetProperty("scenarios").EnumerateObject())
+        {
+            var db = $"pdb_plugin_{sc.Name}";
+            await using (var c = await Fresh(db))
+            {
+                var setup = sc.Value.GetProperty("setup").GetString()!;
+                if (setup.Length > 0) await Exec(c, setup);
+                var n = 0;
+                foreach (var step in sc.Value.GetProperty("steps").EnumerateArray())
+                {
+                    n++;
+                    var upTo = step.TryGetProperty("upTo", out var u) ? u.GetInt32() : 0;
+                    var result = await DatabaseUpkeep.EnsureAsync(c, upTo > 0 ? files.UpTo(upTo) : files, "plugin test", wait: true);
+                    var again = step.TryGetProperty("again", out _);
+                    var diff = Differs(await Signature(c), step.GetProperty("expect"));
+                    Check(diff == "" && (!again || result.Applied.Count == 0),
+                        $"database: {sc.Name}, step {n}{(upTo > 0 ? $" (updates to {upTo}, no views)" : again ? " (again: nothing to do)" : "")}: the same as the app's"
+                        + (diff == "" ? $" ({string.Join(", ", result.Applied.Take(4))}{(result.Applied.Count > 4 ? "..." : "")})" : $": {diff}"));
+                }
+            }
+            await Exec(conn, $"DROP DATABASE IF EXISTS {db} WITH (FORCE)");
+        }
+
+        // The views' checksum is worked out as the app does, so the app and the plugin agree a database is up to date.
+        var appChecksum = root.GetProperty("scenarios").GetProperty("empty").GetProperty("steps")[0].GetProperty("expect").GetProperty("viewsChecksum")[0].GetString();
+        Check(DatabaseUpkeep.Checksum(files.Views!) == appChecksum && DatabaseUpkeep.Checksum("a\r\nb") == DatabaseUpkeep.Checksum("a\nb"),
+            "database: the views' checksum is the app's (Windows line endings or not)");
+        Check(DatabaseUpkeep.CompareVersions("1.9.0", "1.8.1") == 1 && DatabaseUpkeep.CompareVersions("1.9.0-test.31", "1.9.0") == 0
+              && DatabaseUpkeep.CompareVersions("1.10.0", "1.9.9") == 1 && DatabaseUpkeep.CompareVersions("2", "2.0.0") == 0 && DatabaseUpkeep.CompareVersions("1.0.0", "1.0.1") == -1,
+            "database: versions compared as the app does");
+
+        await using (var c = await Fresh("pdb_plugin_rules"))
+        {
+            // Another copy (the app, or another game) is updating: this one leaves it to that one, without waiting.
+            await using (var other = new NpgsqlConnection(Cs("pdb_plugin_rules")))
+            {
+                await other.OpenAsync();
+                await Exec(other, $"SELECT pg_advisory_lock({DatabaseUpkeep.LockKey})");
+                var busy = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+                Check(busy.Busy && busy.Applied.Count == 0 && (await Rows(c, "SELECT to_regclass('companion_schema_version')"))[0][0] is null or DBNull,
+                    "database: while another copy updates, the plugin leaves it alone and doesn't wait");
+            }
+            var made = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(made.Created && made.Version == 16 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
+            var recorded = await Rows(c, "SELECT app_version FROM companion_views");
+            Check((string)recorded[0][0]! == files.AppVersion, "database: the views are recorded with the app version the plugin's files came from");
+
+            // Newer views (a newer app) are never replaced with the plugin's; older ones are.
+            await Exec(c, "UPDATE companion_views SET checksum = 'other', app_version = '99.0.0'");
+            var kept = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(kept.Applied.Count == 0 && (string)(await Rows(c, "SELECT checksum FROM companion_views"))[0][0]! == "other", "database: a newer app's views are left alone");
+            await Exec(c, "UPDATE companion_views SET checksum = 'other', app_version = '1.0.0'");
+            var replaced = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(replaced.Applied.SequenceEqual(new[] { "views updated" }), "database: an older app's views are replaced");
+
+            // A login that may only read: fine while nothing needs changing, a plain message when something does.
+            await Exec(conn, "DROP ROLE IF EXISTS pdb_reader");
+            await Exec(conn, "CREATE ROLE pdb_reader LOGIN PASSWORD 'reader'");
+            await Exec(c, "GRANT SELECT ON ALL TABLES IN SCHEMA public TO pdb_reader");
+            var readerCs = new NpgsqlConnectionStringBuilder(Cs("pdb_plugin_rules")) { Username = "pdb_reader", Password = "reader" }.ConnectionString;
+            await using (var reader = new NpgsqlConnection(readerCs))
+            {
+                await reader.OpenAsync();
+                var fine = await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
+                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 16, "database: a login that may only read is fine while nothing needs changing");
+                // As if made by a copy that had only up to update 15: update 16 is still to do.
+                await Exec(c, "UPDATE companion_schema_version SET version = 15");
+                string? message = null;
+                try
+                {
+                    await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
+                }
+                catch (InvalidOperationException e)
+                {
+                    message = e.Message;
+                }
+                Check(message != null && message.Contains("\"pdb_reader\" is not allowed to change the tables"), "database: and says plainly when it can't apply an update: " + message);
+            }
+            var back = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(back.Applied.SequenceEqual(new[] { "update 16: pc_last_read" }) && back.Version == 16, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
+            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 16");
+            Check((string)by[0][0]! == "plugin test", "database: each version records who applied it");
+
+            // A newer app or plugin updated it further: left alone, and said.
+            await Exec(c, "INSERT INTO companion_schema_version (version, name) VALUES (99, 'from the future'); UPDATE companion_views SET checksum = 'future', app_version = '1.0.0'");
+            var newer = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(newer.Newer && newer.Applied.Count == 0 && (string)(await Rows(c, "SELECT checksum FROM companion_views"))[0][0]! == "future" && newer.Text.Contains("newer"),
+                "database: one a newer copy updated further is left alone, views and all: " + newer.Text);
+        }
+        await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_rules WITH (FORCE)");
+        await Exec(conn, "DROP ROLE IF EXISTS pdb_reader");
+
+        // When the plugin looks: first time, then not again for 10 minutes; a problem is kept and said once.
+        await using (var c = await Fresh("pdb_plugin_keeper"))
+        {
+            var said = new List<string>();
+            var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
+            Check(keeper.StatusText == "Not looked at yet.", "database: nothing said before the first look");
+            await keeper.RunIfDueAsync(c);
+            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 16)"),
+                "database: the first read or sync brings it up to date and says so: " + keeper.StatusText);
+            var recordedBy = await Rows(c, "SELECT app_version FROM companion_schema_version");
+            Check((string)recordedBy[0][0]! == $"{files.AppVersion} (plugin 2.1.0)", "database: recorded as the plugin, with the app version of its files");
+            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 16");
+            await keeper.RunIfDueAsync(c);
+            Check(said.Count == 1 && (await Rows(c, "SELECT count(*) FROM companion_schema_version"))[0][0] is 0L, "database: not looked at again until it's due");
+        }
+        await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_keeper WITH (FORCE)");
+        await using (var c = await Fresh("pdb_plugin_partial"))
+        {
+            await Exec(c, "CREATE TABLE companion_pc_status (pc_name text)");
+            var said = new List<string>();
+            var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
+            await keeper.RunIfDueAsync(c);
+            await keeper.RunIfDueAsync(c);
+            Check(keeper.Problem != null && keeper.Problem.Contains("will not change it") && said.Count == 1 && keeper.StatusText.StartsWith("Couldn't update the database"),
+                "database: one with someone else's tables is left alone; the problem is kept for the Status page and said once: " + keeper.StatusText);
+        }
+        await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_partial WITH (FORCE)");
+    }
+
     private static void Check(bool ok, string what)
     {
         if (ok) passes++; else failures++;
@@ -1560,6 +1734,7 @@ internal static class Program
         await EditsAgainstTheApp(conn);
         await FightClubAgainstTheApp(conn);
         LooksAgainstTheApp();
+        await DatabaseAgainstTheApp(conn);
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

@@ -192,7 +192,7 @@ public partial class MainWindow : Window, IDisposable
         var alerts = reader.Alerts.Data;
         var low = alerts?.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count() ?? 0;
         var attention = back + (alerts?.Count ?? 0);
-        var statusProblem = plugin.SyncProblem != null || (plugin.AutoRetainer != null && !SafeReady());
+        var statusProblem = plugin.SyncProblem != null || plugin.Keeper.Problem != null || plugin.Keeper.LastResult is { Newer: true } || (plugin.AutoRetainer != null && !SafeReady());
         var notSynced = alerts?.Count(a => a.Kind == "not_synced") ?? 0;
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
@@ -416,6 +416,16 @@ public partial class MainWindow : Window, IDisposable
             var elsewhere = plugin.SyncedElsewhere;
             if (elsewhere > 0)
                 ImGui.TextWrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last logged in on another setup, so that setup syncs {(elsewhere == 1 ? "it" : "them")} instead.");
+
+            // The database's version: this plugin brings it up to date itself (DatabaseUpkeep), as the app does.
+            var keeper = plugin.Keeper;
+            if (keeper.Problem != null || keeper.LastResult is { Newer: true })
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                    ImGui.TextWrapped(keeper.StatusText);
+            }
+            else
+                ImGui.TextWrapped(keeper.StatusText);
 
             // Why syncing isn't getting through right now (the database PC is off, a wrong password...).
             var problem = plugin.SyncProblem;
