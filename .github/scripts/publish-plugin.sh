@@ -30,8 +30,9 @@ echo "Attached $asset to $tag."
 put() {
   local path="$1" file="$2" message="$3" sha
   sha="$(GH_TOKEN="$RELEASES_TOKEN" gh api "repos/$releases/contents/$path" --jq .sha 2>/dev/null || true)"
-  GH_TOKEN="$RELEASES_TOKEN" gh api -X PUT "repos/$releases/contents/$path" \
-    -f message="$message" -f content="$(base64 -w0 < "$file")" ${sha:+-f sha="$sha"} --silent
+  # Sent as a file: a long changelog makes the file too big to pass on the command line (Windows refuses it).
+  base64 -w0 < "$file" | jq -Rs --arg m "$message" --arg sha "$sha" '{message: $m, content: .} + (if $sha == "" then {} else {sha: $sha} end)' > put-body.json
+  GH_TOKEN="$RELEASES_TOKEN" gh api -X PUT "repos/$releases/contents/$path" --input put-body.json --silent
 }
 put repo.json repo.json "Plugin ${version}"
 echo "repo.json now lists ${version}."

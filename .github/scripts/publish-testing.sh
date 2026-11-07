@@ -41,6 +41,7 @@ echo "Attached $asset to the $tag release."
 GH_TOKEN="$RELEASES_TOKEN" gh api "repos/$releases/contents/repo.json" -H 'Accept: application/vnd.github.raw' > current.json
 bash "$(dirname "$0")/testing-entry.sh" current.json "$build" "$url" "$api" > repo.json
 sha="$(GH_TOKEN="$RELEASES_TOKEN" gh api "repos/$releases/contents/repo.json" --jq .sha)"
-GH_TOKEN="$RELEASES_TOKEN" gh api -X PUT "repos/$releases/contents/repo.json" \
-  -f message="Plugin test build ${build}" -f content="$(base64 -w0 < repo.json)" -f sha="$sha" --silent
+# Sent as a file: with a long changelog in it, repo.json is too big to pass on the command line (Windows refuses it).
+base64 -w0 < repo.json | jq -Rs --arg m "Plugin test build ${build}" --arg sha "$sha" '{message: $m, content: ., sha: $sha}' > put-body.json
+GH_TOKEN="$RELEASES_TOKEN" gh api -X PUT "repos/$releases/contents/repo.json" --input put-body.json --silent
 echo "repo.json now offers test build ${build} to players who opted in."
