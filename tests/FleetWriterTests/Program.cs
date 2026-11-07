@@ -910,7 +910,7 @@ internal static class Program
             "fight club: text read as a number as JavaScript reads it");
     }
 
-    // The looks (Settings → Look): the same colours as the app's renderer/themes.js, and what they mean in each.
+    // The looks (Settings → Look): the same colours as the app's shared/themes.js, and what they mean in each.
     private static void LooksAgainstTheApp()
     {
         using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "themes-fixture.json")));

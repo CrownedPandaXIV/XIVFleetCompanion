@@ -27,7 +27,7 @@ namespace XIVFleetCompanion
     /// only say what a thing is: gil (gold), a house's address (blue) and a Free Company's name (lavender). Those three
     /// are null (plain text) with colour blind status colors, so the only colors left there are the ones that mean
     /// something. FC points are aqua. Heading: headings' colour (null: the text's). The app uses the same colors
-    /// (renderer/themes.js).
+    /// (shared/themes.js).
     /// </summary>
     public sealed record StatusColors(Vector4 Good, Vector4 Warn, Vector4 Danger, Vector4 Dim,
         Vector4? Gil = null, Vector4? Address = null, Vector4? Fc = null, Vector4? FcPoints = null, RoleColors? Roles = null, Vector4? Heading = null);
@@ -39,7 +39,7 @@ namespace XIVFleetCompanion
     public sealed record RoleColors(Vector4 Tank, Vector4 TankBase, Vector4 Healer, Vector4 HealerBase, Vector4 Dps, Vector4 DpsBase);
 
     /// <summary>
-    /// One look's colours, as the app's renderer/themes.js gives them (the plugin's tests check the two are the same):
+    /// One look's colours, as the app's shared/themes.js gives them (the plugin's tests check the two are the same):
     /// the window (Bg, Sidebar, Panel, Modal, Hover, HoverStrong, Border, BorderStrong, Text, TextBright, TextSoft, Dim,
     /// Faint, Accent, AccentStrong, Link, RowAlt and its alpha, Check, HeaderAlpha, Light, Heading, Glow), what things
     /// mean (Good, Warn, Danger), what they are (Gil, Address, Fc, FcPoints, Roles: tank, its base class, healer, base,
