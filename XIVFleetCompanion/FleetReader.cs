@@ -622,10 +622,12 @@ namespace XIVFleetCompanion
             await using (var r = await cmd.ExecuteReaderAsync())
                 settings = await r.ReadAsync() ? new MarketSettings(Int(r, "stale_days", 7), BoolOrNull(r, "live_prices") == true) : new MarketSettings(7, false);
             var accounts = new List<MarketAccountRow>();
-            await using (var cmd = Db.Cmd("SELECT * FROM fleet_market_accounts_view ORDER BY account_label", conn))
+            await using (var cmd = Db.Cmd("SELECT * FROM fleet_market_accounts_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     accounts.Add(new MarketAccountRow(Text(r, "account_label"), Int(r, "characters"), Int(r, "retainers"), Long(r, "character_gil"), Long(r, "retainer_gil"), Long(r, "total")));
+            // By name, sorted here: the two databases order text differently (capitals first in the file).
+            accounts.Sort((a, b) => StringComparer.InvariantCultureIgnoreCase.Compare(a.Account, b.Account));
             var listings = new List<ListingRow>();
             await using (var cmd = Db.Cmd("SELECT * FROM fleet_market_listings_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
