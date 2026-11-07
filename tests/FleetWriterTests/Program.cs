@@ -1274,6 +1274,8 @@ internal static partial class Program
                 var busy = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
                 Check(busy.Busy && busy.Applied.Count == 0 && (await Rows(c, "SELECT to_regclass('companion_schema_version')"))[0][0] is null or DBNull,
                     "database: while another copy updates, the plugin leaves it alone and doesn't wait");
+                // The other copy finishes (a closed connection goes back to the pool still holding its lock).
+                await Exec(other, $"SELECT pg_advisory_unlock({DatabaseUpkeep.LockKey})");
             }
             var made = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
             Check(made.Created && made.Version == 16 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
