@@ -907,7 +907,7 @@ public partial class MainWindow : Window, IDisposable
         if (supplies != null && supplies.Count > 0)
         {
             ImGui.SameLine();
-            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days" + (WithApp ? " (both set in the app's Supplies tab)." : "."));
+            SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
         }
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
         if (supplies == null) return;

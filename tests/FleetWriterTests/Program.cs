@@ -618,6 +618,7 @@ internal static partial class Program
                     case "update-sort-order": await FleetEdits.SaveOrder(db, a.EnumerateArray().Select(x => x.GetString()!).ToList()); break;
                     case "save-market-settings": error = await FleetEdits.SaveStaleDays(db, D(a.GetProperty("minDays"))); break;
                     case "save-income-settings": error = await FleetEdits.SaveIncomeWindow(db, a.GetProperty("windowDays").GetInt32()); break;
+                    case "save-supply-settings": error = await FleetEdits.SaveSupplyDays(db, D(a.GetProperty("windowDays")), D(a.GetProperty("targetDays"))); break;
                     case "remove-pc":
                         var (removed, problem) = await FleetEdits.RemovePc(db, a.GetString()!, args[1].GetString());
                         error = problem;
@@ -1461,6 +1462,40 @@ internal static partial class Program
         Check(recorded.SequenceEqual(new[] { "Success — 3 of 3 metrics recorded.", "Success — 3 of 3 metrics recorded.", "Success — 0 of 3 metrics recorded.", "Success — 0 of 3 metrics recorded.",
                 "Success — 1 of 3 metrics recorded.", "Success — 1 of 3 metrics recorded." }),
             "file: Trends values are recorded only when they change, on both: " + string.Join(" / ", recorded));
+
+        // ---- The Next Rank dates, saved once an hour (ForecastWriter) ----
+        var forecastNow = (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds;
+        var due = new List<ForecastWriter.Forecast>
+        {
+            new(1001, 1, 51, forecastNow + 3 * 3_600_000, "Renamed"),
+            new(1001, 2, 31, forecastNow + 26 * 3_600_000, "Submersible-2"),
+        };
+        await Exec(pg, "INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (1001, 1, 40, now() - interval '40 days', now() - interval '39 days', 'Old')");
+        await Db.Exec(lite, $"INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (1001, 1, 40, {Db.FileNow} - 40 * 86400.0, {Db.FileNow} - 39 * 86400.0, 'Old')");
+        var forecastSaves = new List<int>();
+        await Each(async c => forecastSaves.Add(await ForecastWriter.SaveAsync(c, due)));
+        await Each(async c => forecastSaves.Add(await ForecastWriter.SaveAsync(c, due)));
+        var forecastRows = new List<string>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, @"SELECT count(*), sum(CASE WHEN sub_name = 'Old' THEN 1 ELSE 0 END), count(DISTINCT made_at) FROM companion_rankup_forecast");
+            await using var r = await cmd.ExecuteReaderAsync();
+            await r.ReadAsync();
+            forecastRows.Add($"{Convert.ToInt64(r.GetValue(0))} rows, {Convert.ToInt64(r.GetValue(1))} old, {Convert.ToInt64(r.GetValue(2))} hour(s)");
+        });
+        Check(forecastSaves.SequenceEqual(new[] { 2, 2, 0, 0 }) && forecastRows.All(f => f == "2 rows, 0 old, 1 hour(s)"),
+            $"file: Next Rank dates are saved once an hour and those over 30 days old go, on both: {string.Join(" / ", forecastSaves)}; {string.Join(" / ", forecastRows)}");
+        var hours = new List<double>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, "SELECT made_at, predicted_at FROM companion_rankup_forecast WHERE slot = 1");
+            await using var r = await cmd.ExecuteReaderAsync();
+            await r.ReadAsync();
+            var made = Db.Time(r, 0);
+            hours.Add(made.Minute + made.Second + made.Millisecond);
+            hours.Add(Math.Abs((Db.Time(r, 1) - DateTime.UnixEpoch).TotalMilliseconds - due[0].PredictedAtMs));
+        });
+        Check(hours.All(h => h < 1), $"file: saved under the hour (on the hour), with the date as given, on both ({string.Join(", ", hours)})");
 
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();

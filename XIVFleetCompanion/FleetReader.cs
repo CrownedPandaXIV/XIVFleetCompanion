@@ -245,6 +245,18 @@ namespace XIVFleetCompanion
             return conn;
         }
 
+        // This hour's Next Rank dates (ForecastWriter). Never stops a read: a problem is tried again at the next one.
+        private static async Task SaveForecasts(DbConnection conn, List<SubRoute> subs)
+        {
+            try
+            {
+                await ForecastWriter.SaveAsync(conn, ForecastWriter.Due(subs));
+            }
+            catch (DbException)
+            {
+            }
+        }
+
         // Why a read couldn't reach the database, in plain words.
         private static string ReachFailure(Exception ex) => ex switch
         {
@@ -343,6 +355,9 @@ namespace XIVFleetCompanion
                         Settings = await Read(conn, ReadSettings, Settings);
                         Parts = await Read(conn, ReadParts, Parts);
                         Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
+                        // On the fleet file there's no app to save the Next Rank dates for the forecast line: the plugin does.
+                        if (Db.IsFile(conn) && Routes.Error == null && Routes.Data is { } planned)
+                            await SaveForecasts(conn, planned.Subs);
                         Forecasts = await Read(conn, ReadForecasts, Forecasts);
                     }
                     if (market) await ReadMarketNow(conn);

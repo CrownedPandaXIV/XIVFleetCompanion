@@ -352,6 +352,42 @@ public partial class MainWindow
         EditLine();
     }
 
+    // ---- Supplies: the days use is measured over and how many days to buy for (as the app's Supplies tab) ----
+
+    private int restockDraft = -1;
+    private int restockShown = -1;
+
+    private void SupplyDaysEditor(int window, int target)
+    {
+        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        using (var combo = ImRaii.Combo("use per day over##supplyWindow", $"{window} days"))
+        {
+            if (combo)
+                foreach (var d in FleetEdits.WindowChoices)
+                    if (ImGui.Selectable($"{d} days", d == window) && d != window)
+                        reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, d, target));
+        }
+        Hover("How many days back the use per day is measured" + (WithApp ? ", for the app too." : "."));
+        // The box follows what was read until it's changed here.
+        if (restockShown != target) { restockShown = target; restockDraft = target; }
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90 * ImGuiHelpers.GlobalScale);
+        ImGui.InputInt("days to buy for##restockDays", ref restockDraft, 1);
+        restockDraft = Math.Clamp(restockDraft, 1, FleetEdits.MaxRestockDays);
+        Hover($"To buy: enough for this many days (1 to {FleetEdits.MaxRestockDays})" + (WithApp ? ", for the app too." : "."));
+        ImGui.SameLine();
+        using (ImRaii.Disabled(reader.Editing || restockDraft == target))
+        {
+            if (ImGui.Button("Save##restockDays"))
+            {
+                var days = restockDraft;
+                reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, window, days));
+            }
+        }
+        ImGui.SameLine();
+        EditLine();
+    }
+
     // ---- Removing a PC (PCs page) ----
 
     private string? pcToRemove;

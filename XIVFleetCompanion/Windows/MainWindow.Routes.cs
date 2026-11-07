@@ -170,14 +170,13 @@ public partial class MainWindow
     // to the real rank-ups, each recent one on hover. The app saves the dates every hour while it's open.
     private void ForecastLine()
     {
-        // The app keeps the forecasts; on Just this PC there's no app to keep them.
-        if (!WithApp || reader.Forecasts.Data is not { } a) return;
+        if (reader.Forecasts.Data is not { } a) return;
         Colored(Dim, "Next Rank forecasts: " + (a.Count > 0 && a.AverageOff is double off
             ? $"within {OffText(off)} on average over the last {a.Count} rank-up{(a.Count == 1 ? "" : "s")}" : "no rank-ups to check yet"));
         string When(double ms) => DateTime.UnixEpoch.AddMilliseconds(ms).ToLocalTime().ToString("MMM d HH:mm", CultureInfo.CurrentCulture);
         var lines = a.Checks.Select(c => $"{c.SubName}{(c.Character.Length > 0 ? $" ({c.Character})" : "")} rank {c.Rank}: said {When(c.PredictedAt)}, ranked up {When(c.At)}, " +
             $"{(Math.Abs(c.Off) < 60000 ? "on time" : $"{OffText(c.Off)} {(c.Off > 0 ? "late" : "early")}")}; worked out {OffText(c.At - c.MadeAt)} before").ToList();
-        Hover("The app saves each sub's Next Rank date every hour while it's open. The average counts dates worked out a day or more before the rank-up, " +
+        Hover((WithApp ? "The app saves each sub's Next Rank date every hour while it's open." : "The plugin saves each sub's Next Rank date every hour while a game shows the fleet.") + " The average counts dates worked out a day or more before the rank-up, " +
               "early or late; a rank-up counts from when its voyage came back." + (lines.Count > 0 ? "\n\nRecent rank-ups:\n" + string.Join("\n", lines) : ""));
     }
 

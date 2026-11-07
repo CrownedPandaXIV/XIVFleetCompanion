@@ -24,8 +24,11 @@ install.
   are kept. The Status page shows the newest and has **Back up now**.
 - On Just this PC, Settings shows where the file is in place of the database login, and the Status page leaves out the
   database connection test and speed test. Text that pointed at the app says where to find it in the game instead,
-  the PCs page talks about the games on this PC, and Route Optimization leaves out the Next Rank forecast accuracy,
-  which the app keeps.
+  and the PCs page talks about the games on this PC.
+- **Without the app, the plugin does its part:** it saves each sub's Next Rank date once an hour (as the app does while
+  it's open), so Route Optimization's forecast line works on Just this PC too.
+- **The Supplies page's days can be changed in the game**: how many days its use per day is measured over (3, 7, 14 or
+  30) and how many days of supplies to buy for (1 to 90), with the same checks as the app's Supplies tab.
 - Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) works on the file.
   The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and every page must read
   the same from both.

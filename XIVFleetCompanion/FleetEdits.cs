@@ -147,6 +147,21 @@ namespace XIVFleetCompanion
             return null;
         }
 
+        public const int MaxRestockDays = 90;
+
+        /// <summary>
+        /// Supplies: the days its use per day is measured over (3, 7, 14 or 30) and how many days of supplies to buy for
+        /// (1 to 90), as the app's save-supply-settings.
+        /// </summary>
+        public static async Task<string?> SaveSupplyDays(DbConnection conn, double windowDays, double targetDays)
+        {
+            if (!WindowChoices.Contains((int)windowDays) || windowDays != Math.Floor(windowDays)) return $"Choose {string.Join(", ", WindowChoices)} days.";
+            if (targetDays != Math.Floor(targetDays) || targetDays < 1 || targetDays > MaxRestockDays) return $"Restock for 1 to {MaxRestockDays} days.";
+            await SaveEconomics(conn, "supply_window_days", (decimal)windowDays);
+            await SaveEconomics(conn, "restock_target_days", (decimal)targetDays);
+            return null;
+        }
+
         public const int DemolitionDays = 45;
         public const int MinNotSyncedMinutes = 10, MaxNotSyncedMinutes = 1440;
         public const int MaxLowSupply = 99999;

@@ -94,8 +94,8 @@ same one. The plugin keeps it up to date itself.
   and has **Back up now**. To go back to one, close every game, then copy it over `fleet.db`.
 - **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, the repair kit cost, Fight
   Club's data) are in the plugin's Settings, saved in the file.
-- **Not available without the app:** the Next Rank forecast accuracy on Route Optimization (the app keeps those dates),
-  and the Supplies page's use and buy periods (14 days each).
+- **Without the app**, the plugin does what the app would: it saves each sub's Next Rank date once an hour for Route
+  Optimization's forecast line, and the Supplies page's days are changed on that page.
 - Moving your fleet between Just this PC and a shared database comes in a later version.
 
 ## Using it
