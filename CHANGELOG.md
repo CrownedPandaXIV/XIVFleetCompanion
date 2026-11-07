@@ -226,6 +226,9 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
   each has its own shades of blue, yellow and orange-red for fine, a look and urgent, measured to stay readable on its
   background and apart with every common kind of colour blindness (Parchment uses a raspberry red for urgent, as dark
   orange and ochre look alike with red-blindness).
+- **The sidebar in groups**: Overview (Summary, Trends), Submarines (Subs, Route Optimization, Parts, Supplies, Salvage),
+  Characters (Roster, Retainers, Free Companies, Inventory) and Gil (Income, Gil & Market), then Tools and System, each
+  group folding away on its own. The app's sidebar has the same groups. With retainers only, Submarines is left out.
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by
