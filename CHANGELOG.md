@@ -3,6 +3,62 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.2.0 - 2026-11-07
+
+**Just this PC**: your fleet can now live in one file on your PC instead of a PostgreSQL database, with nothing to
+install.
+
+- **A new setup is asked first** where its fleet data should live:
+  - **Just this PC**: every game on this PC keeps the fleet in one file, `%APPDATA%\XIV Fleet Companion\fleet.db`.
+    Syncing starts straight away. The XIV Fleet Companion app can't open the file, so you see your fleet in the game.
+  - **Shared between PCs**: a PostgreSQL database set up with the app (its Database Helper is enough), as before.
+  A setup that already has a database connection is never asked and keeps using it.
+- **Several games at once.** Games on the same PC share the file and can sync at the same moment; one waits for another
+  to finish writing rather than fail. Tested with four separate processes writing at once.
+- **Not in a cloud or network folder.** OneDrive, Dropbox, Google Drive and similar copy the file while a game writes
+  to it, which can damage it, so the plugin refuses to keep it there and says why.
+- **It keeps itself up to date.** The plugin adds what a newer version needs to the file (never removing anything) and
+  replaces the fleet views when they change, all or nothing. A file a newer plugin in another game already updated is
+  left alone, and the Status page says to update.
+- **Moving your fleet, either way** (Settings → **Move your fleet**):
+  - from Just this PC to a shared database, when you get a second PC or want the app: set up an empty database with the
+    app's Database Helper, enter its details, and move;
+  - from a shared database to Just this PC, when this is the only PC you play on (it warns you if another PC synced to
+    the database in the last day).
+
+  Syncing waits while every table is copied, and other games on the PC wait to write. Then every row is compared on
+  both sides, and only when all of it matches does anything switch. It never copies into a place that already has a
+  fleet, and the side it came from is left as it was (a fleet file moved away is backed up before it's ever reused).
+  If anything goes wrong, nothing changes.
+- **Every game on a PC goes the same way.** The choice is kept beside the fleet file, so when one game chooses or
+  moves, the others follow at their next sync. A second game on a PC that's already set up isn't asked.
+- **Daily backups.** Once a day while a game runs, the file is copied into a `Backups` folder beside it, and the last 7
+  are kept. The Status page shows the newest and has **Back up now**.
+- On Just this PC, Settings shows where the file is in place of the database login, and the Status page leaves out the
+  database connection test and speed test. Text that pointed at the app says where to find it in the game instead,
+  and the PCs page talks about the games on this PC.
+- **Without the app, the plugin does its part:** it saves each sub's Next Rank date once an hour (as the app does while
+  it's open), so Route Optimization's forecast line works on Just this PC too.
+- **The Supplies page's days can be changed in the game**, on their own line under the table's buttons: how many days its use per day is measured over (3, 7, 14 or
+  30) and how many days of supplies to buy for (1 to 90), with the same checks as the app's Supplies tab.
+- Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) works on the file.
+  The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and every page must read
+  the same from both.
+- Gil & Market lists accounts by name.
+
+## 2.1.0 - 2026-11-07
+
+- **The plugin keeps the database up to date itself**, as the app does, so after an update nobody needs to open the
+  app first. It carries the app's own update files (from app 1.9.0) and does exactly what the app does with them:
+  - an empty database gets every table;
+  - an older one gets each update it's missing, in order, each all or nothing;
+  - the fleet's views are replaced when they changed, never with an older copy's.
+- **The app and the plugin take turns.** Only one of them updates at a time; a game that finds another copy updating
+  leaves it to that one and looks again a minute later. A database a newer app or plugin already updated is left alone,
+  and the Status page says to update this plugin.
+- It looks the first time the plugin reads or syncs, then every 10 minutes. The Status page shows the database's version
+  and anything that stopped an update (such as a login that may only read), and the plugin's log says what changed.
+
 ## 2.0.0 - 2026-11-07
 
 The fleet inside the game: every page of the app in the plugin's own window (Summary, Subs, Route Optimization, Parts,

@@ -9,6 +9,7 @@ using ECommons;
 using ECommons.EzEventManager;
 using Npgsql;
 using System;
+using System.Data.Common;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -31,6 +32,8 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>2.0: the fleet from the database's views, shared by the main window and the info bar line.</summary>
     public FleetReader Fleet { get; }
+    // Keeps the database's tables and views up to date (DatabaseUpkeep).
+    public DatabaseKeeper Keeper { get; }
     // "Fleet" in the game's info bar (top right): what needs attention; click opens the Summary.
     private IDtrBarEntry? infoBar;
     private DateTime infoBarCheckedAt = DateTime.MinValue;
@@ -76,6 +79,15 @@ public sealed class Plugin : IDalamudPlugin
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        // Another game on this PC already chose (or moved): this one follows, without asking.
+        FollowPcChoice(now: true);
+        // A setup from before "Just this PC" (2.2) already uses a shared database: it is never asked.
+        if (Configuration.FleetStore == FleetStoreChoice.NotChosen &&
+            (PostgresCredentialStore.Load(false) != null || PostgresCredentialStore.Load(true) != null || Configuration.LastSyncTimestamp != null))
+        {
+            Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+            Configuration.Save();
+        }
 
         if (string.IsNullOrWhiteSpace(Configuration.FCTrackerConfigPath))
         {
@@ -97,10 +109,11 @@ public sealed class Plugin : IDalamudPlugin
 
         var submarineImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "submarine.png");
 
+        // Brings the database up to date with the app's own update files (DatabaseUpkeep), before reads and syncs.
+        Keeper = new DatabaseKeeper(DatabaseUpkeep.Files.Embedded, $"plugin {VersionText}", text => Log.Information($"Fleet Companion: {text}"));
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
-        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame,
-            () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection),
-            () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText));
+        Fleet = new FleetReader(FleetLocation, GameNames.SubGame, OpenFleetAsync,
+            () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText), Keeper);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckPage = new CheckWindow(this);
         SpeedTestPage = new SpeedTestWindow(this);
@@ -311,7 +324,7 @@ public sealed class Plugin : IDalamudPlugin
     // only the characters that last logged in here or that no setup has recorded a login for yet; the rest are left to
     // the setup they last logged in on. Before the database has the table (app 1.6.0), or if reading it fails, every
     // character is kept, as before.
-    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(NpgsqlConnection conn, List<CharacterRead> characters, List<ulong> leftOutCids)
+    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(DbConnection conn, List<CharacterRead> characters, List<ulong> leftOutCids)
     {
         var pcName = Environment.MachineName;
         var label = Configuration.AccountLabel ?? "";
@@ -354,7 +367,7 @@ public sealed class Plugin : IDalamudPlugin
             lastElsewhereNames = names;
             return elsewhere.Count == 0 ? characters : characters.Except(elsewhere).ToList();
         }
-        catch (PostgresException ex)
+        catch (DbException ex) when (Db.IsQueryError(ex))
         {
             Log.Warning($"Fleet Companion: could not check where characters last logged in, so all of them are synced — {ex.Message}");
             SyncedElsewhere = 0;
@@ -481,6 +494,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task RunSyncAsync()
     {
+        if (moving) return;
         var fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
         if (fromAutoRetainer == null)
         {
@@ -517,8 +531,9 @@ public sealed class Plugin : IDalamudPlugin
         // caller and simply tried again next time.
         await using var openConnection = await OpenDatabaseAsync();
         if (openConnection == null) return;
-        NpgsqlConnection conn = openConnection;
+        DbConnection conn = openConnection;
         SyncingAgain();
+        await Keeper.RunIfDueAsync(conn, Db.IsFile(conn) ? FileDatabase.DefaultPath : null);
 
         // Characters that last logged in on another setup are that setup's to sync.
         characters = await KeepOwnCharactersAsync(conn, characters, leftOutCids);
@@ -545,7 +560,7 @@ public sealed class Plugin : IDalamudPlugin
                 changes.Remember(key, fingerprint);
                 written++;
             }
-            catch (PostgresException ex)
+            catch (DbException ex) when (Db.IsQueryError(ex))
             {
                 changes.Forget(key);
                 failed++;
@@ -623,7 +638,7 @@ public sealed class Plugin : IDalamudPlugin
                             Log.Information("Fleet Companion: the database is missing a column the app adds. Open the XIV Fleet Companion app (0.26.0 or newer) once so it can update the database; until then, empty retainers can't be told from unseen ones.");
                         }
                     }
-                    catch (PostgresException ex)
+                    catch (DbException ex) when (Db.IsQueryError(ex))
                     {
                         Log.Warning($"Fleet Companion: could not record when {who}'s retainers were seen — {ex.Message}");
                     }
@@ -640,7 +655,7 @@ public sealed class Plugin : IDalamudPlugin
                             AddMetric(metrics, "character", cid, $"item_qty:{itemId}", totals[itemId]);
                         AddMetric(metrics, "character", cid, "inventory_sources", await FleetWriter.ReadStoredSourceCountAsync(conn, cid));
                     }
-                    catch (PostgresException ex)
+                    catch (DbException ex) when (Db.IsQueryError(ex))
                     {
                         Log.Warning($"Fleet Companion: could not read stored salvage counts for {who} — {ex.Message}");
                     }
@@ -753,7 +768,7 @@ public sealed class Plugin : IDalamudPlugin
                 Log.Warning("Fleet Companion: the database isn't set up yet. Open the XIV Fleet Companion app (0.26.0 or newer) and connect it to this database once; it sets everything up. Characters are not saved until then.");
             warnedNoCurrentTable = true;
         }
-        catch (PostgresException ex)
+        catch (DbException ex) when (Db.IsQueryError(ex))
         {
             Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
@@ -767,13 +782,13 @@ public sealed class Plugin : IDalamudPlugin
                 await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady,
                     fcTrackerRunning ?? (fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath)), subTrackerRunning, problems);
             }
-            catch (PostgresException ex)
+            catch (DbException ex) when (Db.IsQueryError(ex))
             {
                 Log.Warning($"Fleet Companion: failed to write this PC's status, voyage loot or venture rewards — {ex.Message}");
             }
         }
 
-        var metricPoints = metrics.Select(kv => new PostgresWriter.MetricPoint
+        var metricPoints = metrics.Select(kv => new MetricWriter.MetricPoint
         {
             SubjectType = kv.Key.Type,
             SubjectId = kv.Key.Id,
@@ -782,7 +797,7 @@ public sealed class Plugin : IDalamudPlugin
             Label = kv.Value.Label
         }).ToList();
 
-        var metricResult = await PostgresWriter.WriteMetricsAsync(conn, metricPoints);
+        var metricResult = await MetricWriter.WriteMetricsAsync(conn, metricPoints);
         if (!metricResult.StartsWith("Success"))
             Log.Warning($"Fleet Companion: failed to write metric history — {metricResult}");
 
@@ -891,13 +906,18 @@ public sealed class Plugin : IDalamudPlugin
     // database is being moved to another PC (tried again in a minute), or it moved somewhere this PC can't
     // reach yet (tried again at the next sync). A move to an address this PC can reach is followed by
     // PostgresWriter.OpenConnectionAsync itself.
-    private async Task<NpgsqlConnection?> OpenDatabaseAsync()
+    private async Task<DbConnection?> OpenDatabaseAsync()
     {
         try
         {
-            var conn = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
-            if (conn == null) NotSynced(SyncFailure.NoCredential);
+            var conn = await OpenFleetAsync();
+            if (conn == null) NotSynced(Configuration.FleetStore == FleetStoreChoice.NotChosen ? SyncFailure.NotChosen : SyncFailure.NoCredential);
             return conn;
+        }
+        catch (FileDatabase.RefusedException ex)
+        {
+            NotSynced(ex.Message);
+            return null;
         }
         catch (DatabaseMove.WaitException ex)
         {
@@ -911,6 +931,141 @@ public sealed class Plugin : IDalamudPlugin
             NotSynced(ex.Message);
             return null;
         }
+    }
+
+    // ---- Which way this PC goes (store.json beside the fleet file, shared by every game on it) ----
+
+    private DateTime choiceCheckedAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Follows what another game on this PC chose or moved to (FleetMove's store.json), looked at every 15 seconds at
+    /// most. A setup from before any game wrote it keeps its own choice.
+    /// </summary>
+    public void FollowPcChoice(bool now = false)
+    {
+        if (!now && DateTime.UtcNow - choiceCheckedAt < TimeSpan.FromSeconds(15)) return;
+        choiceCheckedAt = DateTime.UtcNow;
+        var choice = FleetMove.ReadChoice(FleetMove.ChoicePath(FileDatabase.DefaultPath));
+        if (choice == null || moving) return;
+        if (choice.Store == Configuration.FleetStore && (choice.Store != FleetStoreChoice.SharedDatabase || choice.UseRemote == Configuration.UseRemoteConnection))
+            return;
+        var was = Configuration.FleetStore;
+        Configuration.FleetStore = choice.Store;
+        if (choice.Store == FleetStoreChoice.SharedDatabase) Configuration.UseRemoteConnection = choice.UseRemote;
+        Configuration.Save();
+        if (was != FleetStoreChoice.NotChosen)
+            Log.Information($"Fleet Companion: another game on this PC ({choice.ChangedBy}) moved the fleet {(choice.Store == FleetStoreChoice.ThisPc ? "to this PC's fleet file" : "to the shared database")}; this game follows.");
+    }
+
+    /// <summary>Saves this game's choice for every game on this PC (they follow it at their next read or sync).</summary>
+    public static void SaveChoiceForPc(Configuration configuration)
+    {
+        if (configuration.FleetStore == FleetStoreChoice.NotChosen) return;
+        try
+        {
+            FleetMove.WriteChoice(FleetMove.ChoicePath(FileDatabase.DefaultPath),
+                new FleetMove.PcChoice(configuration.FleetStore, configuration.UseRemoteConnection, $"plugin {VersionText} ({configuration.AccountLabel})", DateTime.UtcNow));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning($"Fleet Companion: couldn't note where the fleet lives for the other games on this PC: {ex.Message}");
+        }
+    }
+
+    // ---- Moving the fleet (FleetMove) ----
+
+    private volatile bool moving;
+    public bool Moving => moving;
+    /// <summary>What the move is doing, or how it ended (null: none yet); MoveFailed when it didn't move.</summary>
+    public string? MoveStatus { get; private set; }
+    public bool MoveFailed { get; private set; }
+
+    /// <summary>
+    /// Moves the fleet: from the fleet file into the shared database (its saved connection), or from the shared database
+    /// into this PC's fleet file. Syncing waits meanwhile; on success this game, then every game on the PC, uses the new
+    /// place. On any problem nothing changes.
+    /// </summary>
+    public void MoveFleet(bool toShared)
+    {
+        if (moving) return;
+        moving = true;
+        MoveFailed = false;
+        MoveStatus = "Waiting for the sync that's running to finish...";
+        Task.Run(async () =>
+        {
+            try
+            {
+                for (var i = 0; i < 120 && syncInProgress; i++) await Task.Delay(500);
+                var files = FileDatabase.Files.Embedded();
+                var by = $"plugin {VersionText}";
+                await using var pg = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection)
+                                     ?? throw new FleetMove.RefusedException("Enter the shared database's details above and save them first.");
+                await using var file = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
+                FleetMove.Result result;
+                if (toShared)
+                {
+                    var target = new Npgsql.NpgsqlConnectionStringBuilder(pg.ConnectionString);
+                    result = await FleetMove.FileToSharedAsync(file, pg, files, DatabaseUpkeep.Files.Embedded(), by,
+                        $"the shared database {target.Database} at {target.Host}:{target.Port}, {DateTime.Now:g}", s => MoveStatus = s);
+                    Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+                }
+                else
+                {
+                    result = await FleetMove.SharedToFileAsync(pg, file, FileDatabase.DefaultPath, files, by, s => MoveStatus = s);
+                    Configuration.FleetStore = FleetStoreChoice.ThisPc;
+                }
+                Configuration.Enabled = true;
+                Configuration.Save();
+                SaveChoiceForPc(Configuration);
+                MoveStatus = $"{result.Text} Your fleet is now {(toShared ? "in the shared database" : "on this PC")}; the other games on this PC follow at their next sync.";
+                Log.Information($"Fleet Companion: {MoveStatus}");
+                Fleet.ReadIfDue(everything: true);
+            }
+            catch (Exception ex)
+            {
+                MoveFailed = true;
+                MoveStatus = ex is FleetMove.RefusedException or FileDatabase.RefusedException
+                    ? ex.Message
+                    : $"The move didn't work, so nothing changed: {SyncFailure.Describe(ex)}";
+                Log.Warning($"Fleet Companion: move {(toShared ? "to the shared database" : "to this PC")}: {ex.Message}");
+            }
+            finally
+            {
+                moving = false;
+            }
+        });
+    }
+
+    /// <summary>True when the fleet is kept in the one file on this PC (Just this PC).</summary>
+    public bool OnThisPc => Configuration.FleetStore == FleetStoreChoice.ThisPc;
+
+    /// <summary>
+    /// Where the fleet is, or null when nothing is set up: the fleet file (Just this PC), else the shared database's
+    /// connection (no saved connection: null).
+    /// </summary>
+    public string? FleetLocation()
+    {
+        FollowPcChoice();
+        return FleetLocationNow();
+    }
+
+    private string? FleetLocationNow() => Configuration.FleetStore switch
+    {
+        FleetStoreChoice.ThisPc => FileDatabase.DefaultPath,
+        FleetStoreChoice.SharedDatabase => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The fleet's database, open, or null when nothing is set up: the fleet file (made when it isn't there yet), else the
+    /// shared database (following it when the app moved it to another PC).
+    /// </summary>
+    public async Task<DbConnection?> OpenFleetAsync()
+    {
+        FollowPcChoice();
+        if (Configuration.FleetStore == FleetStoreChoice.ThisPc) return await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
+        if (Configuration.FleetStore == FleetStoreChoice.SharedDatabase) return await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
+        return null;
     }
 
     /// <summary>Why the last sync didn't get through (shown in the main window), or null when it did.</summary>
@@ -970,7 +1125,7 @@ public sealed class Plugin : IDalamudPlugin
     // This PC's status, voyage loot from SubmarineTracker and venture rewards from AutoRetainer (database version 8).
     // fcTrackerFound: FCTracker is loaded in this game (or, when that cannot be told, its file was found);
     // subTrackerRunning: SubmarineTracker is loaded (null: cannot be told, its file decides).
-    private async Task WriteDetailsAsync(NpgsqlConnection conn, List<CharacterRead> characters, int leftOut,
+    private async Task WriteDetailsAsync(DbConnection conn, List<CharacterRead> characters, int leftOut,
         bool allaganToolsReady, bool fcTrackerFound, bool? subTrackerRunning, List<string> problems)
     {
         var cids = characters.Select(c => c.Snapshot.Cid).ToList();
@@ -991,7 +1146,7 @@ public sealed class Plugin : IDalamudPlugin
                 if (!await DetailsWriter.WriteVoyageLootAsync(conn, loot)) { DetailsTablesMissing(); return; }
                 if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
             }
-            catch (Exception ex) when (ex is not PostgresException)
+            catch (Exception ex) when (!Db.IsQueryError(ex))
             {
                 WarnOnce("submarinetracker", $"Fleet Companion: could not read Submarine Tracker's loot ({stPath}) — {ex.Message}");
             }
@@ -1028,7 +1183,7 @@ public sealed class Plugin : IDalamudPlugin
                     if (!await DetailsWriter.WriteVenturesAsync(conn, rows)) { DetailsTablesMissing(); return; }
                     ventureFilesRead[file.Path] = file.Changed;
                 }
-                catch (Exception ex) when (ex is not PostgresException)
+                catch (Exception ex) when (!Db.IsQueryError(ex))
                 {
                     WarnOnce($"ventures:{file.Path}", $"Fleet Companion: could not read AutoRetainer's venture statistics ({file.Path}) — {ex.Message}");
                 }

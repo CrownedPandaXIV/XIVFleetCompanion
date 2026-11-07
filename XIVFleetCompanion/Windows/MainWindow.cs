@@ -117,6 +117,11 @@ public partial class MainWindow : Window, IDisposable
         ImGui.SameLine();
         using var page = ImRaii.Child("##page", Vector2.Zero, false);
         if (!page.Success) return;
+        if (NeedsStoreChoice)
+        {
+            DrawStoreChoice();
+            return;
+        }
         switch (shown)
         {
             case Tab.Summary: DrawSummary(); break;
@@ -142,6 +147,8 @@ public partial class MainWindow : Window, IDisposable
                     DrawSharedSettings();
                     ImGui.Spacing();
                     DrawFightClubImport();
+                    ImGui.Spacing();
+                    DrawMoveFleet();
                 });
                 break;
         }
@@ -192,7 +199,7 @@ public partial class MainWindow : Window, IDisposable
         var alerts = reader.Alerts.Data;
         var low = alerts?.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count() ?? 0;
         var attention = back + (alerts?.Count ?? 0);
-        var statusProblem = plugin.SyncProblem != null || (plugin.AutoRetainer != null && !SafeReady());
+        var statusProblem = plugin.SyncProblem != null || plugin.Keeper.Problem != null || plugin.Keeper.LastResult is { Newer: true } || (plugin.AutoRetainer != null && !SafeReady());
         var notSynced = alerts?.Count(a => a.Kind == "not_synced") ?? 0;
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
@@ -384,13 +391,16 @@ public partial class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, Allagan Tools and FC Tracker have for it, without writing anything (also /xivfleet check).");
-        ImGui.SameLine();
-        if (ImGui.Button("Speed test (2.0)"))
+        if (!plugin.OnThisPc)
         {
-            plugin.OpenSpeedTest();
+            ImGui.SameLine();
+            if (ImGui.Button("Speed test (2.0)"))
+            {
+                plugin.OpenSpeedTest();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Times reading from the database what the 2.0 in-game windows will need, without changing anything (also /xivfleet speedtest).");
         }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Times reading from the database what the 2.0 in-game windows will need, without changing anything (also /xivfleet speedtest).");
 
         ImGui.Spacing();
 
@@ -417,6 +427,16 @@ public partial class MainWindow : Window, IDisposable
             if (elsewhere > 0)
                 ImGui.TextWrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last logged in on another setup, so that setup syncs {(elsewhere == 1 ? "it" : "them")} instead.");
 
+            // The database's version: this plugin brings it up to date itself (DatabaseUpkeep), as the app does.
+            var keeper = plugin.Keeper;
+            if (keeper.Problem != null || keeper.LastResult is { Newer: true } || keeper.LastFile is { Newer: true })
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                    ImGui.TextWrapped(keeper.StatusText);
+            }
+            else
+                ImGui.TextWrapped(keeper.StatusText);
+
             // Why syncing isn't getting through right now (the database PC is off, a wrong password...).
             var problem = plugin.SyncProblem;
             if (problem != null)
@@ -434,32 +454,42 @@ public partial class MainWindow : Window, IDisposable
             ImGui.Spacing();
             ImGui.Text("Connections:");
 
-            var mode = statusRemote ? "Remote" : "Local";
-            ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+            if (plugin.OnThisPc)
+                DrawFileStatus();
+            else if (plugin.Configuration.FleetStore == FleetStoreChoice.NotChosen)
+                ImGui.BulletText("Fleet data: not chosen yet (open the Summary to choose)");
+            else
+            {
+                var mode = statusRemote ? "Remote" : "Local";
+                ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+            }
             ImGui.BulletText(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
             ImGui.BulletText(allaganToolsReady ? "Allagan Tools: running" : "Allagan Tools: not running");
             ImGui.BulletText(OptionalLine("FC Tracker", fcTrackerRunning));
             ImGui.BulletText(OptionalLine("Submarine Tracker", subTrackerRunning));
 
-            ImGui.Spacing();
-
-            using (ImRaii.Disabled(connectionTestRunning))
+            if (!plugin.OnThisPc)
             {
-                if (ImGui.Button("Test Database Connection"))
+                ImGui.Spacing();
+
+                using (ImRaii.Disabled(connectionTestRunning))
                 {
-                    connectionTestRunning = true;
-                    connectionTestResult = "Testing...";
-
-                    Task.Run(async () =>
+                    if (ImGui.Button("Test Database Connection"))
                     {
-                        var result = await PostgresConnectionTester.TestConnectionAsync(plugin.Configuration.UseRemoteConnection);
-                        connectionTestResult = result;
-                        connectionTestRunning = false;
-                    });
-                }
-            }
+                        connectionTestRunning = true;
+                        connectionTestResult = "Testing...";
 
-            ImGui.TextWrapped(connectionTestResult);
+                        Task.Run(async () =>
+                        {
+                            var result = await PostgresConnectionTester.TestConnectionAsync(plugin.Configuration.UseRemoteConnection);
+                            connectionTestResult = result;
+                            connectionTestRunning = false;
+                        });
+                    }
+                }
+
+                ImGui.TextWrapped(connectionTestResult);
+            }
         }
 
         DrawCredits();
@@ -725,7 +755,7 @@ public partial class MainWindow : Window, IDisposable
         if (summary.LowRepairKits > 0) Colored(Amber, $"{summary.LowRepairKits} character{(summary.LowRepairKits == 1 ? "" : "s")} low on repair kits");
         if (summary.SoonestRunsOutDays is double soonest)
             Tinted(DaysColor(soonest), $"The first runs out in {Days(soonest, 1)} days");
-        Colored(Dim, "Warnings are set in the app (Settings → General → Warnings).");
+        Colored(Dim, $"Warnings are {WarningsWhere}.");
     }
 
     // "Updated 19s ago" for the Summary's reads together (the oldest), each on hover; anything that couldn't be read, in amber.
@@ -875,13 +905,10 @@ public partial class MainWindow : Window, IDisposable
         RefreshButton();
         ImGui.SameLine();
         SuppliesTable.DrawControls();
-        var supplies = reader.Supplies.Data;
-        if (supplies != null && supplies.Count > 0)
-        {
-            ImGui.SameLine();
-            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days (both set in the app's Supplies tab).");
-        }
+        ImGui.SameLine();
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
+        var supplies = reader.Supplies.Data;
+        if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
         if (supplies == null) return;
         SuppliesTable.Draw(supplies);
     }

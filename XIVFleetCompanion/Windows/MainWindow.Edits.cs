@@ -110,7 +110,7 @@ public partial class MainWindow
             return;
         }
         EditLine();
-        Colored(Dim, "The build each sub should have from a rank: for some slots and maybe one character. A sub ticked Craft? follows Fight Club's builds from rank 85 instead. Changes are saved for the app too.");
+        Colored(Dim, "The build each sub should have from a rank: for some slots and maybe one character. A sub ticked Craft? follows Fight Club's builds from rank 85 instead." + (WithApp ? " Changes are saved for the app too." : ""));
         var characters = parts.Inputs.Characters.OrderBy(c => c.SortIndex ?? int.MaxValue).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
         var rules = parts.Inputs.Rules.OrderBy(r => r.Rank).ThenBy(r => r.Id).Select(DraftOf).Concat(newRules).ToList();
         if (ImGui.Button("Add a rule##subRules")) newRules.Add(new RuleDraft());
@@ -267,7 +267,7 @@ public partial class MainWindow
     private void DrawRosterOrder()
     {
         var draft = rosterOrderDraft!;
-        Colored(Dim, "Move characters up or down, then save. The order is the Roster's everywhere, in the game and the app.");
+        Colored(Dim, "Move characters up or down, then save. The order is the Roster's everywhere" + (WithApp ? ", in the game and the app." : "."));
         using (ImRaii.Disabled(reader.Editing))
         {
             if (ImGui.Button("Save order##rosterOrder"))
@@ -347,9 +347,61 @@ public partial class MainWindow
                     if (ImGui.Selectable($"{d} days", d == current) && d != current)
                         reader.Edit("the Income window", c => FleetEdits.SaveIncomeWindow(c, d));
         }
-        Hover("How many days the Income page (and Loot per Voyage) counts, for the app too.");
+        Hover("How many days the Income page (and Loot per Voyage) counts" + (WithApp ? ", for the app too." : "."));
         ImGui.SameLine();
         EditLine();
+    }
+
+    // ---- Supplies: the days use is measured over and how many days to buy for (as the app's Supplies tab) ----
+
+    private int restockDraft = -1;
+    private int restockShown = -1;
+
+    // On its own line, each label before what it sets: "Use per day measured over [14 days] · Buy enough for [14] days [Save]".
+    private void SupplyDaysEditor(int window, int target)
+    {
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("Use per day measured over");
+        Hover("How many days back the use per day is measured" + (WithApp ? ", for the app too." : "."));
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        using (var combo = ImRaii.Combo("##supplyWindow", $"{window} days"))
+        {
+            if (combo)
+                foreach (var d in FleetEdits.WindowChoices)
+                    if (ImGui.Selectable($"{d} days", d == window) && d != window)
+                        reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, d, target));
+        }
+        ImGui.SameLine();
+        Colored(Dim, "·");
+        ImGui.SameLine();
+        ImGui.TextUnformatted("Buy enough for");
+        Hover($"The To buy column: enough supplies to last this many days (1 to {FleetEdits.MaxRestockDays})" + (WithApp ? ", for the app too." : "."));
+        // The box follows what was read until it's changed here.
+        if (restockShown != target) { restockShown = target; restockDraft = target; }
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90 * ImGuiHelpers.GlobalScale);
+        ImGui.InputInt("##restockDays", ref restockDraft, 1);
+        restockDraft = Math.Clamp(restockDraft, 1, FleetEdits.MaxRestockDays);
+        ImGui.SameLine();
+        ImGui.TextUnformatted("days");
+        if (restockDraft != target)
+        {
+            ImGui.SameLine();
+            using (ImRaii.Disabled(reader.Editing))
+            {
+                if (ImGui.Button("Save##restockDays"))
+                {
+                    var days = restockDraft;
+                    reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, window, days));
+                }
+            }
+        }
+        if (reader.Editing || reader.LastEdit != null)
+        {
+            ImGui.SameLine();
+            EditLine();
+        }
     }
 
     // ---- Removing a PC (PCs page) ----
@@ -402,7 +454,7 @@ public partial class MainWindow
         ImGui.SameLine();
         var all = MadeOf(p) >= p.Crafts;
         if (ImGui.Checkbox($"all made##allMade{p.ItemId}", ref all)) SaveMade(p, all ? (int)p.Crafts : 0);
-        Hover("Tick parts off as you craft them; every PC sees it (in the app too). Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
+        Hover("Tick parts off as you craft them; " + (WithApp ? "every PC sees it (in the app too)." : "every game on this PC sees it.") + " Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
     }
 
     private void SaveMade(ShopRow p, int made)

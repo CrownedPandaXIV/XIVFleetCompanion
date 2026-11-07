@@ -196,6 +196,56 @@ namespace XIVFleetCompanion
   WHERE h.fc_id IS NOT NULL
   ORDER BY h.fc_id, h.updated_at DESC";
 
+        // The one-file database's versions (Just this PC, see Db): times are Unix seconds, a Free Company's id is text, and
+        // SQLite has no generate_series, arrays, LATERAL or DISTINCT ON, so the same answers are asked for another way.
+
+        /// <summary>SeriesSql for the file: the chart instants by counting, the parts as a list of values, and the newest
+        /// row at or before each instant as a subquery. Parameters: @from, @to (seconds), @n, @first, @last, @split, and
+        /// @m{k}, @t{k}, @w{k} for each part and @s{k} for each subject asked for (none: every subject).</summary>
+        public static string FileSeriesSql(int parts, int subjects) => $@"
+  WITH RECURSIVE buckets(i, ts) AS (
+    SELECT @first, @from + (@to - @from) * @first / @n
+    UNION ALL
+    SELECT i + 1, @from + (@to - @from) * (i + 1) / @n FROM buckets WHERE i < @last
+  ),
+  parts(metric, subject_type, weight) AS (VALUES {string.Join(", ", Enumerable.Range(0, parts).Select(k => $"(@m{k}, @t{k}, @w{k})"))}),
+  subjects AS (
+    SELECT DISTINCT l.subject_type, l.subject_id, pt.metric, pt.weight
+    FROM parts pt
+    JOIN companion_metric_latest l ON l.metric = pt.metric AND l.subject_type = pt.subject_type
+    {(subjects == 0 ? "" : $"WHERE CAST(l.subject_id AS TEXT) IN ({string.Join(", ", Enumerable.Range(0, subjects).Select(k => $"@s{k}"))})")}
+  ),
+  vals AS (
+    SELECT b.i, s.subject_id, s.weight,
+           (SELECT h.value FROM companion_metric_history h
+            WHERE h.subject_type = s.subject_type AND h.subject_id = s.subject_id AND h.metric = s.metric AND h.recorded_at <= b.ts
+            ORDER BY h.recorded_at DESC LIMIT 1) AS v
+    FROM buckets b CROSS JOIN subjects s
+  )
+  SELECT i, CASE WHEN @split THEN subject_id END AS subject_id, sum(v * weight) AS value
+  FROM vals WHERE v IS NOT NULL
+  GROUP BY i, CASE WHEN @split THEN subject_id END
+  ORDER BY subject_id IS NULL, subject_id, i";
+
+        public const string FileCatalogSql = @"
+  SELECT m.metric, m.subject_type, m.subjects, m.last_recorded,
+         (SELECT min(h.recorded_at) FROM companion_metric_history h WHERE h.metric = m.metric) AS first_recorded
+  FROM (
+    SELECT metric, subject_type, count(*) AS subjects, max(recorded_at) AS last_recorded
+    FROM companion_metric_latest
+    GROUP BY metric, subject_type
+  ) m
+  ORDER BY m.metric, m.subject_type";
+
+        // The newest row of each Free Company; ids in number order (they're text in the file).
+        public const string FileFcsSql = @"
+  SELECT fc_id, fc_name, fc_master FROM (
+    SELECT h.fc_id, h.fc_name, h.fc_master, row_number() OVER (PARTITION BY h.fc_id ORDER BY h.updated_at DESC) AS n
+    FROM companion_character_housing h
+    WHERE h.fc_id IS NOT NULL
+  ) WHERE n = 1
+  ORDER BY length(fc_id), fc_id";
+
         /// <summary>The query's rows (point, whose, value) as the chart's points and lines (shapeSeriesResult): a point with
         /// nothing recorded yet is null, so a line starts where its history does.</summary>
         public static TrendResult Shape(IEnumerable<(int I, string? SubjectId, double? Value)> rows, TrendRequest r)

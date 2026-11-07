@@ -177,7 +177,7 @@ public partial class MainWindow
         IncomeWindowEditor(income.WindowDays);
         ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted).");
         if (income.KitCost > 0) Runs(T("Repairs: repair kits used at "), GilRun(income.KitCost), T(" each."));
-        else ImGui.TextWrapped("Repairs: set the repair kit cost in Settings (here or in the app) to count them.");
+        else ImGui.TextWrapped("Repairs: set the repair kit cost in Settings" + (WithApp ? " (here or in the app)" : "") + " to count them.");
         ImGui.TextWrapped((notEnough > 0 ? $"{notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history. " : "") +
                           "Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current Gil/Day).");
         // As the app's Against expected and Below expected tiles.

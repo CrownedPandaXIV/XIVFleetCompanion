@@ -12,7 +12,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using XIVFleetCompanion;
 
-internal static class Program
+internal static partial class Program
 {
     private static int failures;
     private static int passes;
@@ -618,6 +618,7 @@ internal static class Program
                     case "update-sort-order": await FleetEdits.SaveOrder(db, a.EnumerateArray().Select(x => x.GetString()!).ToList()); break;
                     case "save-market-settings": error = await FleetEdits.SaveStaleDays(db, D(a.GetProperty("minDays"))); break;
                     case "save-income-settings": error = await FleetEdits.SaveIncomeWindow(db, a.GetProperty("windowDays").GetInt32()); break;
+                    case "save-supply-settings": error = await FleetEdits.SaveSupplyDays(db, D(a.GetProperty("windowDays")), D(a.GetProperty("targetDays"))); break;
                     case "remove-pc":
                         var (removed, problem) = await FleetEdits.RemovePc(db, a.GetString()!, args[1].GetString());
                         error = problem;
@@ -1179,6 +1180,477 @@ internal static class Program
         }
     }
 
+    // 2.1: the plugin updates the database itself (DatabaseUpkeep), with the app's own files. Each way the app updated a
+    // made-up database (the app's tests/db/plugin-database-fixture.js), done again here with the plugin's own code, must
+    // leave exactly the same tables, columns, indexes, views and version records.
+    private static async Task DatabaseAgainstTheApp(NpgsqlConnection conn)
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "database-fixture.json");
+        using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var root = doc.RootElement;
+        var files = DatabaseUpkeep.Files.Embedded();
+        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 16 && files.Updates.Count == 7 && files.Views != null,
+            $"database: the plugin carries the app's files (app {files.AppVersion}, updates to {files.Latest})");
+        var signature = root.GetProperty("signature").EnumerateObject().Select(p => (p.Name, Sql: p.Value.GetString()!)).ToList();
+        var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
+        string Cs(string db) => new NpgsqlConnectionStringBuilder(given) { Database = db, Pooling = false }.ConnectionString;
+        async Task<NpgsqlConnection> Fresh(string db)
+        {
+            await Exec(conn, $"DROP DATABASE IF EXISTS {db} WITH (FORCE)");
+            await Exec(conn, $"CREATE DATABASE {db}");
+            var c = new NpgsqlConnection(Cs(db));
+            await c.OpenAsync();
+            return c;
+        }
+        async Task<string> Signature(NpgsqlConnection c)
+        {
+            var all = new JsonObject();
+            foreach (var (name, sql) in signature)
+            {
+                try
+                {
+                    all[name] = new JsonArray((await Rows(c, sql)).Select(r => (JsonNode?)JsonValue.Create(Convert.ToString(r[0], System.Globalization.CultureInfo.InvariantCulture))).ToArray());
+                }
+                catch (PostgresException)
+                {
+                    all[name] = null;
+                }
+            }
+            return all.ToJsonString();
+        }
+        static string Differs(string mine, JsonElement app)
+        {
+            var a = JsonNode.Parse(mine)!.AsObject();
+            foreach (var p in app.EnumerateObject())
+            {
+                var m = a[p.Name]?.ToJsonString() ?? "null";
+                var x = p.Value.ValueKind == JsonValueKind.Null ? "null" : JsonNode.Parse(p.Value.GetRawText())!.ToJsonString();
+                if (m == x) continue;
+                var mineList = a[p.Name]?.AsArray().Select(v => v!.ToString()).ToHashSet() ?? new HashSet<string>();
+                var appList = p.Value.ValueKind == JsonValueKind.Array ? p.Value.EnumerateArray().Select(v => v.GetString()!).ToHashSet() : new HashSet<string>();
+                return $"{p.Name}: only the plugin's: [{string.Join("; ", mineList.Except(appList).Take(3))}], only the app's: [{string.Join("; ", appList.Except(mineList).Take(3))}]";
+            }
+            return "";
+        }
+
+        foreach (var sc in root.GetProperty("scenarios").EnumerateObject())
+        {
+            var db = $"pdb_plugin_{sc.Name}";
+            await using (var c = await Fresh(db))
+            {
+                var setup = sc.Value.GetProperty("setup").GetString()!;
+                if (setup.Length > 0) await Exec(c, setup);
+                var n = 0;
+                foreach (var step in sc.Value.GetProperty("steps").EnumerateArray())
+                {
+                    n++;
+                    var upTo = step.TryGetProperty("upTo", out var u) ? u.GetInt32() : 0;
+                    var result = await DatabaseUpkeep.EnsureAsync(c, upTo > 0 ? files.UpTo(upTo) : files, "plugin test", wait: true);
+                    var again = step.TryGetProperty("again", out _);
+                    var diff = Differs(await Signature(c), step.GetProperty("expect"));
+                    Check(diff == "" && (!again || result.Applied.Count == 0),
+                        $"database: {sc.Name}, step {n}{(upTo > 0 ? $" (updates to {upTo}, no views)" : again ? " (again: nothing to do)" : "")}: the same as the app's"
+                        + (diff == "" ? $" ({string.Join(", ", result.Applied.Take(4))}{(result.Applied.Count > 4 ? "..." : "")})" : $": {diff}"));
+                }
+            }
+            await Exec(conn, $"DROP DATABASE IF EXISTS {db} WITH (FORCE)");
+        }
+
+        // The views' checksum is worked out as the app does, so the app and the plugin agree a database is up to date.
+        var appChecksum = root.GetProperty("scenarios").GetProperty("empty").GetProperty("steps")[0].GetProperty("expect").GetProperty("viewsChecksum")[0].GetString();
+        Check(DatabaseUpkeep.Checksum(files.Views!) == appChecksum && DatabaseUpkeep.Checksum("a\r\nb") == DatabaseUpkeep.Checksum("a\nb"),
+            "database: the views' checksum is the app's (Windows line endings or not)");
+        Check(DatabaseUpkeep.CompareVersions("1.9.0", "1.8.1") == 1 && DatabaseUpkeep.CompareVersions("1.9.0-test.31", "1.9.0") == 0
+              && DatabaseUpkeep.CompareVersions("1.10.0", "1.9.9") == 1 && DatabaseUpkeep.CompareVersions("2", "2.0.0") == 0 && DatabaseUpkeep.CompareVersions("1.0.0", "1.0.1") == -1,
+            "database: versions compared as the app does");
+
+        await using (var c = await Fresh("pdb_plugin_rules"))
+        {
+            // Another copy (the app, or another game) is updating: this one leaves it to that one, without waiting.
+            await using (var other = new NpgsqlConnection(Cs("pdb_plugin_rules")))
+            {
+                await other.OpenAsync();
+                await Exec(other, $"SELECT pg_advisory_lock({DatabaseUpkeep.LockKey})");
+                var busy = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+                Check(busy.Busy && busy.Applied.Count == 0 && (await Rows(c, "SELECT to_regclass('companion_schema_version')"))[0][0] is null or DBNull,
+                    "database: while another copy updates, the plugin leaves it alone and doesn't wait");
+                // The other copy finishes (a closed connection goes back to the pool still holding its lock).
+                await Exec(other, $"SELECT pg_advisory_unlock({DatabaseUpkeep.LockKey})");
+            }
+            var made = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(made.Created && made.Version == 16 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
+            var recorded = await Rows(c, "SELECT app_version FROM companion_views");
+            Check((string)recorded[0][0]! == files.AppVersion, "database: the views are recorded with the app version the plugin's files came from");
+
+            // Newer views (a newer app) are never replaced with the plugin's; older ones are.
+            await Exec(c, "UPDATE companion_views SET checksum = 'other', app_version = '99.0.0'");
+            var kept = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(kept.Applied.Count == 0 && (string)(await Rows(c, "SELECT checksum FROM companion_views"))[0][0]! == "other", "database: a newer app's views are left alone");
+            await Exec(c, "UPDATE companion_views SET checksum = 'other', app_version = '1.0.0'");
+            var replaced = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(replaced.Applied.SequenceEqual(new[] { "views updated" }), "database: an older app's views are replaced");
+
+            // A login that may only read: fine while nothing needs changing, a plain message when something does.
+            await Exec(conn, "DROP ROLE IF EXISTS pdb_reader");
+            await Exec(conn, "CREATE ROLE pdb_reader LOGIN PASSWORD 'reader'");
+            await Exec(c, "GRANT SELECT ON ALL TABLES IN SCHEMA public TO pdb_reader");
+            var readerCs = new NpgsqlConnectionStringBuilder(Cs("pdb_plugin_rules")) { Username = "pdb_reader", Password = "reader" }.ConnectionString;
+            await using (var reader = new NpgsqlConnection(readerCs))
+            {
+                await reader.OpenAsync();
+                var fine = await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
+                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 16, "database: a login that may only read is fine while nothing needs changing");
+                // As if made by a copy that had only up to update 15: update 16 is still to do.
+                await Exec(c, "UPDATE companion_schema_version SET version = 15");
+                string? message = null;
+                try
+                {
+                    await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
+                }
+                catch (InvalidOperationException e)
+                {
+                    message = e.Message;
+                }
+                Check(message != null && message.Contains("\"pdb_reader\" is not allowed to change the tables"), "database: and says plainly when it can't apply an update: " + message);
+            }
+            var back = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(back.Applied.SequenceEqual(new[] { "update 16: pc_last_read" }) && back.Version == 16, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
+            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 16");
+            Check((string)by[0][0]! == "plugin test", "database: each version records who applied it");
+
+            // A newer app or plugin updated it further: left alone, and said.
+            await Exec(c, "INSERT INTO companion_schema_version (version, name) VALUES (99, 'from the future'); UPDATE companion_views SET checksum = 'future', app_version = '1.0.0'");
+            var newer = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
+            Check(newer.Newer && newer.Applied.Count == 0 && (string)(await Rows(c, "SELECT checksum FROM companion_views"))[0][0]! == "future" && newer.Text.Contains("newer"),
+                "database: one a newer copy updated further is left alone, views and all: " + newer.Text);
+        }
+        await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_rules WITH (FORCE)");
+        await Exec(conn, "DROP ROLE IF EXISTS pdb_reader");
+
+        // When the plugin looks: first time, then not again for 10 minutes; a problem is kept and said once.
+        await using (var c = await Fresh("pdb_plugin_keeper"))
+        {
+            var said = new List<string>();
+            var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
+            Check(keeper.StatusText == "Not looked at yet.", "database: nothing said before the first look");
+            await keeper.RunIfDueAsync(c);
+            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 16)"),
+                "database: the first read or sync brings it up to date and says so: " + keeper.StatusText);
+            var recordedBy = await Rows(c, "SELECT app_version FROM companion_schema_version");
+            Check((string)recordedBy[0][0]! == $"{files.AppVersion} (plugin 2.1.0)", "database: recorded as the plugin, with the app version of its files");
+            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 16");
+            await keeper.RunIfDueAsync(c);
+            Check(said.Count == 1 && (await Rows(c, "SELECT count(*) FROM companion_schema_version"))[0][0] is 0L, "database: not looked at again until it's due");
+        }
+        await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_keeper WITH (FORCE)");
+        await using (var c = await Fresh("pdb_plugin_partial"))
+        {
+            await Exec(c, "CREATE TABLE companion_pc_status (pc_name text)");
+            var said = new List<string>();
+            var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
+            await keeper.RunIfDueAsync(c);
+            await keeper.RunIfDueAsync(c);
+            Check(keeper.Problem != null && keeper.Problem.Contains("will not change it") && said.Count == 1 && keeper.StatusText.StartsWith("Couldn't update the database"),
+                "database: one with someone else's tables is left alone; the problem is kept for the Status page and said once: " + keeper.StatusText);
+        }
+        await Exec(conn, "DROP DATABASE IF EXISTS pdb_plugin_partial WITH (FORCE)");
+    }
+
+    // 2.2 groundwork ("Just this PC"): everything the plugin writes and reads also works on the one-file database (SQLite,
+    // the app's db/sqlite/). The same made-up fleet is synced and edited into a PostgreSQL database and a file, the same
+    // way, and every page's read must give the same answers (times may differ by the moments between the two).
+    private static async Task TwinAgainstTheFile(NpgsqlConnection admin)
+    {
+        var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
+        await Exec(admin, "DROP DATABASE IF EXISTS twin_pg WITH (FORCE)");
+        await Exec(admin, "CREATE DATABASE twin_pg");
+        var file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"twin-{Guid.NewGuid():N}.db");
+        await using var pg = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(given) { Database = "twin_pg", Pooling = false }.ConnectionString);
+        await pg.OpenAsync();
+        await DatabaseUpkeep.EnsureAsync(pg, DatabaseUpkeep.Files.Embedded(), "twin test", wait: true);
+        await using var lite = new System.Data.SQLite.SQLiteConnection($"Data Source={file};Pooling=False");
+        await lite.OpenAsync();
+        foreach (var f in new[] { "tables.sql", "views.sql" })
+            await Db.Exec(lite, System.IO.File.ReadAllText(RepoFile($"XIVFleetCompanion/Database/sqlite/{f}")));
+        var both = new System.Data.Common.DbConnection[] { pg, lite };
+        async Task Each(Func<System.Data.Common.DbConnection, Task> work) { foreach (var c in both) await work(c); }
+
+        // ---- A made-up fleet, synced the way the plugin does ----
+        const ulong bigFc = 9232379236109516865;   // past a signed 64-bit number, as the game's are
+        var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var chars = new List<FleetWriter.CharacterSnapshot>
+        {
+            new() { Cid = 1001, Name = "Aki", World = "Maduin", Gil = 1_234_567, Ceruleum = 900, RepairKits = 40, RetainerCount = 2, SubmarineCount = 2, AccountLabel = "acct1", FcId = bigFc, NumSubSlots = 4 },
+            new() { Cid = 1002, Name = "Bex", World = "Golem", Gil = 50, Ceruleum = 3, RepairKits = 0, AccountLabel = null, FcId = 0 },
+            new() { Cid = 1003, Name = "Cal", World = "Maduin", Gil = 999_999_999, Ceruleum = 10, RepairKits = 2, AccountLabel = "acct2", FcId = 77 },
+        };
+        await Each(c => FleetWriter.WriteCurrentCharactersAsync(c, chars));
+        await Each(c => FleetWriter.RecordLoginsAsync(c, "DESKTOP-1", "acct1", new Dictionary<ulong, DateTime> { [1001] = DateTime.UtcNow.AddMinutes(-5), [1002] = DateTime.UtcNow.AddMinutes(-4) }));
+        await Each(c => FleetWriter.RecordLoginsAsync(c, "LAPTOP", "acct1", new Dictionary<ulong, DateTime> { [1001] = DateTime.UtcNow.AddMinutes(-60) }));
+        await Each(c => FleetWriter.ReleaseLoginsAsync(c, "DESKTOP-1", "acct1", new ulong[] { 1002 }));
+        await Each(c => FleetWriter.RenameLoginSetupAsync(c, "DESKTOP-1", "acct1", "acct1"));
+        var plan = FleetWriter.PlanInventory(1001, new List<FleetWriter.InventorySource>
+        {
+            new() { Id = 1001, Name = "Aki", SeenItems = new() { new() { SortedContainer = 0, SortedSlotIndex = 0, ItemId = 10155, Quantity = 120 },
+                new() { SortedContainer = 3500, SortedSlotIndex = 0, ItemId = 22500, Quantity = 1, GearSetIds = new uint[] { 1, 4 } },
+                new() { SortedContainer = 2001, SortedSlotIndex = 3, ItemId = 2, Quantity = 999 } } },
+            new() { Id = 5001, Name = "Retainer A", SeenItems = new() { new() { SortedContainer = 10000, SortedSlotIndex = 2, ItemId = 10373, Quantity = 15 } } },
+            new() { Id = 5002, Name = "Retainer B", SeenItems = null },
+        }, retainerListKnown: true);
+        await Each(c => FleetWriter.WriteInventoryAsync(c, 1001, plan));
+        var fcItems = new List<FleetWriter.InventoryItem> { new() { SortedContainer = 20000, SortedSlotIndex = 0, ItemId = 10155, Quantity = 500 }, new() { SortedContainer = 20001, SortedSlotIndex = 1, ItemId = 22500, Quantity = 3 } };
+        await Each(c => FleetWriter.WriteFcInventoryAsync(c, bigFc, fcItems));
+        await Each(c => FleetWriter.WriteFcInventoryAsync(c, 12345, fcItems));
+        await Each(c => FleetWriter.RemoveOrphanFcChestsAsync(c));
+        List<FleetWriter.SubmarineRecord> Subs(string first) => new()
+        {
+            new() { SubName = first, Level = 85, Part1 = 21794, Part2 = 21795, Part3 = 21796, Part4 = 21797, Points = new byte[] { 15, 10, 13 }, ReturnTime = nowUnix + 3600, CurrentExp = 1000, NextLevelExp = 50000, Slot = 1 },
+            new() { SubName = "Submersible-2", Level = 40, Part1 = 21794, Part2 = 21795, Part3 = 21796, Part4 = 21797, Points = Array.Empty<byte>(), ReturnTime = nowUnix - 600, CurrentExp = 5, NextLevelExp = 100, Slot = 2 },
+        };
+        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 1001, Subs("Submersible-1")));
+        await Each(c => FleetEdits.SetCraft(c, "1001", "Submersible-1", true));
+        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 1001, Subs("Renamed")));
+        var retainers = new List<FleetWriter.RetainerRecord>
+        {
+            new() { RetainerId = 5001, Name = "Retainer A", Job = 19, Gil = 7000, HasVenture = true, VentureId = 395, VentureBeginsAt = nowUnix - 3600, VentureEndsAt = nowUnix + 600, Level = 90, HireOrderIndex = 0 },
+            new() { RetainerId = 5002, Name = "Retainer B", Job = 17, Gil = 0, HasVenture = false, Level = 12, HireOrderIndex = 1 },
+            new() { RetainerId = 5003, Name = "Gone Soon", Job = 1, Level = 1, HireOrderIndex = 2 },
+        };
+        await Each(c => FleetWriter.WriteRetainersAsync(c, 1001, retainers));
+        await Each(c => FleetWriter.WriteRetainersAsync(c, 1001, retainers.Take(2).ToList()));
+        await Each(c => FleetWriter.MarkRetainersSeenAsync(c, new ulong[] { 5001 }));
+        var house = new FCTrackerConnector.HousingInfo { FcId = bigFc, FcName = "Kittehs", FcPoints = 52000, FcRank = 8, TotalMembers = 3, HasHouse = true, HouseCity = 8, HouseWard = 7, HousePlot = 28,
+            HouseLastVisited = DateTime.UtcNow.AddDays(-40), FcMaster = "Aki", FcHomeWorldId = 34, FcFoundingDate = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc) };
+        await Each(c => FleetWriter.WriteHousingAsync(c, 1001, house));
+        await Each(c => FleetWriter.WriteHousingAsync(c, 1003, new FCTrackerConnector.HousingInfo { FcId = 77, FcName = "Young", FcPoints = 10, FcRank = 1, TotalMembers = 1, FcMaster = "Cal",
+            FcEligibilityOverride = DateTime.UtcNow.AddDays(3) }));
+        await Each(c => FleetWriter.WriteHousingAsync(c, 1002, new FCTrackerConnector.HousingInfo { FcId = 88, FcName = "Left" }));
+        await Each(c => FleetWriter.RemoveHousingAsync(c, new ulong[] { 1002 }));
+        var status = new DetailsWriter.PcStatus { PcName = "DESKTOP-1", AccountLabel = "acct1", PluginVersion = "2.2.0", AutoRetainerReady = true, AllaganToolsReady = true, FcTrackerFound = true,
+            SubmarineTrackerFound = false, VentureStatsFound = true, CharactersSynced = 2, CharactersLeftOut = 1, Problems = new() { "Bex: no FC chest", "Aki: open Retainer B" } };
+        await Each(c => DetailsWriter.WritePcStatusAsync(c, status));
+        await Each(c => DetailsWriter.WriteCharactersElsewhereAsync(c, "DESKTOP-1", "acct1", 1));
+        await Each(c => DetailsWriter.WritePcReadAsync(c, "LAPTOP", "", "2.2.0"));
+        await Each(c => DetailsWriter.WritePcCheckAsync(c, "LAPTOP", "", "2.2.0", "All good\nNothing to fix", 0));
+        await Each(c => DetailsWriter.WriteAutoRetainerNotRunningAsync(c, "OLD-PC", "x", "1.0.0"));
+        await Each(async c => await FleetEdits.RemovePc(c, "OLD-PC", "x"));
+        var loot = new List<DetailsWriter.LootRow>
+        {
+            new() { FcId = bigFc, Register = 1, Return = (uint)(nowUnix - 86400), Sector = 15, Leg = 1, SubName = "Renamed", PrimaryItem = 22500, PrimaryCount = 3, PrimaryHq = false, AdditionalItem = 22501, AdditionalCount = 1, Valid = true },
+            new() { FcId = bigFc, Register = 1, Return = (uint)(nowUnix - 86400), Sector = 10, Leg = 2, SubName = "Renamed", PrimaryItem = 22505, PrimaryCount = 2, PrimaryHq = true, Valid = true },
+            new() { FcId = 77, Register = 2, Return = (uint)(nowUnix - 3600), Sector = 1, Leg = 1, SubName = "Sub", PrimaryItem = 22500, PrimaryCount = 1, Valid = true },
+        };
+        await Each(c => DetailsWriter.WriteVoyageLootAsync(c, loot));
+        var ventures = new List<DetailsWriter.VentureRow>
+        {
+            new() { OwnerCid = 1001, RetainerName = "Retainer A", At = nowUnix - 7200, ItemId = 5111, Hq = false, Quantity = 20, VentureId = 395 },
+            new() { OwnerCid = 1001, RetainerName = "Retainer A", At = nowUnix - 3600, ItemId = 22500, Hq = true, Quantity = 1, VentureId = 395 },
+        };
+        await Each(c => DetailsWriter.WriteVenturesAsync(c, ventures));
+        var listings = new List<DetailsWriter.Listing> { new() { RetainerId = 5001, Slot = 0, ItemId = 22500, Quantity = 1, Hq = false, UnitPrice = 90000 }, new() { RetainerId = 5001, Slot = 1, ItemId = 5111, Quantity = 99, Hq = true, UnitPrice = 120 } };
+        await Each(c => DetailsWriter.WriteListingsAsync(c, 1001, new ulong[] { 5001 }, listings));
+        await Each(c => DetailsWriter.WriteListingsAsync(c, 1001, new ulong[] { 5001 }, listings.Take(1).ToList()));
+        var metrics = new List<MetricWriter.MetricPoint>
+        {
+            new() { SubjectType = "character", SubjectId = 1001, Metric = "gil", Value = 1_234_567 },
+            new() { SubjectType = "character", SubjectId = 1003, Metric = "gil", Value = 999_999_999 },
+            new() { SubjectType = "fc", SubjectId = bigFc, Metric = "fc_points", Value = 52000, Label = "Aki" },
+        };
+        var recorded = new List<string>();
+        await Each(async c => recorded.Add(await MetricWriter.WriteMetricsAsync(c, metrics)));
+        await Each(async c => recorded.Add(await MetricWriter.WriteMetricsAsync(c, metrics)));
+        metrics[0].Value = 2_000_000;
+        await Each(async c => recorded.Add(await MetricWriter.WriteMetricsAsync(c, metrics)));
+        Check(recorded.SequenceEqual(new[] { "Success — 3 of 3 metrics recorded.", "Success — 3 of 3 metrics recorded.", "Success — 0 of 3 metrics recorded.", "Success — 0 of 3 metrics recorded.",
+                "Success — 1 of 3 metrics recorded.", "Success — 1 of 3 metrics recorded." }),
+            "file: Trends values are recorded only when they change, on both: " + string.Join(" / ", recorded));
+
+        // ---- The Next Rank dates, saved once an hour (ForecastWriter) ----
+        var forecastNow = (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds;
+        var due = new List<ForecastWriter.Forecast>
+        {
+            new(1001, 1, 51, forecastNow + 3 * 3_600_000, "Renamed"),
+            new(1001, 2, 31, forecastNow + 26 * 3_600_000, "Submersible-2"),
+        };
+        await Exec(pg, "INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (1001, 1, 40, now() - interval '40 days', now() - interval '39 days', 'Old')");
+        await Db.Exec(lite, $"INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (1001, 1, 40, {Db.FileNow} - 40 * 86400.0, {Db.FileNow} - 39 * 86400.0, 'Old')");
+        var forecastSaves = new List<int>();
+        await Each(async c => forecastSaves.Add(await ForecastWriter.SaveAsync(c, due)));
+        await Each(async c => forecastSaves.Add(await ForecastWriter.SaveAsync(c, due)));
+        var forecastRows = new List<string>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, @"SELECT count(*), sum(CASE WHEN sub_name = 'Old' THEN 1 ELSE 0 END), count(DISTINCT made_at) FROM companion_rankup_forecast");
+            await using var r = await cmd.ExecuteReaderAsync();
+            await r.ReadAsync();
+            forecastRows.Add($"{Convert.ToInt64(r.GetValue(0))} rows, {Convert.ToInt64(r.GetValue(1))} old, {Convert.ToInt64(r.GetValue(2))} hour(s)");
+        });
+        Check(forecastSaves.SequenceEqual(new[] { 2, 2, 0, 0 }) && forecastRows.All(f => f == "2 rows, 0 old, 1 hour(s)"),
+            $"file: Next Rank dates are saved once an hour and those over 30 days old go, on both: {string.Join(" / ", forecastSaves)}; {string.Join(" / ", forecastRows)}");
+        var hours = new List<double>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, "SELECT made_at, predicted_at FROM companion_rankup_forecast WHERE slot = 1");
+            await using var r = await cmd.ExecuteReaderAsync();
+            await r.ReadAsync();
+            var made = Db.Time(r, 0);
+            hours.Add(made.Minute + made.Second + made.Millisecond);
+            hours.Add(Math.Abs((Db.Time(r, 1) - DateTime.UnixEpoch).TotalMilliseconds - due[0].PredictedAtMs));
+        });
+        Check(hours.All(h => h < 1), $"file: saved under the hour (on the hour), with the date as given, on both ({string.Join(", ", hours)})");
+
+        // ---- The edits made from the game ----
+        var ruleIds = new List<long>();
+        await Each(async c => ruleIds.Add(await FleetEdits.AddRule(c, new FleetEdits.Rule(null, 50, null, null, "S", "S", "C", "C"))));
+        await Each(async c => await FleetEdits.UpdateRule(c, new FleetEdits.Rule(ruleIds[c == pg ? 0 : 1], 60, "1001", "Renamed", "S", "S", "S", "C")));
+        await Each(async c => await FleetEdits.AddRule(c, new FleetEdits.Rule(null, 90, null, null, "Y", "Y", "Y", "Y")));
+        await Each(async c => await FleetEdits.SaveTarget(c, "5001", "level", 90, false));
+        await Each(async c => await FleetEdits.SaveTarget(c, "5002", "ilvl", 600, true));
+        await Each(async c => await FleetEdits.DeleteTarget(c, "5002"));
+        await Each(c => FleetEdits.SaveOrder(c, new[] { "1003", "1001", "1002" }));
+        var answers = new List<string?>();
+        await Each(async c => answers.Add(await FleetEdits.SaveStaleDays(c, 5)));
+        await Each(async c => answers.Add(await FleetEdits.SaveIncomeWindow(c, 7)));
+        await Each(async c => answers.Add(await FleetEdits.SaveWarnings(c, 20, 100, 30, 45)));
+        await Each(async c => answers.Add(await FleetEdits.SaveRepairKitCost(c, 2000)));
+        await Each(c => FleetEdits.SaveLivePrices(c, false));
+        await Each(async c => answers.Add(await FleetEdits.SavePlayStyle(c, "both")));
+        await Each(async c => answers.Add(await FleetEdits.SaveShoppingProgress(c, 21794, 1, 2, 3)));
+        await Each(async c => answers.Add(await FleetEdits.SaveShoppingProgress(c, 21795, 2, 2, 0)));
+        Check(answers.All(a => a == null), "file: every edit is accepted on both: " + string.Join(", ", answers.Where(a => a != null)));
+
+        // ---- Every read, compared ----
+        var options = new JsonSerializerOptions { IncludeFields = true };
+        // unordered: a list the views give in no set order (what reads it sorts it itself): the same rows, in any order.
+        static JsonNode? Sorted(JsonNode? n) => n switch
+        {
+            JsonArray a => new JsonArray(a.Select(Sorted).OrderBy(x => x?.ToJsonString(), StringComparer.Ordinal).ToArray()),
+            JsonObject o => new JsonObject(o.Select(kv => KeyValuePair.Create(kv.Key, Sorted(kv.Value)))),
+            null => null,
+            _ => JsonNode.Parse(n.ToJsonString()),
+        };
+        System.Data.Common.DbConnection left = pg, right = lite;
+        var label = "file";
+        async Task Same<T>(string what, Func<System.Data.Common.DbConnection, Task<T>> read, bool unordered = false)
+        {
+            string a, b;
+            try
+            {
+                a = JsonSerializer.Serialize(await read(left), options);
+                b = JsonSerializer.Serialize(await read(right), options);
+            }
+            catch (Exception ex)
+            {
+                Check(false, $"{label}: {what} reads on both: {ex.GetType().Name}: {ex.Message.Replace("\r", " ").Replace("\n", " ")}");
+                return;
+            }
+            var diff = unordered ? JsonDiff(Sorted(JsonNode.Parse(a)), Sorted(JsonNode.Parse(b)), "") : JsonDiff(JsonNode.Parse(a), JsonNode.Parse(b), "");
+            Check(diff == null, $"{label}: {what} the same on both" + (diff == null ? $" ({a.Length} characters)" : $": {diff}"));
+        }
+        async Task CompareAll()
+        {
+            await Same("logins", c => FleetWriter.ReadLoginOwnersAsync(c, new ulong[] { 1001, 1002, 1003 }));
+            await Same("item totals of a character", c => FleetWriter.ReadItemTotalsAsync(c, 1001, new uint[] { 10155, 10373, 5 }));
+            await Same("sources stored", c => FleetWriter.ReadStoredSourceCountAsync(c, 1001));
+            await Same("how long ago things were stored", async c =>
+            {
+                var ages = await FleetWriter.ReadStoredAgesAsync(c, new ulong[] { 1001, 1002 }, new ulong[] { bigFc });
+                return new { Synced = ages.Synced.Keys.OrderBy(k => k).ToList(), Inventory = ages.Inventory.Keys.Select(k => $"{k.Owner}/{k.Source}").OrderBy(k => k).ToList(),
+                    Chest = ages.Chest.Keys.ToList(), Recent = ages.Synced.Values.Concat(ages.Inventory.Values).Concat(ages.Chest.Values).All(t => t < TimeSpan.FromMinutes(5)) };
+            });
+            await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToList());
+            await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 1001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
+            await Same("settings", FleetReader.ReadSettings);
+            await Same("Subs", FleetReader.ReadSubs);
+            await Same("Supplies", FleetReader.ReadSupplies);
+            await Same("Summary", FleetReader.ReadSummary);
+            await Same("what needs attention", FleetReader.ReadAlerts);
+            await Same("Roster", FleetReader.ReadRoster);
+            await Same("Retainers", FleetReader.ReadRetainers);
+            await Same("PCs", FleetReader.ReadPcs);
+            await Same("retainer counts", FleetReader.ReadRetainerCounts);
+            await Same("Free Companies", FleetReader.ReadFcs);
+            await Same("Inventory", c => FleetReader.ReadHoldings(c, "true"));
+            await Same("a character's stacks", c => FleetReader.ReadHoldings(c, "kind <> 'fc'", "owner_cid", new object[] { 1001L }), unordered: true);
+            await Same("a Free Company's chest", c => FleetReader.ReadHoldings(c, "kind = 'fc'", "fc_id", new object[] { (decimal)bigFc }));
+            await Same("Where is it?", c => FleetReader.ReadHoldings(c, "NOT money", "item_id", new object[] { 10155, 22500 }), unordered: true);
+            await Same("item totals", FleetReader.ReadItemTotals, unordered: true);
+            await Same("Gil & Market", async c => (await FleetReader.ReadMarketData(c)).Read);
+            await Same("what to ask Universalis", async c => { var ask = (await FleetReader.ReadMarketData(c)).Ask; return ask == null ? null : new { Exclude = ask.Exclude.OrderBy(x => x).ToList(), Wanted = ask.Wanted.Select(w => $"{w.World}:{w.ItemId}").OrderBy(x => x).ToList() }; });
+            await Same("routes' inputs", FleetReader.ReadRoutesInputs, unordered: true);
+            await Same("forecast accuracy", FleetReader.ReadForecasts);
+            await Same("Loot per Voyage", FleetReader.ReadLoot);
+            await Same("Parts", async c => (await FleetReader.ReadParts(c)).Needs);
+            await Same("Parts' inputs", FleetReader.ReadPartsInputs, unordered: true);
+            await Same("Salvage", FleetReader.ReadSalvage);
+            await Same("Income", FleetReader.ReadIncome, unordered: true);
+            await Same("venture income", FleetReader.ReadVentures, unordered: true);
+            await Same("items held", FleetReader.ReadHeldItems, unordered: true);
+            await Same("Shopping List", FleetReader.ReadShopping);
+            await Same("Trends: what's recorded", FleetReader.ReadTrendsMeta);
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await Same("Trends: gil, whole fleet", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, null)));
+            await Same("Trends: gil, each character", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, new() { "1001", "1003" })));
+            await Same("Trends: a Free Company's points", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 5, new() { new("fc_points", "fc") }, new() { bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture) })));
+            await Same("Trends: a sum of two", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 6, new() { new("gil", "character"), new("fc_points", "fc", 2) }, null)));
+        }
+        await CompareAll();
+
+        // ---- Moving the fleet (step 4): the file's into an empty shared database, and that back into a new file ----
+        await MoveChecks(admin, given, pg, lite, async (x, y, what) => { left = x; right = y; label = what; await CompareAll(); });
+
+        await lite.CloseAsync();
+        System.Data.SQLite.SQLiteConnection.ClearAllPools();
+        try { System.IO.File.Delete(file); } catch (System.IO.IOException) { }
+        await pg.CloseAsync();
+        await Exec(admin, "DROP DATABASE IF EXISTS twin_pg WITH (FORCE)");
+    }
+
+    // Where two reads' answers differ (null: they don't). Times may differ by the moments between the two writes and
+    // reads: a date within 10 minutes, a Unix time (seconds or milliseconds) within 10 minutes, any other fraction to
+    // one part in a million or a thousandth (an age in days, a minute and a half); whole numbers and text exactly.
+    private static string? JsonDiff(JsonNode? a, JsonNode? b, string path)
+    {
+        if (a == null || b == null) return a == null && b == null ? null : $"{path}: {a?.ToJsonString() ?? "null"} / {b?.ToJsonString() ?? "null"}";
+        if (a is JsonObject oa && b is JsonObject ob)
+        {
+            foreach (var key in oa.Select(p => p.Key).Union(ob.Select(p => p.Key)))
+            {
+                var d = JsonDiff(oa[key], ob[key], $"{path}.{key}");
+                if (d != null) return d;
+            }
+            return null;
+        }
+        if (a is JsonArray xa && b is JsonArray xb)
+        {
+            if (xa.Count != xb.Count) return $"{path}: {xa.Count} / {xb.Count} items";
+            for (var i = 0; i < xa.Count; i++)
+            {
+                var d = JsonDiff(xa[i], xb[i], $"{path}[{i}]");
+                if (d != null) return d;
+            }
+            return null;
+        }
+        var va = a.AsValue();
+        var vb = b.AsValue();
+        if (va.TryGetValue<double>(out var na) && vb.TryGetValue<double>(out var nb))
+        {
+            if (na == nb) return null;
+            var big = Math.Max(Math.Abs(na), Math.Abs(nb));
+            if (big > 1e12 ? Math.Abs(na - nb) <= 600_000 : big > 1e9 ? Math.Abs(na - nb) <= 600 : (na % 1 != 0 || nb % 1 != 0) && Math.Abs(na - nb) <= Math.Max(1e-6 * big, 1e-3)) return null;
+            return $"{path}: {na} / {nb}";
+        }
+        if (va.TryGetValue<string>(out var sa) && vb.TryGetValue<string>(out var sb))
+        {
+            if (sa == sb) return null;
+            if (DateTime.TryParse(sa, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var ta)
+                && DateTime.TryParse(sb, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var tb)
+                && Math.Abs((ta.ToUniversalTime() - tb.ToUniversalTime()).TotalMinutes) <= 10) return null;
+            return $"{path}: \"{sa}\" / \"{sb}\"";
+        }
+        return a.ToJsonString() == b.ToJsonString() ? null : $"{path}: {a.ToJsonString()} / {b.ToJsonString()}";
+    }
+
     private static void Check(bool ok, string what)
     {
         if (ok) passes++; else failures++;
@@ -1257,8 +1729,10 @@ internal static class Program
             _ => Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture),
         }))));
 
-    private static async Task<int> Main()
+    private static async Task<int> Main(string[] args)
     {
+        // A second process writing to the same fleet file (FileChecks).
+        if (args.Length > 0 && args[0] == "--hammer") return await Hammer(args[1], int.Parse(args[2]), int.Parse(args[3]));
         var connectionString = Environment.GetEnvironmentVariable("FLEET_TEST_DB")
             ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
         await using var conn = new NpgsqlConnection(connectionString);
@@ -1460,10 +1934,10 @@ internal static class Program
         Check(fcs.Count == 2 && fcs[0].FcId == 9232379236109516865m && fcs[0].Name == "Kittehs" && fcs[0].HasHouse && fcs[0].HouseLevel == "warn" && fcs[0].HomeWorld == 34 && fcs[0].Points == 52000
               && fcs[1].Name == "Young" && !fcs[1].HasHouse && fcs[1].Eligibility == "Eligible in 3 days" && fcs[1].SortIndex == int.MaxValue && fcs[1].Account == "",
             "batch 2: the Free Companies read, in the Roster's order: " + string.Join(" | ", fcs));
-        var holdings = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 1 }));
+        var holdings = await FleetReader.ReadHoldings(conn, "true", "owner_cid", new object[] { 1L });
         Check(holdings.Count == 2 && holdings[0].Hq && holdings[0].Place == "Bags" && holdings[0].ContainerName == "Inventory 1" && holdings[1].Money && holdings[1].FcId == 9232379236109516865m && holdings[1].World == "",
             "batch 2: stacks read with a condition: " + string.Join(" | ", holdings));
-        var none = await FleetReader.ReadHoldings(conn, "owner_cid = ANY(CAST(@ids AS numeric[]))", p => p.AddWithValue("ids", new long[] { 2 }));
+        var none = await FleetReader.ReadHoldings(conn, "true", "owner_cid", new object[] { 2L });
         Check(none.Count == 0, "batch 2: only the stacks asked for");
         var totals = await FleetReader.ReadItemTotals(conn);
         Check(totals.Count == 1 && totals[0] == new ItemTotalRow(10155, true, 5), "batch 2: the fleet's totals read");
@@ -1502,7 +1976,7 @@ internal static class Program
               (1, 'Aki', 'Maduin', 'A', 5, 6000, 4, NULL, 3, 2, 3),
               (1, 'Aki', 'Maduin', 'A', 5, 6001, 1, NULL, 3, 2, 3))
               AS t(owner_cid, name, world, account_label, sort_index, item_id, quantity, salvage_price, rewards, retainers, window_days);");
-        var worn = await FleetReader.ReadHoldings(conn, "true", _ => { });
+        var worn = await FleetReader.ReadHoldings(conn, "true");
         Check(worn.Count == 2 && worn[0].Equipped && !worn[1].Equipped, "batch 3: equipped gear marked: " + string.Join(" | ", worn));
         var wornTotals = await FleetReader.ReadItemTotals(conn);
         Check(wornTotals.Single() == new ItemTotalRow(40000, false, 3, 1), "batch 3: the fleet's totals say how many are worn: " + wornTotals.Single());
@@ -1560,6 +2034,9 @@ internal static class Program
         await EditsAgainstTheApp(conn);
         await FightClubAgainstTheApp(conn);
         LooksAgainstTheApp();
+        await DatabaseAgainstTheApp(conn);
+        await TwinAgainstTheFile(conn);
+        await FileChecks();
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

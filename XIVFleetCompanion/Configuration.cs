@@ -44,6 +44,9 @@ public class Configuration : IPluginConfiguration
     public string? ShoppingPriceScope { get; set; } = null;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
+    // 2.2: where the fleet lives. A setup from before 2.2 that already has a database connection is SharedDatabase (see
+    // Plugin's start); a new one is asked first (the main window).
+    public FleetStoreChoice FleetStore { get; set; } = FleetStoreChoice.NotChosen;
     public string FCTrackerConfigPath { get; set; } = "";
     public string AccountLabel { get; set; } = "";
     // The account label this setup's logins were last recorded under (null: none yet), so a changed label can
@@ -51,7 +54,7 @@ public class Configuration : IPluginConfiguration
     public string? LoginsRecordedAs { get; set; } = null;
     // Shown in the plugin's window and settings while AccountLabel is blank: the app tells accounts apart by it.
     public const string NoAccountLabelText =
-        "Give this setup an Account Label (for example, the account's name) so the app can tell your accounts apart and spot two setups syncing the same character.";
+        "Give this setup an Account Label (for example, the account's name) so your accounts can be told apart and two setups syncing the same character are spotted.";
 
     // Which characters are synced (see CharacterChoice): every one except SkippedCharacters, or with
     // SyncOnlyChosen only ChosenCharacters.

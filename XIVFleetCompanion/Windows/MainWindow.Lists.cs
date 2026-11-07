@@ -107,12 +107,12 @@ public partial class MainWindow
         new("ceruleum", "Ceruleum", c =>
         {
             RightNumber(c.Ceruleum, SupplyColor(c.Ceruleum, c.CeruleumWarning, c.SubsBuilt > 0 && c.BehindMinutes == null));
-            if (c.LowCeruleum) Hover($"Below the low-ceruleum warning of {c.CeruleumWarning:N0} (set in the app: Settings → General → Warnings)");
+            if (c.LowCeruleum) Hover($"Below the low-ceruleum warning of {c.CeruleumWarning:N0} ({WarningsWhere})");
         }, c => c.Ceruleum ?? 0),
         new("repairKits", "Repair kits", c =>
         {
             RightNumber(c.RepairKits, SupplyColor(c.RepairKits, c.RepairKitWarning, c.SubsBuilt > 0 && c.BehindMinutes == null));
-            if (c.LowRepairKits) Hover($"Below the low-repair-kit warning of {c.RepairKitWarning:N0} (set in the app: Settings → General → Warnings)");
+            if (c.LowRepairKits) Hover($"Below the low-repair-kit warning of {c.RepairKitWarning:N0} ({WarningsWhere})");
         }, c => c.RepairKits ?? 0),
         new("retainers", "Retainers", c => RightNumber(c.Retainers), c => c.Retainers),
         // Subs as dots out of the slots unlocked: green when every slot has one, amber with a slot free.
@@ -165,7 +165,7 @@ public partial class MainWindow
         var roster = reader.Roster.Data;
         if (roster == null) return;
         if (ImGui.Button("Change order##roster")) rosterOrderDraft = FleetOrder.Roster(roster, c => c.SortIndex, c => c.Character).ToList();
-        Hover("Move characters up or down in the Roster order (used everywhere, in the game and the app).");
+        Hover("Move characters up or down in the Roster order (used everywhere" + (WithApp ? ", in the game and the app)." : ")."));
         RosterTable.Draw(roster.Where(c => Matches(rosterFilter, c.Character, c.World, c.Account, c.FcName)).ToList());
     }
 
@@ -197,7 +197,7 @@ public partial class MainWindow
             // Green when the gear meets the retainer's gear target, amber when it falls short, plain with no target.
             var meets = x.Check == "meets" ? Green : x.Check == "short" ? Amber : (Vector4?)null;
             if (x.Ilvl.HasValue) TableCells.Right(x.Ilvl.Value.ToString("0.0", CultureInfo.CurrentCulture), meets); else Colored(Dim, "—");
-            if (x.Check != null) Hover(x.Check == "meets" ? "Every slot meets the gear target." : "Short of the gear target: the app's Retainers tab shows which slots (hover Avg ilvl there).");
+            if (x.Check != null) Hover(x.Check == "meets" ? "Every slot meets the gear target." : "Short of the gear target" + (WithApp ? ": the app's Retainers tab shows which slots (hover Avg ilvl there)." : "."));
             if (!x.R.ItemsSeen) Hover("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
         }, x => x.Ilvl ?? 0, x => x.Ilvl == null),
         new("venture", "Venture", x => ImGui.TextUnformatted(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
@@ -284,14 +284,14 @@ public partial class MainWindow
             var newest = reader.Pcs.Data?.Select(x => x.PluginVersion).Aggregate("0", (v, x) => FleetReader.CompareVersions(x, v) > 0 ? x! : v) ?? "0";
             var old = FleetReader.CompareVersions(p.PluginVersion, newest) < 0;
             if (old) Colored(Amber, p.PluginVersion ?? "—"); else ImGui.TextUnformatted(p.PluginVersion ?? "—");
-            if (old) Hover($"Older than {newest} on another PC: update it in /xlplugins there.");
+            if (old) Hover($"Older than {newest} {(WithApp ? "on another PC" : "in another game on this PC")}: update it in /xlplugins there.");
         }, p => string.Join(".", (p.PluginVersion ?? "").Split('.').Select(n => n.PadLeft(5, '0'))), p => p.PluginVersion == null),
         new("lastSync", "Last sync", p =>
             {
                 // A PC whose plugin only reads (it syncs no characters) checks in too.
                 if (p.LastSync == null && p.LastRead is { } read) Colored(Dim, $"Only reads (seen {FleetReader.Ago(read, DateTime.Now)})");
                 else ImGui.TextUnformatted(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, DateTime.Now) : "never");
-                if (p.LastRead is { } seen) Hover($"Its plugin last read the database {FleetReader.Ago(seen, DateTime.Now)}.");
+                if (p.LastRead is { } seen) Hover($"Its plugin last read {(WithApp ? "the database" : "the fleet file")} {FleetReader.Ago(seen, DateTime.Now)}.");
             },
             p => p.LastSync ?? DateTime.MinValue, p => p.LastSync == null),
         new("characters", "Characters", p =>
@@ -331,7 +331,7 @@ public partial class MainWindow
         ImGui.SameLine();
         PcsTable.DrawControls();
         ImGui.SameLine();
-        Colored(Dim, "Each setup of the plugin (PC and account label), as of its last sync.");
+        Colored(Dim, WithApp ? "Each setup of the plugin (PC and account label), as of its last sync." : "Each game on this PC that syncs (by account label), as of its last sync.");
         ReadLine(reader.Pcs, FleetReader.ListsEvery);
         EditLine();
         var pcs = reader.Pcs.Data;

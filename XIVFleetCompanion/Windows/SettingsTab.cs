@@ -92,6 +92,68 @@ public class SettingsTab : IDisposable
 
     // Which characters are synced: every one except the unticked, or only the ticked (for an account
     // with many characters of which only a few should reach the app).
+    // The shared database's connection (Shared between PCs): Local or Remote, and its saved login.
+    public void DrawDatabaseConnection()
+    {
+        ImGui.Text("Connection Mode");
+
+        var useRemote = configuration.UseRemoteConnection;
+        if (ImGui.RadioButton("Local", !useRemote))
+        {
+            configuration.UseRemoteConnection = false;
+            configuration.Save();
+            Plugin.SaveChoiceForPc(configuration);
+            LoadSavedCredential();
+        }
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Remote", useRemote))
+        {
+            configuration.UseRemoteConnection = true;
+            configuration.Save();
+            Plugin.SaveChoiceForPc(configuration);
+            LoadSavedCredential();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.Text($"Database Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
+
+        ImGui.InputText("Host", ref pgHost, 100);
+        ImGui.InputText("Port", ref pgPort, 10);
+        ImGui.InputText("Database", ref pgDatabase, 100);
+        ImGui.InputText("Username", ref pgUsername, 100);
+        ImGui.InputText("Password", ref pgPassword, 100, ImGuiInputTextFlags.Password);
+        if (pgHasSavedPassword)
+            ImGui.TextDisabled("A password is saved. Leave the box empty to keep it.");
+
+        if (ImGui.Button("Save Database Credentials"))
+            pgSaveResult = SaveCredential();
+
+        ImGui.SameLine();
+
+        // Two clicks within a few seconds, so the saved connection is not removed by a stray click.
+        var clearArmed = DateTime.UtcNow < clearArmedUntil;
+        if (ImGui.Button(clearArmed ? "Click again to clear" : "Clear Saved Credentials"))
+        {
+            if (clearArmed)
+            {
+                PostgresCredentialStore.Delete(configuration.UseRemoteConnection);
+                LoadSavedCredential();
+                pgSaveResult = "Cleared.";
+            }
+            else
+            {
+                clearArmedUntil = DateTime.UtcNow.AddSeconds(5);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(pgSaveResult))
+        {
+            ImGui.TextWrapped(pgSaveResult);
+        }
+    }
+
     private void DrawCharacters()
     {
         if (!ImGui.CollapsingHeader("Characters")) return;
@@ -127,7 +189,9 @@ public class SettingsTab : IDisposable
 
         var syncing = list.Count(c => configuration.ShouldSync(c.Cid));
         ImGui.Text($"Syncing {syncing} of {list.Count} characters.");
-        ImGui.TextDisabled("Left-out characters are not read or sent. Anything they sent before can be removed with the app's Remove button on the Roster.");
+        ImGui.TextDisabled("Left-out characters are not read or sent." + (configuration.FleetStore == FleetStoreChoice.ThisPc
+            ? " What they sent before stays until they're synced again."
+            : " Anything they sent before can be removed with the app's Remove button on the Roster."));
 
         using (var child = ImRaii.Child("##characters", new Vector2(0, Math.Min(list.Count, 10) * ImGui.GetFrameHeightWithSpacing() + 8), true))
         {
@@ -198,7 +262,7 @@ public class SettingsTab : IDisposable
             configuration.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app sees its subs a few seconds later instead of at the next interval.");
+            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so its subs show a few seconds later instead of at the next interval.");
 
         var showInInfoBar = configuration.ShowInInfoBar;
         if (ImGui.Checkbox("Show Fleet in the game's info bar", ref showInInfoBar))
@@ -256,61 +320,14 @@ public class SettingsTab : IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text("Connection Mode");
-
-        var useRemote = configuration.UseRemoteConnection;
-        if (ImGui.RadioButton("Local", !useRemote))
+        if (configuration.FleetStore == FleetStoreChoice.ThisPc)
         {
-            configuration.UseRemoteConnection = false;
-            configuration.Save();
-            LoadSavedCredential();
+            ImGui.Text("Fleet data: Just this PC");
+            ImGui.TextWrapped($"Every game on this PC keeps your fleet in {FileDatabase.DefaultPath}, backed up once a day " +
+                              "(the Status page has Back up now). There's no database to connect to.");
         }
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Remote", useRemote))
-        {
-            configuration.UseRemoteConnection = true;
-            configuration.Save();
-            LoadSavedCredential();
-        }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.Text($"Database Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
-
-        ImGui.InputText("Host", ref pgHost, 100);
-        ImGui.InputText("Port", ref pgPort, 10);
-        ImGui.InputText("Database", ref pgDatabase, 100);
-        ImGui.InputText("Username", ref pgUsername, 100);
-        ImGui.InputText("Password", ref pgPassword, 100, ImGuiInputTextFlags.Password);
-        if (pgHasSavedPassword)
-            ImGui.TextDisabled("A password is saved. Leave the box empty to keep it.");
-
-        if (ImGui.Button("Save Database Credentials"))
-            pgSaveResult = SaveCredential();
-
-        ImGui.SameLine();
-
-        // Two clicks within a few seconds, so the saved connection is not removed by a stray click.
-        var clearArmed = DateTime.UtcNow < clearArmedUntil;
-        if (ImGui.Button(clearArmed ? "Click again to clear" : "Clear Saved Credentials"))
-        {
-            if (clearArmed)
-            {
-                PostgresCredentialStore.Delete(configuration.UseRemoteConnection);
-                LoadSavedCredential();
-                pgSaveResult = "Cleared.";
-            }
-            else
-            {
-                clearArmedUntil = DateTime.UtcNow.AddSeconds(5);
-            }
-        }
-
-        if (!string.IsNullOrEmpty(pgSaveResult))
-        {
-            ImGui.TextWrapped(pgSaveResult);
-        }
+        else
+            DrawDatabaseConnection();
 
         ImGui.Spacing();
         ImGui.Separator();

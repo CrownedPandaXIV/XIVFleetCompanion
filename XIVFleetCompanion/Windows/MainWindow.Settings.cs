@@ -30,8 +30,8 @@ public partial class MainWindow
 
     private void DrawSharedSettings()
     {
-        if (!ImGui.CollapsingHeader("Shared with the app", ImGuiTreeNodeFlags.DefaultOpen)) return;
-        Colored(Dim, "Saved in the database: the app and every PC's plugin use the same.");
+        if (!ImGui.CollapsingHeader(WithApp ? "Shared with the app###sharedSettings" : "Fleet settings###sharedSettings", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        Colored(Dim, WithApp ? "Saved in the database: the app and every PC's plugin use the same." : "Saved in the fleet file: every game on this PC uses the same.");
         var read = reader.Settings;
         if (read.Data is not { } st)
         {
@@ -154,7 +154,7 @@ public partial class MainWindow
     {
         fightClubDialog.Draw();
         if (!ImGui.CollapsingHeader("Fight Club Data")) return;
-        Colored(Dim, "Fight Club's route spreadsheet: the routes, their gil and the builds they need, for Route Optimization, Parts and Income. Saved in the database, for the app too.");
+        Colored(Dim, "Fight Club's route spreadsheet: the routes, their gil and the builds they need, for Route Optimization, Parts and Income." + (WithApp ? " Saved in the database, for the app too." : ""));
         using (ImRaii.Disabled(fightClubReading || reader.Editing))
         {
             if (ImGui.Button("Import Fight Club Data"))

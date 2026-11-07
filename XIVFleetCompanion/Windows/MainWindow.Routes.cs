@@ -176,12 +176,12 @@ public partial class MainWindow
         string When(double ms) => DateTime.UnixEpoch.AddMilliseconds(ms).ToLocalTime().ToString("MMM d HH:mm", CultureInfo.CurrentCulture);
         var lines = a.Checks.Select(c => $"{c.SubName}{(c.Character.Length > 0 ? $" ({c.Character})" : "")} rank {c.Rank}: said {When(c.PredictedAt)}, ranked up {When(c.At)}, " +
             $"{(Math.Abs(c.Off) < 60000 ? "on time" : $"{OffText(c.Off)} {(c.Off > 0 ? "late" : "early")}")}; worked out {OffText(c.At - c.MadeAt)} before").ToList();
-        Hover("The app saves each sub's Next Rank date every hour while it's open. The average counts dates worked out a day or more before the rank-up, " +
+        Hover((WithApp ? "The app saves each sub's Next Rank date every hour while it's open." : "The plugin saves each sub's Next Rank date every hour while a game shows the fleet.") + " The average counts dates worked out a day or more before the rank-up, " +
               "early or late; a rank-up counts from when its voyage came back." + (lines.Count > 0 ? "\n\nRecent rank-ups:\n" + string.Join("\n", lines) : ""));
     }
 
     private const string NoCurrentGil = "Its route isn't in Fight Club, or its rank is below the route's builds.";
-    private const string NoTargetGil = "Fight Club recommends routes from rank 85 (import its data in Settings, here or in the app).";
+    private string NoTargetGil => "Fight Club recommends routes from rank 85 (import its data in Settings" + (WithApp ? ", here or in the app)." : ").");
 
     private FleetTable<SubRoute> RoutesTable => routesTable ??= new FleetTable<SubRoute>("routeOpt", plugin.Configuration, new List<FleetColumn<SubRoute>>
     {
