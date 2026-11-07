@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -352,6 +353,7 @@ public sealed class DatabaseKeeper
     public static readonly TimeSpan AfterProblem = TimeSpan.FromMinutes(5);
 
     private readonly Func<DatabaseUpkeep.Files> files;
+    private readonly Func<FileDatabase.Files> fileFiles;
     private readonly string recordedBy;
     private readonly Action<string>? log;
     private DateTime nextAt = DateTime.MinValue;
@@ -364,8 +366,10 @@ public sealed class DatabaseKeeper
 
     /// <param name="recordedBy">Recorded with each version this plugin applies, e.g. "plugin 2.1.0".</param>
     /// <param name="log">Where to say what changed, and a problem (once until it changes).</param>
-    public DatabaseKeeper(Func<DatabaseUpkeep.Files> files, string recordedBy, Action<string>? log = null)
+    /// <param name="fileFiles">The fleet file's tables and views (Just this PC); none: the ones built into the plugin.</param>
+    public DatabaseKeeper(Func<DatabaseUpkeep.Files> files, string recordedBy, Action<string>? log = null, Func<FileDatabase.Files>? fileFiles = null)
     {
+        this.fileFiles = fileFiles ?? FileDatabase.Files.Embedded;
         this.files = files;
         this.recordedBy = recordedBy;
         this.log = log;
@@ -373,20 +377,34 @@ public sealed class DatabaseKeeper
 
     /// <summary>For the Status page: what the last look found.</summary>
     public string StatusText => Problem != null ? $"Couldn't update the database: {Problem}"
-        : LastResult?.Text ?? "Not looked at yet.";
+        : LastFile?.Text ?? LastResult?.Text ?? "Not looked at yet.";
 
-    public async Task RunIfDueAsync(NpgsqlConnection conn)
+    /// <summary>The fleet file's last look (Just this PC), instead of LastResult.</summary>
+    public FileDatabase.Result? LastFile { get; private set; }
+
+    /// <summary>The fleet file's newest backup this plugin made, and a problem making one (else null).</summary>
+    public string? LastBackup { get; private set; }
+    public string? BackupProblem { get; private set; }
+
+    /// <param name="filePath">The fleet file (Just this PC), for its daily backup; null on PostgreSQL.</param>
+    public async Task RunIfDueAsync(DbConnection conn, string? filePath = null)
     {
         if (DateTime.UtcNow < nextAt) return;
         if (System.Threading.Interlocked.Exchange(ref running, 1) == 1) return;
         try
         {
+            if (Db.IsFile(conn))
+            {
+                await RunOnFileAsync(conn, filePath);
+                return;
+            }
             var files = this.files();
-            var result = await DatabaseUpkeep.EnsureAsync(conn, files, $"{files.AppVersion} ({recordedBy})");
+            var result = await DatabaseUpkeep.EnsureAsync((NpgsqlConnection)conn, files, $"{files.AppVersion} ({recordedBy})");
             LastAt = DateTime.UtcNow;
             if (!result.Busy)
             {
                 LastResult = result;
+                LastFile = null;
                 Problem = null;
             }
             nextAt = DateTime.UtcNow + (result.Busy ? AfterBusy : Every);
@@ -403,6 +421,31 @@ public sealed class DatabaseKeeper
         finally
         {
             System.Threading.Interlocked.Exchange(ref running, 0);
+        }
+    }
+
+    // The fleet file: brought up to date (another game doing so is waited for), then backed up when none was made today.
+    private async Task RunOnFileAsync(DbConnection conn, string? filePath)
+    {
+        var files = fileFiles();
+        var result = await FileDatabase.EnsureAsync(conn, files, $"{files.AppVersion} ({recordedBy})");
+        LastAt = DateTime.UtcNow;
+        LastFile = result;
+        LastResult = null;
+        Problem = null;
+        nextAt = DateTime.UtcNow + Every;
+        if (result.Created || result.Applied.Count > 0 || (result.Newer && lastLogged != result.Text)) Say(result.Text);
+        else lastLogged = null;
+        if (filePath == null || !FileDatabase.BackupDue(filePath, DateTime.Now)) return;
+        try
+        {
+            LastBackup = await FileDatabase.BackUpAsync(conn, filePath, DateTime.Now);
+            BackupProblem = null;
+        }
+        catch (Exception ex)
+        {
+            if (BackupProblem != ex.Message) Say($"Couldn't back up the fleet file (trying again later): {ex.Message}");
+            BackupProblem = ex.Message;
         }
     }
 

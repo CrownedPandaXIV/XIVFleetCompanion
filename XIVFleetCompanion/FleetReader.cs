@@ -142,6 +142,9 @@ namespace XIVFleetCompanion
         public const string MissingViewsText =
             "The database doesn't have the fleet views yet. Update the XIV Fleet Companion app to 1.8.0 or later and open it once; it adds them.";
 
+        public const string MissingFileViewsText =
+            "The fleet file doesn't have the fleet views yet. The plugin adds them itself; the Status page says what stopped it.";
+
         private readonly Func<string?> connectionString;
         private volatile bool busy;
         private DateTime subsAsked = DateTime.MinValue;
@@ -188,7 +191,7 @@ namespace XIVFleetCompanion
         /// <param name="checkIn">This PC, its account label and plugin version, recorded as it reads (every few minutes),
         /// so a PC that syncs no characters is still on the app's PCs tab and in a move's checks; null: not recorded.</param>
         /// <param name="keeper">Brings the database up to date before reading, when it's due (DatabaseUpkeep); null: never.</param>
-        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null, Func<Task<NpgsqlConnection?>>? open = null,
+        public FleetReader(Func<string?> connectionString, Func<SubGameData?>? subGame = null, Func<Task<DbConnection?>>? open = null,
             Func<(string Pc, string Account, string Version)>? checkIn = null, DatabaseKeeper? keeper = null)
         {
             this.keeper = keeper;
@@ -223,10 +226,10 @@ namespace XIVFleetCompanion
                 // tried again next time
             }
         }
-        private readonly Func<Task<NpgsqlConnection?>>? open;
+        private readonly Func<Task<DbConnection?>>? open;
 
         // The connection for one read: through `open` (which follows a moved database), else the connection string.
-        private async Task<NpgsqlConnection> OpenAsync(string cs)
+        private async Task<DbConnection> OpenAsync(string cs)
         {
             if (open != null) return await open() ?? throw new InvalidOperationException("The database isn't set up yet (Settings tab).");
             var conn = new NpgsqlConnection(cs);
@@ -243,9 +246,13 @@ namespace XIVFleetCompanion
         }
 
         // Why a read couldn't reach the database, in plain words.
-        private static string ReachFailure(Exception ex) => ex is DatabaseMove.WaitException
-            ? "The database is being moved to another PC. The pages show what was read before until that's done."
-            : $"Could not reach the database: {ex.Message}";
+        private static string ReachFailure(Exception ex) => ex switch
+        {
+            DatabaseMove.WaitException => "The database is being moved to another PC. The pages show what was read before until that's done.",
+            FileDatabase.RefusedException => ex.Message,
+            System.Data.SQLite.SQLiteException => $"Could not open the fleet file: {ex.Message}",
+            _ => $"Could not reach the database: {ex.Message}",
+        };
         private readonly Func<SubGameData?>? subGame;
 
         /// <summary>
@@ -301,7 +308,8 @@ namespace XIVFleetCompanion
                 try
                 {
                     await using var conn = await OpenAsync(cs);
-                    if (keeper != null) await keeper.RunIfDueAsync(conn);
+                    // On the fleet file, cs is the file (for its daily backup).
+                    if (keeper != null) await keeper.RunIfDueAsync(conn, Db.IsFile(conn) ? cs : null);
                     await CheckInIfDue(conn);
                     if (subs)
                     {
@@ -401,6 +409,10 @@ namespace XIVFleetCompanion
             catch (PostgresException ex)
             {
                 return before with { Error = ex.MessageText };
+            }
+            catch (System.Data.SQLite.SQLiteException ex) when (ex.Message.Contains("no such table") || ex.Message.Contains("no such view"))
+            {
+                return before with { Error = MissingFileViewsText };
             }
             // Something in what was read the plugin couldn't take (not the connection): only this read fails, and says so.
             catch (Exception ex) when (ex is not NpgsqlException)

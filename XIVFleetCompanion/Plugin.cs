@@ -9,6 +9,7 @@ using ECommons;
 using ECommons.EzEventManager;
 using Npgsql;
 using System;
+using System.Data.Common;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -78,6 +79,13 @@ public sealed class Plugin : IDalamudPlugin
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        // A setup from before "Just this PC" (2.2) already uses a shared database: it is never asked.
+        if (Configuration.FleetStore == FleetStoreChoice.NotChosen &&
+            (PostgresCredentialStore.Load(false) != null || PostgresCredentialStore.Load(true) != null || Configuration.LastSyncTimestamp != null))
+        {
+            Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+            Configuration.Save();
+        }
 
         if (string.IsNullOrWhiteSpace(Configuration.FCTrackerConfigPath))
         {
@@ -102,8 +110,7 @@ public sealed class Plugin : IDalamudPlugin
         // Brings the database up to date with the app's own update files (DatabaseUpkeep), before reads and syncs.
         Keeper = new DatabaseKeeper(DatabaseUpkeep.Files.Embedded, $"plugin {VersionText}", text => Log.Information($"Fleet Companion: {text}"));
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
-        Fleet = new FleetReader(() => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString, GameNames.SubGame,
-            () => PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection),
+        Fleet = new FleetReader(FleetLocation, GameNames.SubGame, OpenFleetAsync,
             () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText), Keeper);
         MainWindow = new MainWindow(this, submarineImagePath);
         CheckPage = new CheckWindow(this);
@@ -315,7 +322,7 @@ public sealed class Plugin : IDalamudPlugin
     // only the characters that last logged in here or that no setup has recorded a login for yet; the rest are left to
     // the setup they last logged in on. Before the database has the table (app 1.6.0), or if reading it fails, every
     // character is kept, as before.
-    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(NpgsqlConnection conn, List<CharacterRead> characters, List<ulong> leftOutCids)
+    private async Task<List<CharacterRead>> KeepOwnCharactersAsync(DbConnection conn, List<CharacterRead> characters, List<ulong> leftOutCids)
     {
         var pcName = Environment.MachineName;
         var label = Configuration.AccountLabel ?? "";
@@ -358,7 +365,7 @@ public sealed class Plugin : IDalamudPlugin
             lastElsewhereNames = names;
             return elsewhere.Count == 0 ? characters : characters.Except(elsewhere).ToList();
         }
-        catch (PostgresException ex)
+        catch (DbException ex) when (Db.IsQueryError(ex))
         {
             Log.Warning($"Fleet Companion: could not check where characters last logged in, so all of them are synced — {ex.Message}");
             SyncedElsewhere = 0;
@@ -521,9 +528,9 @@ public sealed class Plugin : IDalamudPlugin
         // caller and simply tried again next time.
         await using var openConnection = await OpenDatabaseAsync();
         if (openConnection == null) return;
-        NpgsqlConnection conn = openConnection;
+        DbConnection conn = openConnection;
         SyncingAgain();
-        await Keeper.RunIfDueAsync(conn);
+        await Keeper.RunIfDueAsync(conn, Db.IsFile(conn) ? FileDatabase.DefaultPath : null);
 
         // Characters that last logged in on another setup are that setup's to sync.
         characters = await KeepOwnCharactersAsync(conn, characters, leftOutCids);
@@ -550,7 +557,7 @@ public sealed class Plugin : IDalamudPlugin
                 changes.Remember(key, fingerprint);
                 written++;
             }
-            catch (PostgresException ex)
+            catch (DbException ex) when (Db.IsQueryError(ex))
             {
                 changes.Forget(key);
                 failed++;
@@ -628,7 +635,7 @@ public sealed class Plugin : IDalamudPlugin
                             Log.Information("Fleet Companion: the database is missing a column the app adds. Open the XIV Fleet Companion app (0.26.0 or newer) once so it can update the database; until then, empty retainers can't be told from unseen ones.");
                         }
                     }
-                    catch (PostgresException ex)
+                    catch (DbException ex) when (Db.IsQueryError(ex))
                     {
                         Log.Warning($"Fleet Companion: could not record when {who}'s retainers were seen — {ex.Message}");
                     }
@@ -645,7 +652,7 @@ public sealed class Plugin : IDalamudPlugin
                             AddMetric(metrics, "character", cid, $"item_qty:{itemId}", totals[itemId]);
                         AddMetric(metrics, "character", cid, "inventory_sources", await FleetWriter.ReadStoredSourceCountAsync(conn, cid));
                     }
-                    catch (PostgresException ex)
+                    catch (DbException ex) when (Db.IsQueryError(ex))
                     {
                         Log.Warning($"Fleet Companion: could not read stored salvage counts for {who} — {ex.Message}");
                     }
@@ -758,7 +765,7 @@ public sealed class Plugin : IDalamudPlugin
                 Log.Warning("Fleet Companion: the database isn't set up yet. Open the XIV Fleet Companion app (0.26.0 or newer) and connect it to this database once; it sets everything up. Characters are not saved until then.");
             warnedNoCurrentTable = true;
         }
-        catch (PostgresException ex)
+        catch (DbException ex) when (Db.IsQueryError(ex))
         {
             Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
@@ -772,7 +779,7 @@ public sealed class Plugin : IDalamudPlugin
                 await WriteDetailsAsync(conn, characters, leftOutCount, allaganToolsReady,
                     fcTrackerRunning ?? (fcTrackerHousing.Count > 0 || File.Exists(Configuration.FCTrackerConfigPath)), subTrackerRunning, problems);
             }
-            catch (PostgresException ex)
+            catch (DbException ex) when (Db.IsQueryError(ex))
             {
                 Log.Warning($"Fleet Companion: failed to write this PC's status, voyage loot or venture rewards — {ex.Message}");
             }
@@ -896,13 +903,18 @@ public sealed class Plugin : IDalamudPlugin
     // database is being moved to another PC (tried again in a minute), or it moved somewhere this PC can't
     // reach yet (tried again at the next sync). A move to an address this PC can reach is followed by
     // PostgresWriter.OpenConnectionAsync itself.
-    private async Task<NpgsqlConnection?> OpenDatabaseAsync()
+    private async Task<DbConnection?> OpenDatabaseAsync()
     {
         try
         {
-            var conn = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
-            if (conn == null) NotSynced(SyncFailure.NoCredential);
+            var conn = await OpenFleetAsync();
+            if (conn == null) NotSynced(Configuration.FleetStore == FleetStoreChoice.NotChosen ? SyncFailure.NotChosen : SyncFailure.NoCredential);
             return conn;
+        }
+        catch (FileDatabase.RefusedException ex)
+        {
+            NotSynced(ex.Message);
+            return null;
         }
         catch (DatabaseMove.WaitException ex)
         {
@@ -916,6 +928,31 @@ public sealed class Plugin : IDalamudPlugin
             NotSynced(ex.Message);
             return null;
         }
+    }
+
+    /// <summary>True when the fleet is kept in the one file on this PC (Just this PC).</summary>
+    public bool OnThisPc => Configuration.FleetStore == FleetStoreChoice.ThisPc;
+
+    /// <summary>
+    /// Where the fleet is, or null when nothing is set up: the fleet file (Just this PC), else the shared database's
+    /// connection (no saved connection: null).
+    /// </summary>
+    public string? FleetLocation() => Configuration.FleetStore switch
+    {
+        FleetStoreChoice.ThisPc => FileDatabase.DefaultPath,
+        FleetStoreChoice.SharedDatabase => PostgresWriter.BuildConnectionString(Configuration.UseRemoteConnection).connectionString,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The fleet's database, open, or null when nothing is set up: the fleet file (made when it isn't there yet), else the
+    /// shared database (following it when the app moved it to another PC).
+    /// </summary>
+    public async Task<DbConnection?> OpenFleetAsync()
+    {
+        if (Configuration.FleetStore == FleetStoreChoice.ThisPc) return await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
+        if (Configuration.FleetStore == FleetStoreChoice.SharedDatabase) return await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection);
+        return null;
     }
 
     /// <summary>Why the last sync didn't get through (shown in the main window), or null when it did.</summary>
@@ -975,7 +1012,7 @@ public sealed class Plugin : IDalamudPlugin
     // This PC's status, voyage loot from SubmarineTracker and venture rewards from AutoRetainer (database version 8).
     // fcTrackerFound: FCTracker is loaded in this game (or, when that cannot be told, its file was found);
     // subTrackerRunning: SubmarineTracker is loaded (null: cannot be told, its file decides).
-    private async Task WriteDetailsAsync(NpgsqlConnection conn, List<CharacterRead> characters, int leftOut,
+    private async Task WriteDetailsAsync(DbConnection conn, List<CharacterRead> characters, int leftOut,
         bool allaganToolsReady, bool fcTrackerFound, bool? subTrackerRunning, List<string> problems)
     {
         var cids = characters.Select(c => c.Snapshot.Cid).ToList();
@@ -996,7 +1033,7 @@ public sealed class Plugin : IDalamudPlugin
                 if (!await DetailsWriter.WriteVoyageLootAsync(conn, loot)) { DetailsTablesMissing(); return; }
                 if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
             }
-            catch (Exception ex) when (ex is not PostgresException)
+            catch (Exception ex) when (!Db.IsQueryError(ex))
             {
                 WarnOnce("submarinetracker", $"Fleet Companion: could not read Submarine Tracker's loot ({stPath}) — {ex.Message}");
             }
@@ -1033,7 +1070,7 @@ public sealed class Plugin : IDalamudPlugin
                     if (!await DetailsWriter.WriteVenturesAsync(conn, rows)) { DetailsTablesMissing(); return; }
                     ventureFilesRead[file.Path] = file.Changed;
                 }
-                catch (Exception ex) when (ex is not PostgresException)
+                catch (Exception ex) when (!Db.IsQueryError(ex))
                 {
                     WarnOnce($"ventures:{file.Path}", $"Fleet Companion: could not read AutoRetainer's venture statistics ({file.Path}) — {ex.Message}");
                 }

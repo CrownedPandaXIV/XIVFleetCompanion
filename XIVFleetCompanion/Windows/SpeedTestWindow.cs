@@ -46,6 +46,11 @@ public class SpeedTestWindow : Window, IDisposable
     public void Run()
     {
         if (running) return;
+        if (plugin.OnThisPc)
+        {
+            status = "The speed test times a database on another PC. Your fleet file is on this PC, so there's nothing to time.";
+            return;
+        }
         var remote = plugin.Configuration.UseRemoteConnection;
         var (connectionString, error) = PostgresWriter.BuildConnectionString(remote);
         if (connectionString == null)

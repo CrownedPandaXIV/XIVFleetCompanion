@@ -5,12 +5,28 @@ All notable changes to the plugin are recorded here. Versions follow
 
 ## 2.2.0 - 2026-11-07
 
-Groundwork for **Just this PC**, the coming mode where the fleet lives in one file on your PC instead of a PostgreSQL
-database, with nothing to install. Nothing changes for anyone yet: every PC keeps using its database as before.
+**Just this PC**: your fleet can now live in one file on your PC instead of a PostgreSQL database, with nothing to
+install.
 
-- Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) now also works on
-  the one-file database. The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and
-  every page must read the same from both.
+- **A new setup is asked first** where its fleet data should live:
+  - **Just this PC**: every game on this PC keeps the fleet in one file, `%APPDATA%\XIV Fleet Companion\fleet.db`.
+    Syncing starts straight away. The XIV Fleet Companion app can't open the file, so you see your fleet in the game.
+  - **Shared between PCs**: a PostgreSQL database set up with the app (its Database Helper is enough), as before.
+  A setup that already has a database connection is never asked and keeps using it.
+- **Several games at once.** Games on the same PC share the file and can sync at the same moment; one waits for another
+  to finish writing rather than fail. Tested with four separate processes writing at once.
+- **Not in a cloud or network folder.** OneDrive, Dropbox, Google Drive and similar copy the file while a game writes
+  to it, which can damage it, so the plugin refuses to keep it there and says why.
+- **It keeps itself up to date.** The plugin adds what a newer version needs to the file (never removing anything) and
+  replaces the fleet views when they change, all or nothing. A file a newer plugin in another game already updated is
+  left alone, and the Status page says to update.
+- **Daily backups.** Once a day while a game runs, the file is copied into a `Backups` folder beside it, and the last 7
+  are kept. The Status page shows the newest and has **Back up now**.
+- On Just this PC, Settings shows where the file is in place of the database login, and the Status page leaves out the
+  database connection test and speed test.
+- Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) works on the file.
+  The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and every page must read
+  the same from both.
 - Gil & Market lists accounts by name.
 
 ## 2.1.0 - 2026-11-07

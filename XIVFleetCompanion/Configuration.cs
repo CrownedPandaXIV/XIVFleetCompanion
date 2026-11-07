@@ -4,6 +4,14 @@ using System.Collections.Generic;
 
 namespace XIVFleetCompanion;
 
+/// <summary>Where the fleet lives: a PostgreSQL database shared between PCs (with the app), or one file on this PC.</summary>
+public enum FleetStoreChoice
+{
+    NotChosen = 0,
+    SharedDatabase = 1,
+    ThisPc = 2,
+}
+
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
@@ -44,6 +52,9 @@ public class Configuration : IPluginConfiguration
     public string? ShoppingPriceScope { get; set; } = null;
     public DateTime? LastSyncTimestamp { get; set; } = null;
     public bool UseRemoteConnection { get; set; } = false;
+    // 2.2: where the fleet lives. A setup from before 2.2 that already has a database connection is SharedDatabase (see
+    // Plugin's start); a new one is asked first (the main window).
+    public FleetStoreChoice FleetStore { get; set; } = FleetStoreChoice.NotChosen;
     public string FCTrackerConfigPath { get; set; } = "";
     public string AccountLabel { get; set; } = "";
     // The account label this setup's logins were last recorded under (null: none yet), so a changed label can

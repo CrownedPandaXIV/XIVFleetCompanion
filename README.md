@@ -16,7 +16,8 @@ The plugin just collects. All the working out (income, rank-ups, what to build, 
 | **FC Tracker** | optional | Free Company houses, and when each was last entered. A recent FC Tracker is asked directly; an older one is read from its saved file. | Repository below |
 | **Submarine Tracker** | optional | What every voyage brought back, for the app's income per voyage. | Dalamud's own plugin list |
 
-You also need the app connected to a PostgreSQL database. The plugin writes to the same database.
+Your fleet lives either in one file on your PC (**Just this PC**, nothing else to install) or in a PostgreSQL database
+shared with the app and your other PCs (**Shared between PCs**). The plugin asks which the first time.
 
 ## Install
 
@@ -47,9 +48,21 @@ saved password carry over.
 
 ## Set it up
 
-Type `/xivfleet` and open the settings:
+Type `/xivfleet`. The first time, it asks **where your fleet data should live**:
 
-- **Database:** enter the same address, port, database name, username and password as in the app. The password is
+| | Just this PC | Shared between PCs |
+| --- | --- | --- |
+| What you install | nothing else | the app and PostgreSQL (the app's Database Helper sets it up) |
+| Where the fleet is | `%APPDATA%\XIV Fleet Companion\fleet.db`, shared by every game on this PC | a database your PCs and the app all use |
+| Where you see it | in the game | in the game and in the app |
+| Backups | a copy a day in `Backups` beside the file, the last 7 kept, plus **Back up now** on the Status page | the app's backups |
+
+The file isn't allowed in a OneDrive, Dropbox, Google Drive or network folder: those copy it while a game is writing
+and can damage it. A setup that already had a database connection before 2.2 isn't asked and keeps using it.
+
+Then open the settings:
+
+- **Database** (Shared between PCs only): enter the same address, port, database name, username and password as in the app. The password is
   kept in Windows Credential Manager and never shown again. Leave the box empty to keep the saved one.
 - **Characters:** sync everyone AutoRetainer knows (the default), or only the characters you tick. "Tick only those
   with subs" is handy for accounts where only a few characters matter.

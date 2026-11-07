@@ -19,6 +19,12 @@ public static class Db
     /// <summary>True for the one-file database (anything that isn't PostgreSQL).</summary>
     public static bool IsFile(DbConnection conn) => conn is not NpgsqlConnection;
 
+    /// <summary>
+    /// An error the database answered with (a constraint, a missing table, the file busy for too long): that write fails
+    /// and the rest go on. Not reaching PostgreSQL at all is something else, which ends a sync.
+    /// </summary>
+    public static bool IsQueryError(Exception ex) => ex is PostgresException or System.Data.SQLite.SQLiteException;
+
     /// <summary>Now, as the file keeps times: Unix seconds.</summary>
     public static double Now() => Unix(DateTime.UtcNow);
 

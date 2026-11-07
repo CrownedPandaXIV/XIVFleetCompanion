@@ -68,7 +68,7 @@ public class CheckWindow : Window, IDisposable
     {
         try
         {
-            await using var conn = await PostgresWriter.OpenConnectionAsync(plugin.Configuration.UseRemoteConnection);
+            await using var conn = await plugin.OpenFleetAsync();
             if (conn == null) return;
             if (!await DetailsWriter.WritePcCheckAsync(conn, Environment.MachineName, plugin.Configuration.AccountLabel ?? "", Plugin.VersionText, result, toFix))
                 status += " (Open the app once so it can update the database and show this too.)";
@@ -149,10 +149,10 @@ public class CheckWindow : Window, IDisposable
         // The database, read only: when each part was last stored.
         try
         {
-            await using var conn = await PostgresWriter.OpenConnectionAsync(configuration.UseRemoteConnection);
+            await using var conn = await plugin.OpenFleetAsync();
             if (conn == null)
             {
-                facts.DatabaseProblem = "no saved connection (Settings → Database Connection).";
+                facts.DatabaseProblem = plugin.Configuration.FleetStore == FleetStoreChoice.NotChosen ? "where your fleet data lives isn't chosen yet." : "no saved connection (Settings → Database Connection).";
             }
             else
             {

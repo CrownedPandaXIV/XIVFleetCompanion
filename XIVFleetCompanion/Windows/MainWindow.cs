@@ -117,6 +117,11 @@ public partial class MainWindow : Window, IDisposable
         ImGui.SameLine();
         using var page = ImRaii.Child("##page", Vector2.Zero, false);
         if (!page.Success) return;
+        if (NeedsStoreChoice)
+        {
+            DrawStoreChoice();
+            return;
+        }
         switch (shown)
         {
             case Tab.Summary: DrawSummary(); break;
@@ -384,13 +389,16 @@ public partial class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, Allagan Tools and FC Tracker have for it, without writing anything (also /xivfleet check).");
-        ImGui.SameLine();
-        if (ImGui.Button("Speed test (2.0)"))
+        if (!plugin.OnThisPc)
         {
-            plugin.OpenSpeedTest();
+            ImGui.SameLine();
+            if (ImGui.Button("Speed test (2.0)"))
+            {
+                plugin.OpenSpeedTest();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Times reading from the database what the 2.0 in-game windows will need, without changing anything (also /xivfleet speedtest).");
         }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Times reading from the database what the 2.0 in-game windows will need, without changing anything (also /xivfleet speedtest).");
 
         ImGui.Spacing();
 
@@ -419,7 +427,7 @@ public partial class MainWindow : Window, IDisposable
 
             // The database's version: this plugin brings it up to date itself (DatabaseUpkeep), as the app does.
             var keeper = plugin.Keeper;
-            if (keeper.Problem != null || keeper.LastResult is { Newer: true })
+            if (keeper.Problem != null || keeper.LastResult is { Newer: true } || keeper.LastFile is { Newer: true })
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
                     ImGui.TextWrapped(keeper.StatusText);
@@ -444,32 +452,42 @@ public partial class MainWindow : Window, IDisposable
             ImGui.Spacing();
             ImGui.Text("Connections:");
 
-            var mode = statusRemote ? "Remote" : "Local";
-            ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+            if (plugin.OnThisPc)
+                DrawFileStatus();
+            else if (plugin.Configuration.FleetStore == FleetStoreChoice.NotChosen)
+                ImGui.BulletText("Fleet data: not chosen yet (open the Summary to choose)");
+            else
+            {
+                var mode = statusRemote ? "Remote" : "Local";
+                ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+            }
             ImGui.BulletText(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
             ImGui.BulletText(allaganToolsReady ? "Allagan Tools: running" : "Allagan Tools: not running");
             ImGui.BulletText(OptionalLine("FC Tracker", fcTrackerRunning));
             ImGui.BulletText(OptionalLine("Submarine Tracker", subTrackerRunning));
 
-            ImGui.Spacing();
-
-            using (ImRaii.Disabled(connectionTestRunning))
+            if (!plugin.OnThisPc)
             {
-                if (ImGui.Button("Test Database Connection"))
+                ImGui.Spacing();
+
+                using (ImRaii.Disabled(connectionTestRunning))
                 {
-                    connectionTestRunning = true;
-                    connectionTestResult = "Testing...";
-
-                    Task.Run(async () =>
+                    if (ImGui.Button("Test Database Connection"))
                     {
-                        var result = await PostgresConnectionTester.TestConnectionAsync(plugin.Configuration.UseRemoteConnection);
-                        connectionTestResult = result;
-                        connectionTestRunning = false;
-                    });
-                }
-            }
+                        connectionTestRunning = true;
+                        connectionTestResult = "Testing...";
 
-            ImGui.TextWrapped(connectionTestResult);
+                        Task.Run(async () =>
+                        {
+                            var result = await PostgresConnectionTester.TestConnectionAsync(plugin.Configuration.UseRemoteConnection);
+                            connectionTestResult = result;
+                            connectionTestRunning = false;
+                        });
+                    }
+                }
+
+                ImGui.TextWrapped(connectionTestResult);
+            }
         }
 
         DrawCredits();

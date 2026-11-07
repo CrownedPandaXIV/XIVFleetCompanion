@@ -12,7 +12,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using XIVFleetCompanion;
 
-internal static class Program
+internal static partial class Program
 {
     private static int failures;
     private static int passes;
@@ -1683,8 +1683,10 @@ internal static class Program
             _ => Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture),
         }))));
 
-    private static async Task<int> Main()
+    private static async Task<int> Main(string[] args)
     {
+        // A second process writing to the same fleet file (FileChecks).
+        if (args.Length > 0 && args[0] == "--hammer") return await Hammer(args[1], int.Parse(args[2]), int.Parse(args[3]));
         var connectionString = Environment.GetEnvironmentVariable("FLEET_TEST_DB")
             ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
         await using var conn = new NpgsqlConnection(connectionString);
@@ -1988,6 +1990,7 @@ internal static class Program
         LooksAgainstTheApp();
         await DatabaseAgainstTheApp(conn);
         await TwinAgainstTheFile(conn);
+        await FileChecks();
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
