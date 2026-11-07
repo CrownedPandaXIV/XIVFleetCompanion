@@ -753,7 +753,7 @@ public partial class MainWindow : Window, IDisposable
         if (summary.LowRepairKits > 0) Colored(Amber, $"{summary.LowRepairKits} character{(summary.LowRepairKits == 1 ? "" : "s")} low on repair kits");
         if (summary.SoonestRunsOutDays is double soonest)
             Tinted(DaysColor(soonest), $"The first runs out in {Days(soonest, 1)} days");
-        Colored(Dim, "Warnings are set in the app (Settings → General → Warnings).");
+        Colored(Dim, $"Warnings are {WarningsWhere}.");
     }
 
     // "Updated 19s ago" for the Summary's reads together (the oldest), each on hover; anything that couldn't be read, in amber.
@@ -907,7 +907,7 @@ public partial class MainWindow : Window, IDisposable
         if (supplies != null && supplies.Count > 0)
         {
             ImGui.SameLine();
-            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days (both set in the app's Supplies tab).");
+            Colored(Dim, $"Use per day over the last {supplies[0].WindowDays} days; to buy: enough for {supplies[0].TargetDays} days" + (WithApp ? " (both set in the app's Supplies tab)." : "."));
         }
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
         if (supplies == null) return;

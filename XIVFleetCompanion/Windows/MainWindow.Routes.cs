@@ -170,7 +170,8 @@ public partial class MainWindow
     // to the real rank-ups, each recent one on hover. The app saves the dates every hour while it's open.
     private void ForecastLine()
     {
-        if (reader.Forecasts.Data is not { } a) return;
+        // The app keeps the forecasts; on Just this PC there's no app to keep them.
+        if (!WithApp || reader.Forecasts.Data is not { } a) return;
         Colored(Dim, "Next Rank forecasts: " + (a.Count > 0 && a.AverageOff is double off
             ? $"within {OffText(off)} on average over the last {a.Count} rank-up{(a.Count == 1 ? "" : "s")}" : "no rank-ups to check yet"));
         string When(double ms) => DateTime.UnixEpoch.AddMilliseconds(ms).ToLocalTime().ToString("MMM d HH:mm", CultureInfo.CurrentCulture);
@@ -181,7 +182,7 @@ public partial class MainWindow
     }
 
     private const string NoCurrentGil = "Its route isn't in Fight Club, or its rank is below the route's builds.";
-    private const string NoTargetGil = "Fight Club recommends routes from rank 85 (import its data in Settings, here or in the app).";
+    private string NoTargetGil => "Fight Club recommends routes from rank 85 (import its data in Settings" + (WithApp ? ", here or in the app)." : ").");
 
     private FleetTable<SubRoute> RoutesTable => routesTable ??= new FleetTable<SubRoute>("routeOpt", plugin.Configuration, new List<FleetColumn<SubRoute>>
     {

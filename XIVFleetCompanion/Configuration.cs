@@ -62,7 +62,7 @@ public class Configuration : IPluginConfiguration
     public string? LoginsRecordedAs { get; set; } = null;
     // Shown in the plugin's window and settings while AccountLabel is blank: the app tells accounts apart by it.
     public const string NoAccountLabelText =
-        "Give this setup an Account Label (for example, the account's name) so the app can tell your accounts apart and spot two setups syncing the same character.";
+        "Give this setup an Account Label (for example, the account's name) so your accounts can be told apart and two setups syncing the same character are spotted.";
 
     // Which characters are synced (see CharacterChoice): every one except SkippedCharacters, or with
     // SyncOnlyChosen only ChosenCharacters.

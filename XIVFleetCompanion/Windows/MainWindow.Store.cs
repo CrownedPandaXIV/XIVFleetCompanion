@@ -15,6 +15,13 @@ namespace XIVFleetCompanion.Windows;
 public partial class MainWindow
 {
     private string? storeProblem;
+
+    // True when the app also shows this fleet (Shared between PCs); on Just this PC the game is the only place, so text
+    // that points at the app says something else.
+    private bool WithApp => !plugin.OnThisPc;
+
+    // Where the Warnings are changed.
+    private string WarningsWhere => WithApp ? "set in Settings, here or in the app" : "set in Settings";
     private bool backingUp;
     private string? backupResult;
     // The newest backup, looked up every few seconds rather than every frame.

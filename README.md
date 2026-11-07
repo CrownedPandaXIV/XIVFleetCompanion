@@ -1,11 +1,12 @@
 # XIV Fleet Companion (Dalamud plugin)
 
-The in-game half of XIV Fleet Companion. While you play, or while AutoRetainer runs your characters, it quietly sends
-your characters, subs, retainers and inventories to a database. The
-[XIV Fleet Companion app](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App) then shows your whole fleet from
-there, across every account and PC.
+Your whole fleet in the game. While you play, or while AutoRetainer runs your characters, it quietly keeps your
+characters, subs, retainers and inventories, and shows them in its own window: subs and their routes, supplies, parts,
+retainers, Free Companies, inventories, income, the market and how it all changes over time.
 
-The plugin just collects. All the working out (income, rank-ups, what to build, alerts) happens in the app.
+Keep it all on one PC with nothing else to install, or share it with your other PCs and the
+[XIV Fleet Companion app](https://github.com/CrownedPandaXIV/XIVFleetCompanion-App), which shows the same fleet on
+your desktop.
 
 ## What you need
 
@@ -74,22 +75,37 @@ logged in on syncs it. So if one setup's AutoRetainer still has an old copy of a
 account, it leaves that character alone instead of overwriting it. Characters that haven't logged in anywhere yet
 are synced by every setup that has them, as before. There's no time limit, so a long break changes nothing.
 
-The database itself is set up by the app the first time it connects, so there's nothing to run on it. If the plugin's
-log says the database is missing something, open the app once and it'll sort it out.
+### Shared between PCs
+
+The database is set up by the app (or its Database Helper) the first time it connects, so there's nothing to run on it.
+After that, the plugin keeps it up to date itself, as the app does.
 
 If you move the database to another PC (the app's Settings → Database → **Move the database to this PC**), the plugin
 follows it by itself at its next sync: it switches to the new address and saves it in its settings, keeping the same
 database name, username and password. While the app is copying the database, the plugin waits and tries again every
 minute, so nothing is lost mid-copy.
 
+### Just this PC
+
+There's nothing to set up: the file is made the first time the game reads or syncs, and every game on the PC uses the
+same one. The plugin keeps it up to date itself.
+
+- **Backups** are in the `Backups` folder beside the file, one a day, the last 7 kept. The Status page shows the newest
+  and has **Back up now**. To go back to one, close every game, then copy it over `fleet.db`.
+- **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, the repair kit cost, Fight
+  Club's data) are in the plugin's Settings, saved in the file.
+- **Not available without the app:** the Next Rank forecast accuracy on Route Optimization (the app keeps those dates),
+  and the Supplies page's use and buy periods (14 days each).
+- Moving your fleet between Just this PC and a shared database comes in a later version.
+
 ## Using it
 
 - **`/xivfleet`** opens the main window. It shows when the last sync was and, if syncing isn't getting through (for
-  example the PC with the database is off), why.
+  example the PC with the database is off), why. The Status page shows where your fleet is kept.
 - **`/xivfleet check`** (or **Check what I can see**) shows, character by character, what the plugin can see and
   what you need to open in the game to fill any gaps. For example, Allagan Tools only sees a retainer's items after
-  you've opened that retainer at a summoning bell. **Copy results** copies it so you can share it, and the app's PCs
-  tab shows it too.
+  you've opened that retainer at a summoning bell. **Copy results** copies it so you can share it, and the PCs page (and the app's)
+  shows it too.
 
 The plugin syncs on the interval in its settings, and also a few seconds after AutoRetainer finishes with a character.
 To keep things light, it only sends what's changed (plus everything once an hour).
@@ -101,9 +117,9 @@ To keep things light, it only sends what's changed (plus everything once an hour
 - **Inventories:** bags, retainers and FC chests, from Allagan Tools.
 - **Subs and retainers:** levels, parts, routes and ventures, plus what each voyage and venture brought back.
 - **Market listings** your retainers have up for sale.
-- **Each PC's status:** plugin version, last sync, which other plugins are running, what it couldn't see, and the
-  database login it uses (so a database move can check every PC will be let in).
-- **Values over time** for the app's charts: gil, ceruleum, repair kits, FC points and salvage. Only changes are
+- **Each PC's status:** plugin version, last sync, which other plugins are running, what it couldn't see, and (on a
+  shared database) the database login it uses, so a database move can check every PC will be let in.
+- **Values over time** for the Trends charts: gil, ceruleum, repair kits, FC points and salvage. Only changes are
   stored, so the history stays small.
 
 ---

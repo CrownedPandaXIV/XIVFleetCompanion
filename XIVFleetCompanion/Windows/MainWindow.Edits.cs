@@ -110,7 +110,7 @@ public partial class MainWindow
             return;
         }
         EditLine();
-        Colored(Dim, "The build each sub should have from a rank: for some slots and maybe one character. A sub ticked Craft? follows Fight Club's builds from rank 85 instead. Changes are saved for the app too.");
+        Colored(Dim, "The build each sub should have from a rank: for some slots and maybe one character. A sub ticked Craft? follows Fight Club's builds from rank 85 instead." + (WithApp ? " Changes are saved for the app too." : ""));
         var characters = parts.Inputs.Characters.OrderBy(c => c.SortIndex ?? int.MaxValue).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
         var rules = parts.Inputs.Rules.OrderBy(r => r.Rank).ThenBy(r => r.Id).Select(DraftOf).Concat(newRules).ToList();
         if (ImGui.Button("Add a rule##subRules")) newRules.Add(new RuleDraft());
@@ -267,7 +267,7 @@ public partial class MainWindow
     private void DrawRosterOrder()
     {
         var draft = rosterOrderDraft!;
-        Colored(Dim, "Move characters up or down, then save. The order is the Roster's everywhere, in the game and the app.");
+        Colored(Dim, "Move characters up or down, then save. The order is the Roster's everywhere" + (WithApp ? ", in the game and the app." : "."));
         using (ImRaii.Disabled(reader.Editing))
         {
             if (ImGui.Button("Save order##rosterOrder"))
@@ -347,7 +347,7 @@ public partial class MainWindow
                     if (ImGui.Selectable($"{d} days", d == current) && d != current)
                         reader.Edit("the Income window", c => FleetEdits.SaveIncomeWindow(c, d));
         }
-        Hover("How many days the Income page (and Loot per Voyage) counts, for the app too.");
+        Hover("How many days the Income page (and Loot per Voyage) counts" + (WithApp ? ", for the app too." : "."));
         ImGui.SameLine();
         EditLine();
     }
@@ -402,7 +402,7 @@ public partial class MainWindow
         ImGui.SameLine();
         var all = MadeOf(p) >= p.Crafts;
         if (ImGui.Checkbox($"all made##allMade{p.ItemId}", ref all)) SaveMade(p, all ? (int)p.Crafts : 0);
-        Hover("Tick parts off as you craft them; every PC sees it (in the app too). Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
+        Hover("Tick parts off as you craft them; " + (WithApp ? "every PC sees it (in the app too)." : "every game on this PC sees it.") + " Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
     }
 
     private void SaveMade(ShopRow p, int made)

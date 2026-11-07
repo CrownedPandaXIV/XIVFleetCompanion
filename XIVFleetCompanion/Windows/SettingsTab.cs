@@ -187,7 +187,9 @@ public class SettingsTab : IDisposable
 
         var syncing = list.Count(c => configuration.ShouldSync(c.Cid));
         ImGui.Text($"Syncing {syncing} of {list.Count} characters.");
-        ImGui.TextDisabled("Left-out characters are not read or sent. Anything they sent before can be removed with the app's Remove button on the Roster.");
+        ImGui.TextDisabled("Left-out characters are not read or sent." + (configuration.FleetStore == FleetStoreChoice.ThisPc
+            ? " What they sent before stays until they're synced again."
+            : " Anything they sent before can be removed with the app's Remove button on the Roster."));
 
         using (var child = ImRaii.Child("##characters", new Vector2(0, Math.Min(list.Count, 10) * ImGui.GetFrameHeightWithSpacing() + 8), true))
         {
@@ -258,7 +260,7 @@ public class SettingsTab : IDisposable
             configuration.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so the app sees its subs a few seconds later instead of at the next interval.");
+            ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so its subs show a few seconds later instead of at the next interval.");
 
         var showInInfoBar = configuration.ShowInInfoBar;
         if (ImGui.Checkbox("Show Fleet in the game's info bar", ref showInInfoBar))

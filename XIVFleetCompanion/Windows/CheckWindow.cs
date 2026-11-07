@@ -199,7 +199,7 @@ public class CheckWindow : Window, IDisposable
         ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the character's " +
                           "items, each retainer's and the FC chest's (from Allagan Tools; each filled slot counts once, with where they " +
                           "are: bags, crystals, armoury...), the house (from FC Tracker) and when each was last stored. Only the result " +
-                          "itself is saved, for the app's PCs panel.");
+                          "itself is saved, for the PCs page" + (plugin.OnThisPc ? "." : " here and in the app."));
         using (ImRaii.Disabled(running))
         {
             if (ImGui.Button(running ? "Checking..." : "Check again")) Run();

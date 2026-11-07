@@ -112,7 +112,7 @@ public partial class MainWindow
         Heading(needs.Count == 0 ? "Every sub has the build it should have." :
             $"{needs.Count} part{(needs.Count == 1 ? "" : "s")} needed, {toCraft} to craft" + (comingUp > 0 ? $" ({comingUp} for builds coming up)" : ""));
         if (ready.Count > 0) Colored(Green, PartsPlanner.ReadyText(ready));
-        Colored(Dim, "From each sub's Sub Rules, or Fight Club's best build for a sub ticked Craft? from rank 85 (both set in the app). Spares in bags, " +
+        Colored(Dim, "From each sub's Sub Rules, or Fight Club's best build for a sub ticked Craft? from rank 85 (both set below and on the Subs page" + (WithApp ? ", or in the app" : "") + "). Spares in bags, " +
                      "retainers and the FC chest are used first, then the parts other subs give up when upgraded.");
 
         using var tabs = ImRaii.TabBar("##partsTabs");

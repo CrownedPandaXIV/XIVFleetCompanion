@@ -119,7 +119,7 @@ public partial class MainWindow
         if (m.Settings.LivePrices && reader.AskingUniversalis)
             Colored(Dim, m.Live == null ? "Getting live prices from Universalis..." : "Updating live prices from Universalis...");
         else if (m.Live is { Error: null } && marketCache.Working) Colored(Dim, "Working out the new prices...");
-        if (!m.Settings.LivePrices) Colored(Dim, "Live Market Prices is off: turn it on in Settings (here or in the app) to see the cheapest rivals and undercut listings.");
+        if (!m.Settings.LivePrices) Colored(Dim, "Live Market Prices is off: turn it on in Settings" + (WithApp ? " (here or in the app)" : "") + " to see the cheapest rivals and undercut listings.");
         if (live)
         {
             Heading("Undercut listings");

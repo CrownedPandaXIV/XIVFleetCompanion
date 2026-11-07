@@ -405,7 +405,7 @@ public partial class MainWindow
         ImGui.TextUnformatted("Sub parts to craft");
         ImGui.Separator();
         EditLine();
-        Note("Tick parts off as you craft them (here or in the app); every PC sees it. Once the plugin sees a crafted part in bags, " +
+        Note("Tick parts off as you craft them" + (WithApp ? " (here or in the app); every PC sees it." : "; every game on this PC sees it.") + " Once the plugin sees a crafted part in bags, " +
                      "a retainer or the FC chest, it leaves the list by itself. The materials below are for every part on the list, made or not.");
         var partsTable = ShopPartsTable(priced);
         partsTable.DrawControls();

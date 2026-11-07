@@ -23,7 +23,9 @@ install.
 - **Daily backups.** Once a day while a game runs, the file is copied into a `Backups` folder beside it, and the last 7
   are kept. The Status page shows the newest and has **Back up now**.
 - On Just this PC, Settings shows where the file is in place of the database login, and the Status page leaves out the
-  database connection test and speed test.
+  database connection test and speed test. Text that pointed at the app says where to find it in the game instead,
+  the PCs page talks about the games on this PC, and Route Optimization leaves out the Next Rank forecast accuracy,
+  which the app keeps.
 - Everything the plugin writes and reads (syncing, every page, the edits made from the game, Trends) works on the file.
   The tests sync and edit the same made-up fleet into a PostgreSQL database and into a file, and every page must read
   the same from both.
