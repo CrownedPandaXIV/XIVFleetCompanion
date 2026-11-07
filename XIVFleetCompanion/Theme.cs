@@ -1,109 +1,40 @@
-using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 
 namespace XIVFleetCompanion
 {
-    /// <summary>The look of the plugin's window (Settings → Look): only our window changes, never the game or other plugins.</summary>
-    public enum ThemeChoice
+    // The looks' colours in the window (ImGui); the colours themselves are in ThemeLooks.cs.
+    public static partial class Theme
     {
-        /// <summary>The app's colors: dark blue-grey, with blue and amber accents.</summary>
-        Fleet,
-        /// <summary>Whatever Dalamud's style is, like other plugins.</summary>
-        Dalamud,
-        /// <summary>Black and white with strong borders, for reading at a glance.</summary>
-        HighContrast,
-    }
-
-    /// <summary>
-    /// The colors that carry meaning: fine or done, needs a look, urgent, and less important text; then the colors that
-    /// only say what a thing is: gil (gold), a house's address (blue) and a Free Company's name (lavender). Those three
-    /// are null (plain text) with colour blind status colors, so the only colors left there are the ones that mean
-    /// something. FC points are aqua. The app uses the same colors (renderer/index.html).
-    /// </summary>
-    public sealed record StatusColors(Vector4 Good, Vector4 Warn, Vector4 Danger, Vector4 Dim,
-        Vector4? Gil = null, Vector4? Address = null, Vector4? Fc = null, Vector4? FcPoints = null, RoleColors? Roles = null);
-
-    /// <summary>
-    /// A class's colour by its role, as the game groups them: tanks blue, healers green, damage red, each base class
-    /// (Gladiator, Conjurer, ...) a lighter shade of its job's. Null with colour blind status colors (plain text).
-    /// </summary>
-    public sealed record RoleColors(Vector4 Tank, Vector4 TankBase, Vector4 Healer, Vector4 HealerBase, Vector4 Dps, Vector4 DpsBase);
-
-    public static class Theme
-    {
-        private static Vector4 Hex(uint rgb, float alpha = 1f) =>
-            new(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f, (rgb & 0xFF) / 255f, alpha);
-
-        // Role colours for the Fleet and Dalamud looks (the app's too).
-        private static readonly RoleColors Roles = new(Hex(0x5B8DEF), Hex(0xA3BFF5), Hex(0x5FB870), Hex(0xA6D9AF), Hex(0xE06464), Hex(0xEFA6A6));
-
-        /// <summary>
-        /// Status colors for a look. colourBlind: blue for fine, yellow for a look, vermilion for urgent (from the
-        /// Okabe–Ito palette, told apart with every common kind of colour blindness) instead of green, amber and red.
-        /// </summary>
-        public static StatusColors Status(ThemeChoice theme, bool colourBlind)
+        /// <summary>The window's own colors for a look (none for Dalamud's), from its tokens.</summary>
+        public static (ImGuiCol Col, Vector4 Color)[] Colors(ThemeChoice theme)
         {
-            var dim = theme == ThemeChoice.HighContrast ? Hex(0xC8C8C8) : Hex(0x8A8F9A);
-            if (colourBlind) return new StatusColors(Hex(0x56B4E9), Hex(0xF0E442), Hex(0xFF7A3D), dim);
-            return theme switch
+            if (Info(theme).Tokens is not { } t) return System.Array.Empty<(ImGuiCol, Vector4)>();
+            Vector4 C(string hex, float alpha = 1f) => Hex(hex, alpha);
+            return new[]
             {
-                // The warning is orange rather than gold, so it is never mistaken for gil.
-                ThemeChoice.HighContrast => new StatusColors(Hex(0x3DFF8A), Hex(0xFF9F1A), Hex(0xFF4D4D), dim, Hex(0xFFE066), Hex(0x7FD4FF), Hex(0xD0BCFF), Hex(0x6FF0E2),
-                    new RoleColors(Hex(0x6FA8FF), Hex(0xB5D2FF), Hex(0x5CE68A), Hex(0xADF2C4), Hex(0xFF6B6B), Hex(0xFFB3B3))),
-                ThemeChoice.Dalamud => new StatusColors(new Vector4(0.55f, 0.85f, 0.55f, 1f), Hex(0xE8A04C), new Vector4(1f, 0.45f, 0.45f, 1f), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0), Hex(0x5FD3C8), Roles),
-                _ => new StatusColors(Hex(0x6FBF82), Hex(0xE8A04C), Hex(0xE57373), dim, Hex(0xF2D06B), Hex(0x8CC4F2), Hex(0xB8A6F0), Hex(0x5FD3C8), Roles),
+                (ImGuiCol.WindowBg, C(t.Bg, 0.97f)), (ImGuiCol.ChildBg, C(t.Bg, 0f)), (ImGuiCol.PopupBg, C(t.Modal, 0.98f)),
+                (ImGuiCol.Border, C(t.Border)), (ImGuiCol.Separator, C(t.Border)),
+                (ImGuiCol.Text, C(t.Text)), (ImGuiCol.TextDisabled, C(t.Dim)), (ImGuiCol.TextSelectedBg, C(t.Accent, 0.35f)),
+                (ImGuiCol.TitleBg, C(t.Sidebar)), (ImGuiCol.TitleBgActive, C(t.Panel)), (ImGuiCol.TitleBgCollapsed, C(t.Sidebar)),
+                (ImGuiCol.FrameBg, C(t.Panel)), (ImGuiCol.FrameBgHovered, C(t.Hover)), (ImGuiCol.FrameBgActive, C(t.Border)),
+                (ImGuiCol.Button, C(t.Hover)), (ImGuiCol.ButtonHovered, C(t.HoverStrong)), (ImGuiCol.ButtonActive, C(t.Accent, 0.6f)),
+                (ImGuiCol.Header, C(t.Accent, t.HeaderAlpha)), (ImGuiCol.HeaderHovered, C(t.Accent, t.HeaderAlpha >= 1 ? 0.55f : t.HeaderAlpha * 0.65f)),
+                (ImGuiCol.HeaderActive, C(t.HeaderAlpha >= 1 ? t.AccentStrong : t.Accent, t.HeaderAlpha >= 1 ? 1f : 0.4f)),
+                (ImGuiCol.CheckMark, C(t.Check)), (ImGuiCol.SliderGrab, C(t.Accent)), (ImGuiCol.SliderGrabActive, C(t.AccentStrong)),
+                (ImGuiCol.Tab, C(t.Hover)), (ImGuiCol.TabHovered, C(t.Accent, 0.5f)),
+                (ImGuiCol.TableHeaderBg, C(t.Panel)), (ImGuiCol.TableBorderStrong, C(t.Border)), (ImGuiCol.TableBorderLight, C(t.Hover)),
+                (ImGuiCol.TableRowBg, C(t.Bg, 0f)), (ImGuiCol.TableRowBgAlt, C(t.RowAlt, t.RowAltAlpha)),
+                (ImGuiCol.ScrollbarBg, C(t.Sidebar, 0.6f)), (ImGuiCol.ScrollbarGrab, C(t.Border)), (ImGuiCol.ScrollbarGrabHovered, C(t.BorderStrong)),
+                (ImGuiCol.ResizeGrip, C(t.Accent, 0.2f)), (ImGuiCol.ResizeGripHovered, C(t.Accent, 0.5f)),
+                (ImGuiCol.PlotLines, C(t.Accent)), (ImGuiCol.PlotHistogram, C(t.Accent)),
             };
         }
-
-        // The window's own colors for each look (Dalamud's look sets none).
-        private static readonly Dictionary<ThemeChoice, (ImGuiCol Col, Vector4 Color)[]> Colors = new()
-        {
-            [ThemeChoice.Fleet] = new[]
-            {
-                (ImGuiCol.WindowBg, Hex(0x12141A, 0.97f)), (ImGuiCol.ChildBg, Hex(0x000000, 0f)), (ImGuiCol.PopupBg, Hex(0x1A1D24, 0.98f)),
-                (ImGuiCol.Border, Hex(0x2A2E38)), (ImGuiCol.Separator, Hex(0x2A2E38)),
-                (ImGuiCol.Text, Hex(0xE6E6E6)), (ImGuiCol.TextDisabled, Hex(0x8A8F9A)),
-                (ImGuiCol.TitleBg, Hex(0x0D0F13)), (ImGuiCol.TitleBgActive, Hex(0x1A1D24)), (ImGuiCol.TitleBgCollapsed, Hex(0x0D0F13)),
-                (ImGuiCol.FrameBg, Hex(0x1A1D24)), (ImGuiCol.FrameBgHovered, Hex(0x23262E)), (ImGuiCol.FrameBgActive, Hex(0x2A2E38)),
-                (ImGuiCol.Button, Hex(0x23262E)), (ImGuiCol.ButtonHovered, Hex(0x2F3440)), (ImGuiCol.ButtonActive, Hex(0x5B8DEF, 0.6f)),
-                (ImGuiCol.Header, Hex(0x5B8DEF, 0.28f)), (ImGuiCol.HeaderHovered, Hex(0x5B8DEF, 0.18f)), (ImGuiCol.HeaderActive, Hex(0x5B8DEF, 0.4f)),
-                (ImGuiCol.CheckMark, Hex(0x5B8DEF)), (ImGuiCol.SliderGrab, Hex(0x5B8DEF)), (ImGuiCol.SliderGrabActive, Hex(0x3987E5)),
-                (ImGuiCol.TableHeaderBg, Hex(0x1A1D24)), (ImGuiCol.TableBorderStrong, Hex(0x2A2E38)), (ImGuiCol.TableBorderLight, Hex(0x23262E)),
-                (ImGuiCol.TableRowBg, Hex(0x000000, 0f)), (ImGuiCol.TableRowBgAlt, Hex(0xFFFFFF, 0.055f)),
-                (ImGuiCol.ScrollbarBg, Hex(0x0D0F13, 0.6f)), (ImGuiCol.ScrollbarGrab, Hex(0x2A2E38)), (ImGuiCol.ScrollbarGrabHovered, Hex(0x3A3F4A)),
-                (ImGuiCol.ResizeGrip, Hex(0x5B8DEF, 0.2f)), (ImGuiCol.ResizeGripHovered, Hex(0x5B8DEF, 0.5f)),
-            },
-            [ThemeChoice.HighContrast] = new[]
-            {
-                (ImGuiCol.WindowBg, Hex(0x000000)), (ImGuiCol.ChildBg, Hex(0x000000, 0f)), (ImGuiCol.PopupBg, Hex(0x000000)),
-                (ImGuiCol.Border, Hex(0xFFFFFF, 0.7f)), (ImGuiCol.Separator, Hex(0xFFFFFF, 0.6f)),
-                (ImGuiCol.Text, Hex(0xFFFFFF)), (ImGuiCol.TextDisabled, Hex(0xC8C8C8)),
-                (ImGuiCol.TitleBg, Hex(0x000000)), (ImGuiCol.TitleBgActive, Hex(0x1E1E1E)), (ImGuiCol.TitleBgCollapsed, Hex(0x000000)),
-                (ImGuiCol.FrameBg, Hex(0x1E1E1E)), (ImGuiCol.FrameBgHovered, Hex(0x333333)), (ImGuiCol.FrameBgActive, Hex(0x444444)),
-                (ImGuiCol.Button, Hex(0x262626)), (ImGuiCol.ButtonHovered, Hex(0x3D3D3D)), (ImGuiCol.ButtonActive, Hex(0x0060DF)),
-                (ImGuiCol.Header, Hex(0x0060DF)), (ImGuiCol.HeaderHovered, Hex(0x0060DF, 0.55f)), (ImGuiCol.HeaderActive, Hex(0x0050C0)),
-                (ImGuiCol.CheckMark, Hex(0xFFFFFF)), (ImGuiCol.SliderGrab, Hex(0xFFFFFF)), (ImGuiCol.SliderGrabActive, Hex(0xC8C8C8)),
-                (ImGuiCol.TableHeaderBg, Hex(0x1E1E1E)), (ImGuiCol.TableBorderStrong, Hex(0xFFFFFF, 0.7f)), (ImGuiCol.TableBorderLight, Hex(0xFFFFFF, 0.35f)),
-                (ImGuiCol.TableRowBg, Hex(0x000000, 0f)), (ImGuiCol.TableRowBgAlt, Hex(0xFFFFFF, 0.10f)),
-                (ImGuiCol.ScrollbarBg, Hex(0x000000)), (ImGuiCol.ScrollbarGrab, Hex(0x8C8C8C)), (ImGuiCol.ScrollbarGrabHovered, Hex(0xC8C8C8)),
-                (ImGuiCol.ResizeGrip, Hex(0xFFFFFF, 0.3f)), (ImGuiCol.ResizeGripHovered, Hex(0xFFFFFF, 0.6f)),
-            },
-            [ThemeChoice.Dalamud] = System.Array.Empty<(ImGuiCol, Vector4)>(),
-        };
-
-        /// <summary>The sidebar's background for a look (null: the window's own).</summary>
-        public static Vector4? SidebarBg(ThemeChoice theme) => theme switch
-        {
-            ThemeChoice.Fleet => Hex(0x0D0F13),
-            ThemeChoice.HighContrast => Hex(0x0A0A0A),
-            _ => null,
-        };
 
         /// <summary>Pushes a look's colors (before the window is drawn); returns how many, for <see cref="Pop"/>.</summary>
         public static int Push(ThemeChoice theme)
         {
-            var colors = Colors.TryGetValue(theme, out var c) ? c : System.Array.Empty<(ImGuiCol, Vector4)>();
+            var colors = Colors(theme);
             foreach (var (col, color) in colors) ImGui.PushStyleColor(col, color);
             return colors.Length;
         }

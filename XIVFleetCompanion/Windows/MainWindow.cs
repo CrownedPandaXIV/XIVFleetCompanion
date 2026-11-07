@@ -86,7 +86,16 @@ public partial class MainWindow : Window, IDisposable
     }
 
     // The look (Settings → Look) applies to this window only.
-    public override void PreDraw() => themeColors = Theme.Push(plugin.Configuration.Theme);
+    public override void PreDraw()
+    {
+        themeColors = Theme.Push(plugin.Configuration.Theme);
+        // Headings and box titles in the look's colours (they're drawn by static helpers).
+        var palette = Palette;
+        headingColor = palette.Heading;
+        softColor = palette.Dim;
+    }
+    private static Vector4? headingColor;
+    private static Vector4 softColor = new(0.62f, 0.64f, 0.68f, 1f);
     public override void PostDraw()
     {
         Theme.Pop(themeColors);
@@ -287,6 +296,15 @@ public partial class MainWindow : Window, IDisposable
         var rowHeight = ImGui.GetTextLineHeight() * 1.5f;
         if (ImGui.Selectable($"##page{tab}", shown == tab, ImGuiSelectableFlags.None, new Vector2(0, rowHeight))) Show(tab);
         var hovered = ImGui.IsItemHovered();
+        // A look with a glow (Princess): the page shown glows, and its edge is lit.
+        if (shown == tab && Theme.Glow(plugin.Configuration.Theme) is { } glow)
+        {
+            var draw = ImGui.GetWindowDrawList();
+            var (min, max) = (ImGui.GetItemRectMin(), ImGui.GetItemRectMax());
+            for (var i = 1; i <= 4; i++)
+                draw.AddRect(min - new Vector2(i, i), max + new Vector2(i, i), ImGui.GetColorU32(glow with { W = 0.22f / i }), 4f * ImGuiHelpers.GlobalScale, ImDrawFlags.None, 2f);
+            draw.AddRectFilled(min, new Vector2(min.X + 3 * ImGuiHelpers.GlobalScale, max.Y), ImGui.GetColorU32(glow));
+        }
         var after = ImGui.GetCursorPos();
         var pad = (rowHeight - ImGui.GetTextLineHeight()) / 2;
         ImGui.SetCursorPos(new Vector2(start.X + 6 * ImGuiHelpers.GlobalScale, start.Y + pad));
@@ -461,7 +479,7 @@ public partial class MainWindow : Window, IDisposable
     private static void Heading(string text)
     {
         ImGui.Spacing();
-        ImGui.TextUnformatted(text);
+        Tinted(headingColor, text);
         ImGui.Separator();
     }
 
@@ -494,7 +512,7 @@ public partial class MainWindow : Window, IDisposable
     private static void HeadingRuns(params (string Text, Vector4? Color)[] runs)
     {
         ImGui.Spacing();
-        Runs(runs);
+        Runs(runs.Select(r => (r.Text, r.Color ?? headingColor)).ToArray());
         ImGui.Separator();
     }
 
@@ -626,7 +644,7 @@ public partial class MainWindow : Window, IDisposable
     // A box's title (softer), then its main figure large.
     private static void BoxTitle(string title, string figure, Vector4? color)
     {
-        Colored(new Vector4(0.62f, 0.64f, 0.68f, 1f), title);
+        Colored(softColor, title);
         ImGui.SetWindowFontScale(1.35f);
         Tinted(color, figure);
         ImGui.SetWindowFontScale(1f);

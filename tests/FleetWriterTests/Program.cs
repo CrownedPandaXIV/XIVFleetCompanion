@@ -910,6 +910,50 @@ internal static class Program
             "fight club: text read as a number as JavaScript reads it");
     }
 
+    // The looks (Settings → Look): the same colours as the app's renderer/themes.js, and what they mean in each.
+    private static void LooksAgainstTheApp()
+    {
+        using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "themes-fixture.json")));
+        var app = doc.RootElement.GetProperty("themes").EnumerateArray().ToList();
+        Check(app.Select(t => t.GetProperty("key").GetString()).SequenceEqual(Theme.Looks.Select(l => l.Key)), "looks: the same looks as the app's, in the same order");
+        foreach (var t in app)
+        {
+            var key = t.GetProperty("key").GetString()!;
+            var mine = Theme.Looks.FirstOrDefault(l => l.Key == key);
+            if (mine == null) continue;
+            var name = t.GetProperty("name").GetString();
+            if (t.GetProperty("tokens").ValueKind != JsonValueKind.Object)
+            {
+                Check(mine.Tokens == null && mine.Name == name, $"looks: {name} is Dalamud's own style here too");
+                continue;
+            }
+            var k = t.GetProperty("tokens");
+            string S(string p) => k.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
+            var m = mine.Tokens!;
+            var want = new[] { S("bg"), S("sidebar"), S("panel"), S("modal"), S("hover"), S("hoverStrong"), S("border"), S("borderStrong"), S("text"),
+                S("textBright"), S("textSoft"), S("dim"), S("faint"), S("accent"), S("accentStrong"), S("link"), k.GetProperty("rowAlt")[0].GetString()!,
+                k.GetProperty("rowAlt")[1].GetDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), S("check"),
+                k.GetProperty("headerAlpha").GetDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), k.GetProperty("light").GetBoolean().ToString(),
+                S("heading"), (k.TryGetProperty("glow", out var g) && g.GetBoolean()).ToString(), S("good"), S("warn"), S("danger"), S("gil"), S("address"), S("fc"), S("fcPoints"),
+                string.Join(",", new[] { "tank", "tankBase", "healer", "healerBase", "dps", "dpsBase" }.Select(r => k.GetProperty("roles").GetProperty(r).GetString())),
+                string.Join(",", new[] { "good", "warn", "danger" }.Select(r => k.GetProperty("cb").GetProperty(r).GetString())) };
+            var have = new[] { m.Bg, m.Sidebar, m.Panel, m.Modal, m.Hover, m.HoverStrong, m.Border, m.BorderStrong, m.Text, m.TextBright, m.TextSoft, m.Dim,
+                m.Faint, m.Accent, m.AccentStrong, m.Link, m.RowAlt, m.RowAltAlpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), m.Check,
+                m.HeaderAlpha.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), m.Light.ToString(), m.Heading ?? "", m.Glow.ToString(),
+                m.Good, m.Warn, m.Danger, m.Gil, m.Address, m.Fc, m.FcPoints, string.Join(",", m.Roles), string.Join(",", m.Cb) };
+            var diff = want.Zip(have).Select((x, i) => (x, i)).FirstOrDefault(z => z.x.First != z.x.Second);
+            Check(want.SequenceEqual(have) && mine.Name == name && mine.About == t.GetProperty("about").GetString(),
+                $"looks: {name} has the app's colours" + (want.SequenceEqual(have) ? "" : $" (colour {diff.i}: app {diff.x.First}, plugin {diff.x.Second})"));
+            var normal = Theme.Status(mine.Choice, false);
+            var cb = Theme.Status(mine.Choice, true);
+            Check(normal.Good == Theme.Hex(m.Good) && normal.Gil == Theme.Hex(m.Gil) && normal.Roles != null && cb.Good == Theme.Hex(m.Cb[0])
+                  && cb.Warn == Theme.Hex(m.Cb[1]) && cb.Danger == Theme.Hex(m.Cb[2]) && cb.Gil == null && cb.Roles == null && cb.Address == null,
+                $"looks: {name}: colour-blind friendly swaps fine, a look and urgent for its own, and leaves gil, addresses and classes plain");
+        }
+        Check(Theme.Info((ThemeChoice)99).Choice == ThemeChoice.Fleet, "looks: an unknown saved look is the default");
+        Check((int)ThemeChoice.Fleet == 0 && (int)ThemeChoice.Dalamud == 1 && (int)ThemeChoice.HighContrast == 2, "looks: the looks saved before keep their numbers");
+    }
+
     private static string? JsonDiff(System.Text.Json.JsonElement a, System.Text.Json.JsonElement b, string at)
     {
         if (a.ValueKind != b.ValueKind && !(a.ValueKind is JsonValueKind.True or JsonValueKind.False && b.ValueKind is JsonValueKind.True or JsonValueKind.False))
@@ -1515,6 +1559,7 @@ internal static class Program
         await TrendsAgainstTheApp(conn);
         await EditsAgainstTheApp(conn);
         await FightClubAgainstTheApp(conn);
+        LooksAgainstTheApp();
         TrendsMathChecks();
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 

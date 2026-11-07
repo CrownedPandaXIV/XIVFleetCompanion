@@ -218,6 +218,14 @@ In progress: the fleet inside the game. Built in stages, each tried as a test bu
 - **A PC that only reads shows on the PCs page.** A PC whose plugin syncs no characters (syncing off, or none ticked)
   now checks in every few minutes while the game runs, so the app's PCs tab and the plugin's PCs page list it ("Only
   reads"), and moving the database checks it can follow (with app 1.8.0).
+- **Five new looks, chosen from a dropdown** (Settings → Look, with a strip of each look's colours and a line about it on
+  hover): **Princess** (neon and pastel pink on deep plum, pink headings and a glowing selected page), **Deep Sea**
+  (navy and teal with glowing cyan), **Sunset Harbor** (dusky purple with rose-gold), **Parchment** (a light look: cream
+  with dark brown text and ink blue) and **Evergreen** (forest green with soft teal), beside XIV Fleet Companion,
+  Dalamud and High contrast. The app has the same looks. **Colour-blind friendly status colors** work with every look:
+  each has its own shades of blue, yellow and orange-red for fine, a look and urgent, measured to stay readable on its
+  background and apart with every common kind of colour blindness (Parchment uses a raspberry red for urgent, as dark
+  orange and ochre look alike with red-blindness).
 - **Searching word by word** in every Filter box and Where is it?: every word typed, in any order ("diadochos healing"
   finds every piece of Diadochos healing gear).
 - **Hide equipped gear** on the Inventory page's Characters, Fleet totals and Where is it?: leaves out gear being worn by

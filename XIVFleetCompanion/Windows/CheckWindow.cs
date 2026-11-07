@@ -218,7 +218,7 @@ public class CheckWindow : Window, IDisposable
 
         using var child = ImRaii.Child("##checkresults", Vector2.Zero, true);
         if (!child.Success || text == null) return;
-        var amber = new Vector4(0.95f, 0.70f, 0.35f, 1f);
+        var amber = Theme.Status(plugin.Configuration.Theme, plugin.Configuration.ColourBlindStatus).Warn;
         foreach (var line in text.Split('\n'))
         {
             var trimmed = line.TrimEnd('\r');

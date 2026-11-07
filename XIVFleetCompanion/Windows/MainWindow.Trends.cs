@@ -192,7 +192,7 @@ public partial class MainWindow
             if (!chartDragFrom.ContainsKey(id)) chartDragFrom[id] = Math.Clamp(mouse.X, left, right);
             var a = chartDragFrom[id];
             var b = Math.Clamp(mouse.X, left, right);
-            draw.AddRectFilled(new Vector2(Math.Min(a, b), top), new Vector2(Math.Max(a, b), bottom), ImGui.GetColorU32(new Vector4(1, 1, 1, 0.08f)));
+            draw.AddRectFilled(new Vector2(Math.Min(a, b), top), new Vector2(Math.Max(a, b), bottom), ImGui.GetColorU32(ImGuiCol.TextSelectedBg));
         }
         (double, double)? zoomTo = null;
         if (zoomable && released && chartDragFrom.Remove(id, out var dragFrom))
