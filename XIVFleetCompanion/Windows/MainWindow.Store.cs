@@ -53,7 +53,7 @@ public partial class MainWindow
                 ImGui.TextWrapped("Every game on this PC keeps your fleet in one file. Nothing else to install or set up.");
                 ImGui.Spacing();
                 using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                    ImGui.TextWrapped("The XIV Fleet Companion app can't open the file, so you see your fleet here, in the game. " +
+                    ImGui.TextWrapped("You see your fleet here, in the game, and in the XIV Fleet Companion app on this PC (1.10 or later). " +
                                       "Backed up once a day; the last 7 are kept.");
                 ImGui.Spacing();
                 if (ImGui.Button("Keep it on this PC")) ChooseThisPc();
@@ -244,7 +244,7 @@ public partial class MainWindow
                               "for when this is the only PC you play on.");
             using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
                 ImGui.TextWrapped("Every table is copied and checked before anything switches. The shared database is left as it is. " +
-                                  "The XIV Fleet Companion app can't open the file, so afterwards you see your fleet in the game.");
+                                  "Afterwards you see your fleet in the game, and in the XIV Fleet Companion app on this PC (1.10 or later).");
             // Other PCs still syncing to the database would carry on there, not in this PC's file.
             reader.ReadIfDue(withLists: true);
             var others = reader.Pcs.Data?.Where(p => !string.Equals(p.Pc, Environment.MachineName, StringComparison.OrdinalIgnoreCase)

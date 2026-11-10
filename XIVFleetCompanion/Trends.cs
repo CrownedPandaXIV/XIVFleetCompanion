@@ -55,7 +55,9 @@ namespace XIVFleetCompanion
 
     /// <summary>A line over its span: the value now and at the start, the change (and as a share of the start), the change
     /// a day on average, and the lowest and highest.</summary>
-    public sealed record TrendStats(double? Current, double? Start, double? Change, double? Percent, double? PerDay, double? Low, double? High);
+    /// <summary>A line over its span. PerDay is the change a day; GainedPerDay counts only the rises (what was gained a day,
+    /// for values that drop back when they're sold: see TrendsMath.SoldOff).</summary>
+    public sealed record TrendStats(double? Current, double? Start, double? Change, double? Percent, double? PerDay, double? Low, double? High, double? GainedPerDay = null);
 
     public sealed record TrendRange(string Key, string Label, double? Ms, int Points);
 
@@ -277,8 +279,15 @@ namespace XIVFleetCompanion
             var change = current - start;
             var known = values.Where(v => v != null).Select(v => v!.Value).ToList();
             var days = (timestamps[last] - timestamps[first]) / Day;
-            return new TrendStats(current, start, change, start != 0 ? change / Math.Abs(start) * 100 : null, days > 0 ? change / days : null, known.Min(), known.Max());
+            double gained = 0;
+            for (var i = 1; i < known.Count; i++) gained += Math.Max(0, known[i] - known[i - 1]);
+            return new TrendStats(current, start, change, start != 0 ? change / Math.Abs(start) * 100 : null, days > 0 ? change / days : null, known.Min(), known.Max(),
+                days > 0 ? gained / days : null);
         }
+
+        /// <summary>Values that climb and then drop back when they're sold (salvage): a day on average would count each sale
+        /// as a loss, so these show what was gained a day instead (as the app's trendSoldOff).</summary>
+        public static bool SoldOff(string metricKey) => metricKey is "salvage_value" or "salvage_items";
 
         /// <summary>A whole number with thousands separators ("—" for none), as the app's trendFullNumber.</summary>
         public static string Full(double? n) => n is double v ? Math.Floor(v + 0.5).ToString("#,0", CultureInfo.InvariantCulture) : "—";

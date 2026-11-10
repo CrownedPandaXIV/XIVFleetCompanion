@@ -55,8 +55,12 @@ Type `/xivfleet`. The first time, it asks **where your fleet data should live**:
 | --- | --- | --- |
 | What you install | nothing else | the app and PostgreSQL (the app's Database Helper sets it up) |
 | Where the fleet is | `%APPDATA%\XIV Fleet Companion\fleet.db`, shared by every game on this PC | a database your PCs and the app all use |
-| Where you see it | in the game | in the game and in the app |
+| Where you see it | in the game, and in the app on this PC (1.10 or later) | in the game and in the app |
 | Backups | a copy a day in `Backups` beside the file, the last 7 kept, plus **Back up now** on the Status page | the app's backups |
+
+The app (1.10 or later) opens the fleet file by itself on the same PC, with nothing to set up: every page works on it,
+edits save to it, and its Settings show the file and its backups. It follows the choice made in the game, so on a PC
+that switches between the two, the app switches too.
 
 The file isn't allowed in a OneDrive, Dropbox, Google Drive or network folder: those copy it while a game is writing
 and can damage it. A setup that already had a database connection before 2.2 isn't asked and keeps using it.
