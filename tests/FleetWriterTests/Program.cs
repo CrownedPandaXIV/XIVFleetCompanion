@@ -382,8 +382,12 @@ internal static partial class Program
     {
         var day = TrendsMath.Day;
         var stats = TrendsMath.Stats(new double?[] { null, 100, 150, null, 90, 130 }, new double[] { 0, day, 2 * day, 3 * day, 4 * day, 5 * day });
-        Check(stats == new TrendStats(130, 100, 30, 30, 7.5, 90, 150),
-            "trends: under a chart, now, at the start (its first recorded point), the change and its share, a day on average (30 over 4 days), lowest and highest: " + stats);
+        Check(stats == new TrendStats(130, 100, 30, 30, 7.5, 90, 150, 22.5),
+            "trends: under a chart, now, at the start (its first recorded point), the change and its share, a day on average (30 over 4 days), lowest and highest, and gained a day (50 + 40 over 4 days): " + stats);
+        // Salvage climbing to 30M and sold twice over 3 days: a day on average sees nothing; gained a day sees the 60M.
+        var salvage = TrendsMath.Stats(new double?[] { 0, 30e6, 0, 30e6, 0 }, new double[] { 0, day * 0.75, day * 1.5, day * 2.25, day * 3 });
+        Check(salvage.PerDay == 0 && salvage.GainedPerDay == 20e6 && TrendsMath.SoldOff("salvage_value") && TrendsMath.SoldOff("salvage_items") && !TrendsMath.SoldOff("gil"),
+            "trends: salvage, which drops back when it's sold, shows what was gained a day (60M over 3 days), and only salvage does: " + salvage);
         var flat = TrendsMath.Stats(new double?[] { 0, 0, 5 }, new double[] { 0, day / 2, day });
         Check(flat.Percent == null && flat.PerDay == 5 && flat.Change == 5, "trends: from nothing, no share of the start is given (it would be infinite)");
         var none = TrendsMath.Stats(new double?[] { null, null }, new double[] { 0, day });

@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.3.1 - 2026-11-10
+
+- **Trends: salvage shows "Gained a day".** Salvage value and salvage items climb, then drop back when you sell, so "A
+  day on average" counted every sale as a loss and showed next to nothing. For salvage it's now "Gained a day": every
+  rise over the span added up, drops from selling left out. Everything else keeps "A day on average". The same as the
+  app's.
+- The setup question, Move your fleet and the README now say the app (1.10 or later) opens the fleet file on the same
+  PC, instead of that it can't.
+
 ## 2.3.0 - 2026-11-07
 
 - **Try the move first.** Settings → Move your fleet has a trial run: it copies your whole fleet and checks every row,

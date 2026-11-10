@@ -271,13 +271,20 @@ public partial class MainWindow
 
     private static string Signed(double? n) => n is double v ? (v > 0 ? "+" : "") + TrendsMath.Full(v) : "—";
 
+    // The rate under a chart: a day on average, or for salvage (which drops back when it's sold) what was gained a day.
+    private static string RateLabel(string metricKey) => TrendsMath.SoldOff(metricKey) ? "Gained a day" : "A day on average";
+    private static double? Rate(string metricKey, TrendStats s) => TrendsMath.SoldOff(metricKey) ? s.GainedPerDay : s.PerDay;
+    private static string RateHint(string metricKey) => TrendsMath.SoldOff(metricKey)
+        ? "Every rise over this span added up, divided by the days between the first and last recorded values shown. Drops from selling aren't taken off."
+        : "The change over this span, divided by the days between the first and last recorded values shown.";
+
     // Under a chart: each line's value now, its change over the span (and as a share of the start), a day on average,
     // and its lowest and highest.
-    private void TrendStatsTable(string id, IReadOnlyList<double> timestamps, IReadOnlyList<(string Name, Vector4 Color, IReadOnlyList<double?> Values)> lines)
+    private void TrendStatsTable(string id, string metricKey, IReadOnlyList<double> timestamps, IReadOnlyList<(string Name, Vector4 Color, IReadOnlyList<double?> Values)> lines)
     {
         using var table = ImRaii.Table($"##trendStats{id}", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
         if (!table) return;
-        foreach (var label in new[] { lines.Count == 1 ? "" : "Line", "Now", "Change", "Change %", "A day on average", "Lowest", "Highest" }) ImGui.TableSetupColumn(label);
+        foreach (var label in new[] { lines.Count == 1 ? "" : "Line", "Now", "Change", "Change %", RateLabel(metricKey), "Lowest", "Highest" }) ImGui.TableSetupColumn(label);
         ImGui.TableHeadersRow();
         foreach (var (name, color, values) in lines)
         {
@@ -294,8 +301,8 @@ public partial class MainWindow
             ImGui.TableNextColumn();
             TableCells.Right(s.Percent is double p ? $"{(p > 0 ? "+" : "")}{p:0.0}%" : "—", s.Change > 0 ? Green : s.Change < 0 ? Amber : null);
             ImGui.TableNextColumn();
-            TableCells.Right(Signed(s.PerDay));
-            Hover("The change over this span, divided by the days between the first and last recorded values shown.");
+            TableCells.Right(Signed(Rate(metricKey, s)));
+            Hover(RateHint(metricKey));
             ImGui.TableNextColumn();
             TableCells.Right(TrendsMath.Full(s.Low));
             ImGui.TableNextColumn();
@@ -431,7 +438,8 @@ public partial class MainWindow
             ImGui.SameLine();
             ChangeText(s);
             ImGui.SameLine(0, 24 * scale);
-            ImGui.TextUnformatted($"A day on average {Signed(s.PerDay)}");
+            ImGui.TextUnformatted($"{RateLabel(metric.Key)} {Signed(Rate(metric.Key, s))}");
+            Hover(RateHint(metric.Key));
         }
         if (trendTable) DrawTrendTable(result, lines);
         else
@@ -440,7 +448,7 @@ public partial class MainWindow
             if (picked != null) trendZoom = picked;
             Colored(Dim, "Drag across the chart to zoom into that span; hover for the values.");
         }
-        if (lines.Count > 1) TrendStatsTable("trends", result.Timestamps, lines);
+        if (lines.Count > 1) TrendStatsTable("trends", metric.Key, result.Timestamps, lines);
     }
 
     private void PickTrendScope(string scope, TrendsMeta meta)
