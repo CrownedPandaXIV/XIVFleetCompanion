@@ -3,7 +3,7 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
-## 2.4.0 - unreleased
+## 2.4.0 - 2026-11-13
 
 Everything the app does, now in the game too: the plugin no longer needs the app for anything.
 
