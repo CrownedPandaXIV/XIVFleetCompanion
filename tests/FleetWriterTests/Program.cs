@@ -64,6 +64,30 @@ internal static partial class Program
         }
     }
 
+    // A Universalis that never answers.
+    private sealed class SilentUniversalis : System.Net.Http.HttpMessageHandler
+    {
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken token)
+        {
+            await Task.Delay(System.Threading.Timeout.Infinite, token);
+            throw new InvalidOperationException("never");
+        }
+    }
+
+    // No answer in the time allowed is said plainly, as the app says it; the plugin allows 20 seconds, as the app does.
+    private static async Task MarketGivesUpInTime()
+    {
+        var universalis = new Universalis(new System.Net.Http.HttpClient(new SilentUniversalis()) { Timeout = TimeSpan.FromSeconds(1) }, "https://universalis.test");
+        string? said = null;
+        var started = DateTime.UtcNow;
+        try { await universalis.MarketFor(new List<(string?, int)> { ("Maduin", 1) }); }
+        catch (InvalidOperationException e) { said = e.Message; }
+        var source = System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "XIVFleetCompanion", "Universalis.cs"));
+        Check(said == "Universalis could not be reached (no answer in 1 seconds)." && DateTime.UtcNow - started < TimeSpan.FromSeconds(10)
+              && source.Contains("new HttpClient { Timeout = TimeSpan.FromSeconds(20) }"),
+            $"market: a Universalis that doesn't answer is given up in the time allowed, and said plainly ({said})");
+    }
+
     private static async Task MarketAsksEachPlaceOnce()
     {
         var handler = new SlowUniversalis();
@@ -2067,6 +2091,7 @@ internal static partial class Program
         RoutesAgainstTheApp();
         await RoutesReadFromTheDatabase(conn);
         await MarketAsksEachPlaceOnce();
+        await MarketGivesUpInTime();
         MarketWorkedOutOncePerRead();
         await MarketReadFromTheDatabase(conn);
         await ShoppingReadFromTheDatabase(conn);
@@ -2832,6 +2857,68 @@ internal static partial class Program
         Check(SyncFailure.Describe(bug) == "Sequence contains no elements" && !SyncFailure.IsExpected(bug)
               && !SyncFailure.IsExpected(new PostgresException("syntax error", "ERROR", "ERROR", PostgresErrorCodes.SyntaxError)),
             "anything else may be a bug, so it is logged in full every time");
+
+        // /xivfleet's words: every page of the window, named in the help, any case; a typo matches nothing.
+        var windowSource = System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "XIVFleetCompanion", "Windows", "MainWindow.cs"));
+        var tabLine = System.Text.RegularExpressions.Regex.Match(windowSource, @"public enum Tab \{([^}]*)\}").Groups[1].Value;
+        var tabs = tabLine.Split(',').Select(t => t.Trim().ToLowerInvariant()).Where(t => t.Length > 0).ToList();
+        var pageTabs = tabs.Where(t => t != "check" && t != "speedtest").ToList();
+        Check(tabs.Count > 0 && pageTabs.All(t => CommandWords.Pages.Contains(t)) && CommandWords.Pages.All(p => tabs.Contains(p))
+              && tabs.Contains(CommandWords.Check) && tabs.Contains(CommandWords.SpeedTest),
+            $"/xivfleet knows every page of the window ({string.Join(", ", pageTabs)})");
+        Check(CommandWords.Pages.All(p => CommandWords.Help.Contains(p)) && CommandWords.Help.Contains("routes") && CommandWords.Help.Contains("trends"),
+            "/xivfleet's help names every page, routes and trends too");
+        Check(CommandWords.Match("Trends") == "trends" && CommandWords.Match(" SPEEDTEST ") == CommandWords.SpeedTest && CommandWords.Match("check") == CommandWords.Check
+              && CommandWords.Match("subz") == null && CommandWords.Match("summary,subs") == null && CommandWords.Match("1") == null,
+            "/xivfleet matches its words in any case, and a typo matches nothing");
+        Check(CommandWords.Unknown(" subz ").Contains("\"subz\" isn't a page") && CommandWords.Unknown("subz").Contains("routes"),
+            "/xivfleet says which words there are after a typo");
+
+        // The fleet file's problems a player can fix, from the errors SQLite really throws.
+        async Task<Exception?> FailOnFile(string connectionString, string sql)
+        {
+            try
+            {
+                await using var c = new System.Data.SQLite.SQLiteConnection(connectionString);
+                await c.OpenAsync();
+                await using var cmd = c.CreateCommand();
+                cmd.CommandText = sql;
+                await cmd.ExecuteNonQueryAsync();
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+        }
+        var fileDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"sync-failure-{Guid.NewGuid():N}");
+        System.IO.Directory.CreateDirectory(fileDir);
+        try
+        {
+            var damaged = System.IO.Path.Combine(fileDir, "damaged.db");
+            System.IO.File.WriteAllBytes(damaged, Enumerable.Repeat((byte)0x5A, 8192).ToArray());
+            var notDb = await FailOnFile($"Data Source={damaged};Pooling=False", "SELECT count(*) FROM sqlite_master");
+            Check(notDb != null && SyncFailure.Describe(notDb) == SyncFailure.FileDamaged && SyncFailure.IsExpected(notDb),
+                "a damaged fleet file says to restore a backup: " + notDb?.Message);
+            var whole = System.IO.Path.Combine(fileDir, "whole.db");
+            await FailOnFile($"Data Source={whole};Pooling=False", "CREATE TABLE t (x INTEGER)");
+            var readOnly = await FailOnFile($"Data Source={whole};Pooling=False;Read Only=True", "INSERT INTO t VALUES (1)");
+            Check(readOnly != null && SyncFailure.Describe(readOnly) == SyncFailure.FileReadOnly && SyncFailure.IsExpected(readOnly),
+                "a fleet file that can't be written to is said plainly: " + readOnly?.Message);
+            var nowhere = await FailOnFile($"Data Source={System.IO.Path.Combine(fileDir, "no-such-folder", "fleet.db")};Pooling=False", "SELECT 1");
+            Check(nowhere != null && SyncFailure.Describe(nowhere) == SyncFailure.FileCantOpen && SyncFailure.IsExpected(nowhere),
+                "a fleet file that can't be opened is said plainly: " + nowhere?.Message);
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { System.IO.Directory.Delete(fileDir, true); } catch (System.IO.IOException) { }
+        }
+        var full = new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Full, "database or disk is full");
+        var otherFile = new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Error, "no such table: x");
+        Check(SyncFailure.Describe(full) == SyncFailure.FileDiskFull && SyncFailure.IsExpected(full)
+              && SyncFailure.Describe(otherFile).StartsWith("Couldn't use the fleet file: ") && !SyncFailure.IsExpected(otherFile),
+            "a full disk is said plainly; any other fleet file error is still logged in full");
 
         var loot = new List<DetailsWriter.LootRow>
         {

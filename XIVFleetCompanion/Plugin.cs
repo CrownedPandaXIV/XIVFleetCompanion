@@ -29,6 +29,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IDtrBar DtrBar { get; private set; } = null!;
+    [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
 
     /// <summary>2.0: the fleet from the database's views, shared by the main window and the info bar line.</summary>
     public FleetReader Fleet { get; }
@@ -129,7 +130,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Opens the XIV Fleet Companion window. Add summary, subs, supplies, parts, roster, retainers, fcs, inventory, salvage, income, market, pcs, status or settings to open that page; check shows what the plugin can see for each character; speedtest times reading from the database."
+            HelpMessage = CommandWords.Help
         });
 
         AttachInfoBar();
@@ -167,14 +168,23 @@ public sealed class Plugin : IDalamudPlugin
     private void OnCommand(string command, string args)
     {
         var word = args.Trim();
-        if (word.Equals("check", StringComparison.OrdinalIgnoreCase))
-            OpenCheck();
-        else if (word.Equals("speedtest", StringComparison.OrdinalIgnoreCase))
-            OpenSpeedTest();
-        else if (Enum.TryParse<MainWindow.Tab>(word, ignoreCase: true, out var tab) && word.Length > 0 && !char.IsDigit(word[0]))
-            MainWindow.OpenAt(tab);
-        else
+        if (word.Length == 0)
+        {
             MainWindow.Toggle();
+            return;
+        }
+        switch (CommandWords.Match(word))
+        {
+            case CommandWords.Check: OpenCheck(); break;
+            case CommandWords.SpeedTest: OpenSpeedTest(); break;
+            case { } page: MainWindow.OpenAt(Enum.Parse<MainWindow.Tab>(page, ignoreCase: true)); break;
+            default:
+                // A word it doesn't know (a typo): open the window where it was, and say which words there are.
+                MainWindow.IsOpen = true;
+                MainWindow.BringToFront();
+                ChatGui.PrintError(CommandWords.Unknown(word));
+                break;
+        }
     }
 
     public void OpenCheck()
