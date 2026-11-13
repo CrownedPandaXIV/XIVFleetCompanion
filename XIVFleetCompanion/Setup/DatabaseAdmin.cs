@@ -80,6 +80,11 @@ namespace XIVFleetCompanion.Setup
 
         // ---- A new database (the app's setup/create-database.js) ----
 
+        /// <summary>Why a port typed on a database tool can't be used, or null when it can: a whole number from 1 to 65535,
+        /// refused before anything starts (Set up this PC and a move install PostgreSQL on it). As the app's portProblem.</summary>
+        public static string? PortProblem(int port) =>
+            port is >= 1 and <= 65535 ? null : "The port must be a whole number from 1 to 65535 (PostgreSQL's usual one is 5432).";
+
         public static string? CheckRequest(string database, string user, string password)
         {
             if (!Name.IsMatch(database ?? "")) return "The database name can only use lower-case letters, numbers and _, and must start with a letter.";

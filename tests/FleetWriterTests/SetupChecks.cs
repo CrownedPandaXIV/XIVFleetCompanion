@@ -25,6 +25,9 @@ internal static partial class Program
             ("fleet", "fleetapp", "short", "The app's password needs at least 8 characters."),
         };
         Check(requests.All(r => DatabaseAdmin.CheckRequest(r.Db, r.User, r.Password) == r.App), "setup: a new database's names and password checked as the app checks them");
+        const string BadPort = "The port must be a whole number from 1 to 65535 (PostgreSQL's usual one is 5432).";
+        Check(new[] { 1, 5432, 65535 }.All(p => DatabaseAdmin.PortProblem(p) == null) && new[] { 0, -1, 65536, 70000 }.All(p => DatabaseAdmin.PortProblem(p) == BadPort),
+            "setup: a port is a whole number from 1 to 65535, refused before anything starts, in the app's words");
 
         // The app's move checks (setup/move-database.js): which PCs block a move and which are only noted.
         var now = new DateTime(2026, 11, 13, 12, 0, 0);

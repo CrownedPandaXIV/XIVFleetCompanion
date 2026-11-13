@@ -19,6 +19,7 @@
     <Compile Include="..\..\XIVFleetCompanion\DatabaseMove.cs" Link="DatabaseMove.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SyncFailure.cs" Link="SyncFailure.cs" />
     <Compile Include="..\..\XIVFleetCompanion\CommandWords.cs" Link="CommandWords.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\SortCache.cs" Link="SortCache.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SpeedTest.cs" Link="SpeedTest.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FleetReader.cs" Link="FleetReader.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FleetOrder.cs" Link="FleetOrder.cs" />

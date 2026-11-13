@@ -52,6 +52,7 @@ namespace XIVFleetCompanion.Setup
             var plan = WindowsSetup.SetupPlan(input.Role, input.SameNetwork, pgHere, tsHere);
             if (plan == null) return (false, "Choose what this PC is for first.");
             if (plan.CreateDatabase && DatabaseAdmin.CheckRequest(input.Database, input.User, input.AppPassword) is { } bad) return (false, bad);
+            if (plan.CreateDatabase && DatabaseAdmin.PortProblem(input.Port) is { } badPort) return (false, badPort);
             if (plan.CreateDatabase && input.MasterPassword.Length == 0) return (false, "Choose PostgreSQL's master password (or enter it, if PostgreSQL is already on this PC).");
             steps.Clear();
             steps.AddRange(SetupSteps(plan));

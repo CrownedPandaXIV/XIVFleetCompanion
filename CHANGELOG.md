@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.2 - 2026-11-13
+
+- **Big tables don't slow the game down when sorted.** A table sorted by a column was sorted again every frame: with
+  10,000 rows by name, about 9 ms of the 16.7 ms a frame has at 60 fps. It's now sorted again only when its rows or the
+  sort change (or once a second): 0.17 ms a frame for the same table.
+- **Database tools check the port first**: Set up this PC, New database, Move the database to this PC, Let other PCs
+  connect and Leftovers take a whole number from 1 to 65535, and say so plainly otherwise, before anything starts
+  (Set up this PC installs PostgreSQL on it). The same as the app's (1.10.3).
+
 ## 2.4.1 - 2026-11-13
 
 - **`/xivfleet routes` and `/xivfleet trends`** are now in the command's help, which is made from the window's pages so

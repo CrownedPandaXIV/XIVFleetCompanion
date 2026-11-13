@@ -2858,6 +2858,30 @@ internal static partial class Program
               && !SyncFailure.IsExpected(new PostgresException("syntax error", "ERROR", "ERROR", PostgresErrorCodes.SyntaxError)),
             "anything else may be a bug, so it is logged in full every time");
 
+        // A sorted table isn't sorted again every frame: only when its rows or the sort change, or after a second.
+        {
+            var cache = new SortCache<SortRow>();
+            var rows = Enumerable.Range(0, 10000).Select(i => new SortRow($"Item {(i * 7919) % 10000:D5}", i % 50 == 0 ? null : i)).ToList();
+            var t0 = new DateTime(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+            Func<SortRow, object?> byName = r => r.Name;
+            var first = cache.Sorted(rows, "name", true, byName, null, t0);
+            var filtered = rows.Where(_ => true).ToList(); // a page that filters every frame hands over a new list
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (var f = 0; f < 60; f++) cache.Sorted(filtered, "name", true, byName, null, t0.AddMilliseconds(f * 16));
+            var perFrame = sw.Elapsed.TotalMilliseconds / 60;
+            Check(cache.Sorts == 1 && first.Select(r => r.Name).SequenceEqual(rows.Select(r => r.Name).OrderBy(n => n)),
+                $"tables: 10,000 rows sorted once, then reused for the next frames ({perFrame:0.00} ms a frame instead of sorting again)");
+            cache.Sorted(filtered, "name", false, byName, null, t0.AddMilliseconds(100));
+            var changed = filtered.Skip(1).ToList();
+            cache.Sorted(changed, "name", false, byName, null, t0.AddMilliseconds(200));
+            cache.Sorted(changed, "qty", false, r => r.Qty, r => r.Qty == null, t0.AddMilliseconds(300));
+            var byQty = cache.Sorted(changed, "qty", false, r => r.Qty, r => r.Qty == null, t0.AddMilliseconds(400));
+            Check(cache.Sorts == 4 && byQty.Last().Qty == null && byQty.First().Qty == 9999,
+                $"tables: sorted again for the other direction, changed rows and another column; missing values stay last ({cache.Sorts} sorts)");
+            cache.Sorted(changed, "qty", false, r => r.Qty, r => r.Qty == null, t0.AddMilliseconds(1500));
+            Check(cache.Sorts == 5, "tables: sorted again after a second, for a sort that depends on the time");
+        }
+
         // /xivfleet's words: every page of the window, named in the help, any case; a typo matches nothing.
         var windowSource = System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "XIVFleetCompanion", "Windows", "MainWindow.cs"));
         var tabLine = System.Text.RegularExpressions.Regex.Match(windowSource, @"public enum Tab \{([^}]*)\}").Groups[1].Value;
@@ -3041,3 +3065,5 @@ internal static partial class Program
         }
     }
 }
+
+internal sealed record SortRow(string Name, int? Qty);
