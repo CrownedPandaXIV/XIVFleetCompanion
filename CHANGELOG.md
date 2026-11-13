@@ -5,10 +5,26 @@ All notable changes to the plugin are recorded here. Versions follow
 
 ## 2.4.0 - unreleased
 
+Everything the app does, now in the game too: the plugin no longer needs the app for anything.
+
 - **Export any table**, as the app does: every table has an **Export** button (beside Columns) with **Copy table**, to
   paste into a spreadsheet, and **Export to CSV**, which saves the same file the app does (Documents to start with).
-  It's the whole table in the order shown, every row (not only those on screen), each cell as it reads: a tick as Yes
-  or No, a box's number, a list's choice.
+  It's the whole table in the order shown, every row (not only those on screen), each cell as it reads.
+- **Backups of the shared database** (Settings → Backups of the shared database), the same backups the app makes and
+  sharing its settings on a PC with both: **Back up now**, a daily backup (made by a running game when the app's
+  scheduled task isn't on this PC), a second copy, how many to keep, **Test** (loads one into a scratch database and
+  compares it), **Restore** (backs up first, so it can be undone), **Restore from a file**, and **Get the backup tools**
+  for a PC without PostgreSQL (only pg_dump and pg_restore, from PostgreSQL's maker, checksum checked).
+- **Database tools** (Settings), as the app's Setup Help and Database tab:
+  - **Set up this PC**: installs PostgreSQL and Tailscale (downloaded from their makers, checksum checked), lets other
+    PCs connect, and makes the database and its login, with one Windows permission prompt. Then **Sign in to
+    Tailscale**.
+  - **New database on this PC**, **Let other PCs connect**, and **What another PC needs** (the details to type there).
+  - **Move the database to this PC**: checked first, one consistent copy, every table compared, and only then every PC
+    and app switched over. Anything that goes wrong before that puts everything back; the old database is never
+    deleted.
+  - **Leftovers from moving the database**, and **Remove everything from this PC** (only what was set up for the
+    fleet; a final backup first if you like).
 
 ## 2.3.1 - 2026-11-10
 

@@ -346,6 +346,28 @@ public partial class MainWindow
             ImGui.TreePop();
         }
 
+        // ---- Found a problem? ----
+        if (ImGui.TreeNode("Found a problem?"))
+        {
+            Ui.Wrapped("Report it on GitHub, with the details below (they hold no password).");
+            var details = string.Join("\n", new[]
+            {
+                $"Plugin {Plugin.VersionText} on {Environment.OSVersion}",
+                $"Fleet data: {plugin.Configuration.FleetStore}",
+                $"Database: {(saved == null ? "none saved" : $"{saved.Host}:{saved.Port}/{saved.Database} as {saved.User}")}",
+                $"PostgreSQL here: {pgHere}, Tailscale here: {tsHere}",
+                $"Last sync: {plugin.Configuration.LastSyncTimestamp?.ToString("u") ?? "never"}",
+                $"Sync problem: {plugin.SyncProblem ?? "none"}",
+                $"Database version: {plugin.Keeper.StatusText}",
+            });
+            if (ImGui.Button("Copy the details")) ImGui.SetClipboardText(details);
+            ImGui.SameLine();
+            if (ImGui.Button("Report a problem"))
+                Process.Start(new ProcessStartInfo("https://github.com/CrownedPandaXIV/XIVFleetCompanion-App/issues/new/choose") { UseShellExecute = true });
+            Colored(Dim, details);
+            ImGui.TreePop();
+        }
+
         // ---- Remove everything ----
         if (ImGui.TreeNode("Remove everything from this PC"))
         {
