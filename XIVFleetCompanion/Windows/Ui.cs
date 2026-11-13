@@ -72,20 +72,22 @@ internal static class Ui
         return ImGui.InputInt(label, ref value, step, stepFast);
     }
 
-    public static ImRaii.IEndObject Combo(string label, string preview, ImGuiComboFlags flags = ImGuiComboFlags.None)
+    public static Scope Combo(string label, string preview, ImGuiComboFlags flags = ImGuiComboFlags.None)
     {
         if (Capture is { } c)
         {
             c.Add(preview);
-            return Ended.Closed;
+            return new Scope(null, false);
         }
-        return ImRaii.Combo(label, preview, flags);
+        var combo = flags == ImGuiComboFlags.None ? ImRaii.Combo(label, preview) : ImRaii.Combo(label, preview, flags);
+        return new Scope(combo, combo.Success);
     }
 
-    public static ImRaii.IEndObject Table(string id, int columns, ImGuiTableFlags flags = ImGuiTableFlags.None, Vector2 outerSize = default)
+    public static Scope Table(string id, int columns, ImGuiTableFlags flags = ImGuiTableFlags.None, Vector2 outerSize = default)
     {
-        if (Capture != null) return Ended.Open;
-        return ImRaii.Table(id, columns, flags, outerSize);
+        if (Capture != null) return new Scope(null, true);
+        var table = ImRaii.Table(id, columns, flags, outerSize);
+        return new Scope(table, table.Success);
     }
 
     public static void SetupColumn(string label, ImGuiTableColumnFlags flags = ImGuiTableColumnFlags.None, float width = 0)
@@ -136,14 +138,23 @@ internal static class Ui
         if (Capture == null) ImGui.TableSetBgColor(target, color, column);
     }
 
-    // A table that isn't drawn while it's read: open (its rows are read) or closed (a list shows only its choice).
-    private sealed class Ended : ImRaii.IEndObject
+    /// <summary>A table or list as ImRaii gives it (ended when disposed), or, while a table is read, one that isn't
+    /// drawn: open (its rows are read) or closed (a list shows only its choice).</summary>
+    public readonly struct Scope : IDisposable
     {
-        public static readonly Ended Open = new(true);
-        public static readonly Ended Closed = new(false);
-        private Ended(bool success) => Success = success;
+        private readonly IDisposable? inner;
+
+        public Scope(IDisposable? inner, bool success)
+        {
+            this.inner = inner;
+            Success = success;
+        }
+
         public bool Success { get; }
-        public void Dispose() { }
+
+        public static implicit operator bool(Scope s) => s.Success;
+
+        public void Dispose() => inner?.Dispose();
     }
 }
 
