@@ -62,6 +62,14 @@ jobs:
         ports: [ '5432:5432' ]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      # A second server, as "this PC" when the tests move a database to it.
+      postgres2:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [ '5433:5432' ]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
 
     steps:
     - name: Checkout
@@ -78,4 +86,5 @@ jobs:
     - name: Run the writer tests
       env:
         FLEET_TEST_DB: Host=localhost;Username=postgres;Password=postgres;Database=postgres
+        FLEET_TEST_DB2: Host=localhost;Port=5433;Username=postgres;Password=postgres;Database=postgres
       run: dotnet run --project tests/FleetWriterTests

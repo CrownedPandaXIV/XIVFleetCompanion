@@ -153,6 +153,8 @@ public partial class MainWindow : Window, IDisposable
                     DrawMoveFleet();
                     ImGui.Spacing();
                     DrawSharedBackups();
+                    ImGui.Spacing();
+                    DrawDatabaseTools();
                 });
                 break;
         }

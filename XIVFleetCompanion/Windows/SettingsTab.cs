@@ -209,7 +209,7 @@ public class SettingsTab : IDisposable
     }
 
     // Fills the form from the saved credential for the current connection mode (or the defaults).
-    private void LoadSavedCredential()
+    public void LoadSavedCredential()
     {
         var saved = PostgresCredentialStore.Load(configuration.UseRemoteConnection);
         pgHost = saved?.Host ?? "";

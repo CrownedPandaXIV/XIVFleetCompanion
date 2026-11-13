@@ -68,6 +68,7 @@
     <EmbeddedResource Include="Database\*.sql;Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Database\sqlite\*.sql" LogicalName="Database/sqlite/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Setup\elevated.ps1" LogicalName="Setup/elevated.ps1" />
   </ItemGroup>
 
   <ItemGroup>
