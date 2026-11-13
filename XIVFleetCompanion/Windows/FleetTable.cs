@@ -43,6 +43,10 @@ public sealed class FleetTable<T>
     private readonly Func<T, string>? runKey;
     private bool resetSort;
     private bool sorted;
+    private List<Line> lastLines = new();
+
+    /// <summary>What the table is, after the page's name, in an export's file name ("Characters").</summary>
+    public string Title { get; init; } = "";
 
     /// <param name="id">The table's name in the settings (its columns and grouping are saved under it).</param>
     /// <param name="account">A row's account label, for Group by account (null: the table doesn't group).</param>
@@ -118,11 +122,52 @@ public sealed class FleetTable<T>
         else if (account != null)
         {
             var group = GroupByAccount;
-            if (ImGui.Checkbox($"Group by account##{id}", ref group)) GroupByAccount = group;
+            if (Ui.Checkbox($"Group by account##{id}", ref group)) GroupByAccount = group;
             ImGui.SameLine();
         }
         if (ImGui.Button($"Columns##{id}")) ImGui.OpenPopup($"columns##{id}");
         DrawColumnsPopup();
+        ImGui.SameLine();
+        TableExportUi.Button(id, Title.Length > 0 ? Title : TitleOf(id), Export);
+    }
+
+    // What a page's table is, after the page's name, in an export's file name (a page with one table needs none).
+    private static string TitleOf(string id) => id switch
+    {
+        "inventoryCharacters" => "Characters",
+        "inventoryFcs" => "Free Company chests",
+        "inventoryTotals" => "Fleet totals",
+        "marketAccounts" => "Accounts",
+        "marketUndercut" => "Undercut",
+        "marketUnsold" or "marketUnsoldLive" => "Unsold",
+        "ventureIncome" or "ventureIncomeLive" => "Retainer ventures",
+        "lootSubs" or "lootSubsLive" => "Loot per voyage, subs",
+        "lootRoutes" or "lootRoutesLive" => "Loot per voyage, routes",
+        "partsCraft" => "To craft",
+        "shoppingBuy" => "Shopping List, to buy",
+        _ when id.StartsWith("shopping", StringComparison.Ordinal) => "Shopping List",
+        _ => "",
+    };
+
+    /// <summary>The table as text, as shown: its headings, then every row in the order shown (an account's band as
+    /// its own row), each cell as it reads.</summary>
+    public List<List<string>> Export()
+    {
+        var shown = Shown();
+        var result = new List<List<string>> { shown.Select(c => TableCapture.Visible(c.Label)).ToList() };
+        for (var i = 0; i < lastLines.Count; i++)
+        {
+            var line = lastLines[i];
+            if (line.Heading != null)
+            {
+                result.Add(new[] { line.Heading }.Concat(Enumerable.Repeat("", shown.Count - 1)).ToList());
+                continue;
+            }
+            SameAsAbove = runKey != null && !sorted && i > 0 && lastLines[i - 1].Heading == null && runKey(lastLines[i - 1].Row) == runKey(line.Row);
+            result.Add(shown.Select(c => TableCapture.Cell(() => c.Draw(line.Row))).ToList());
+        }
+        SameAsAbove = false;
+        return result;
     }
 
     private void DrawColumnsPopup()
@@ -131,13 +176,13 @@ public sealed class FleetTable<T>
         if (!popup) return;
         var shown = Shown();
         List<FleetColumn<T>>? changed = null;
-        ImGui.TextDisabled("Shown");
+        Ui.Disabled("Shown");
         for (var i = 0; i < shown.Count; i++)
         {
             var c = shown[i];
             using var rowId = ImRaii.PushId(c.Key);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(Name(c.Label));
+            Ui.Text(Name(c.Label));
             ImGui.SameLine(180 * ImGuiHelpers.GlobalScale);
             using (ImRaii.Disabled(i == 0))
             {
@@ -158,12 +203,12 @@ public sealed class FleetTable<T>
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(c.Locked ? "This column always shows" : "Hide this column");
         }
         ImGui.Spacing();
-        ImGui.TextDisabled("Add a column");
+        Ui.Disabled("Add a column");
         var hidden = columns.Where(c => !shown.Contains(c)).ToList();
-        if (hidden.Count == 0) ImGui.TextUnformatted("Every column is shown.");
+        if (hidden.Count == 0) Ui.Text("Every column is shown.");
         foreach (var c in hidden)
         {
-            if (ImGui.Selectable($"+ {Name(c.Label)}##add{c.Key}", false, ImGuiSelectableFlags.DontClosePopups)) changed = shown.Append(c).ToList();
+            if (Ui.Selectable($"+ {Name(c.Label)}##add{c.Key}", false, ImGuiSelectableFlags.DontClosePopups)) changed = shown.Append(c).ToList();
         }
         ImGui.Spacing();
         using (ImRaii.Disabled(!config.TableColumns.ContainsKey(id)))
@@ -205,17 +250,17 @@ public sealed class FleetTable<T>
         // widths saved before columns kept their own width were shares of the window, which don't carry over).
         // A little more room in each row, so long tables read easily.
         using var padding = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(ImGui.GetStyle().CellPadding.X + 2, ImGui.GetStyle().CellPadding.Y + 2) );
-        using var table = ImRaii.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}|w", shown.Count,
+        using var table = Ui.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}|w", shown.Count,
             fitRows ? Flags & ~(ImGuiTableFlags.ScrollX | ImGuiTableFlags.ScrollY) : Flags);
         if (!table) return;
-        if (!fitRows) ImGui.TableSetupScrollFreeze(1, 1);
-        foreach (var c in shown) ImGui.TableSetupColumn(c.Label, c.SortKey == null ? ImGuiTableColumnFlags.NoSort : ImGuiTableColumnFlags.None);
+        if (!fitRows) Ui.ScrollFreeze(1, 1);
+        foreach (var c in shown) Ui.SetupColumn(c.Label, c.SortKey == null ? ImGuiTableColumnFlags.NoSort : ImGuiTableColumnFlags.None);
         if (resetSort)
         {
             for (var i = 0; i < shown.Count; i++) ImGuiP.TableSetColumnSortDirection(i, ImGuiSortDirection.None, false);
             resetSort = false;
         }
-        ImGui.TableHeadersRow();
+        Ui.HeadersRow();
 
         FleetColumn<T>? by = null;
         var ascending = true;
@@ -250,6 +295,7 @@ public sealed class FleetTable<T>
         {
             lines = rows.Select(r => new Line(r, null)).ToList();
         }
+        lastLines = lines;
 
         var clipper = ImGui.ImGuiListClipper();
         clipper.Begin(lines.Count, -1f);
@@ -258,21 +304,21 @@ public sealed class FleetTable<T>
             for (var i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
             {
                 var line = lines[i];
-                ImGui.TableNextRow();
+                Ui.NextRow();
                 if (line.Heading != null)
                 {
                     // A band in the look's accent across the whole row.
-                    ImGui.TableSetColumnIndex(0);
-                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(ImGuiCol.Header));
+                    Ui.SetColumnIndex(0);
+                    Ui.SetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(ImGuiCol.Header));
                     using (ImRaii.PushColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.CheckMark)))
-                        ImGui.TextUnformatted(line.Heading);
+                        Ui.Text(line.Heading);
                     continue;
                 }
                 using var rowId = ImRaii.PushId(i);
                 SameAsAbove = runKey != null && !sorted && i > 0 && lines[i - 1].Heading == null && runKey(lines[i - 1].Row) == runKey(line.Row);
                 foreach (var c in shown)
                 {
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
                     c.Draw(line.Row);
                 }
                 afterRow?.Invoke(line.Row);
@@ -294,9 +340,9 @@ public static class TableCells
         if (room > width) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + room - width);
         if (color is Vector4 c)
         {
-            using (ImRaii.PushColor(ImGuiCol.Text, c)) ImGui.TextUnformatted(text);
+            using (ImRaii.PushColor(ImGuiCol.Text, c)) Ui.Text(text);
         }
-        else ImGui.TextUnformatted(text);
+        else Ui.Text(text);
     }
 
     /// <summary>A thin bar, filled to fraction (0 to 1), centred on the line, in the look's accent on a frame-coloured

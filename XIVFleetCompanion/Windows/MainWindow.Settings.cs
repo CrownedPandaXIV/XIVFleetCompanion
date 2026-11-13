@@ -51,15 +51,15 @@ public partial class MainWindow
 
         // What do you run?
         ImGui.Spacing();
-        ImGui.TextUnformatted("What do you run?");
+        Ui.Text("What do you run?");
         ImGui.SameLine();
         var choice = pending && settingsPending.Play != null ? settingsPending.Play : st.PlayChoice;
         ImGui.SetNextItemWidth(230 * ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("##playStyle", Array.Find(PlayChoices, c => c.Value == choice).Label ?? choice))
+        using (var combo = Ui.Combo("##playStyle", Array.Find(PlayChoices, c => c.Value == choice).Label ?? choice))
         {
             if (combo)
                 foreach (var (value, label) in PlayChoices)
-                    if (ImGui.Selectable(label, value == choice) && value != choice)
+                    if (Ui.Selectable(label, value == choice) && value != choice)
                     {
                         settingsPending = (value, null, DateTime.Now);
                         reader.Edit("What do you run?", c => FleetEdits.SavePlayStyle(c, value));
@@ -72,7 +72,7 @@ public partial class MainWindow
         // Live Market Prices.
         ImGui.Spacing();
         var live = pending && settingsPending.Live is { } l ? l : st.LivePrices;
-        if (ImGui.Checkbox("Use live market prices from Universalis", ref live))
+        if (Ui.Checkbox("Use live market prices from Universalis", ref live))
         {
             var on = live;
             settingsPending = (null, on, DateTime.Now);
@@ -84,10 +84,10 @@ public partial class MainWindow
 
         // Repair kit cost.
         ImGui.Spacing();
-        ImGui.TextUnformatted("Repair kit cost");
+        Ui.Text("Repair kit cost");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(width);
-        if (ImGui.InputInt("##repairKitCost", ref costBox, 0)) costTyped = true;
+        if (Ui.InputInt("##repairKitCost", ref costBox, 0)) costTyped = true;
         Hover("What one repair kit costs you, for the routes' profit (Route Optimization and Income).");
         ImGui.SameLine();
         Tinted(Palette.Gil, "gil");
@@ -100,17 +100,17 @@ public partial class MainWindow
 
         // Warnings.
         ImGui.Spacing();
-        ImGui.TextUnformatted("Warnings");
+        Ui.Text("Warnings");
         void Box(string label, string id, ref int value, string after, string help)
         {
-            ImGui.TextUnformatted(label);
+            Ui.Text(label);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(width);
-            if (ImGui.InputInt($"##{id}", ref value, 0)) warningsTyped = true;
+            if (Ui.InputInt($"##{id}", ref value, 0)) warningsTyped = true;
             if (after.Length > 0)
             {
                 ImGui.SameLine();
-                ImGui.TextUnformatted(after);
+                Ui.Text(after);
             }
             Hover(help);
         }
@@ -193,16 +193,16 @@ public partial class MainWindow
         if (!read.Success)
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"{fightClubFile}: {read.Error}");
+                Ui.Wrapped($"{fightClubFile}: {read.Error}");
             if (read.ActualHeaders.Count > 0) Colored(Dim, $"Columns found in the file: {string.Join(", ", read.ActualHeaders)}");
             if (ImGui.Button("Close##fightClub")) fightClubRead = null;
             return;
         }
-        ImGui.TextUnformatted($"From {fightClubFile}:");
+        Ui.Text($"From {fightClubFile}:");
         if (read.MissingOptional.Count > 0)
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"This file has no column for {string.Join(", ", read.MissingOptional)}. Those are left blank for every row.");
-        ImGui.TextUnformatted("Patch label (optional)");
+                Ui.Wrapped($"This file has no column for {string.Join(", ", read.MissingOptional)}. Those are left blank for every row.");
+        Ui.Text("Patch label (optional)");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
         ImGui.InputTextWithHint("##fightClubLabel", "e.g. Patch 7.5", ref fightClubLabel, 40);
@@ -210,39 +210,39 @@ public partial class MainWindow
         Colored(Dim, $"{count} of {read.Rows.Count} rows will be imported. This replaces all the Fight Club data there is now. Rows with a problem start unticked.");
 
         var height = Math.Min(read.Rows.Count + 1, 12) * ImGui.GetFrameHeightWithSpacing() + 8;
-        using (var table = ImRaii.Table("##fightClubRows", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit, new Vector2(0, height)))
+        using (var table = Ui.Table("##fightClubRows", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit, new Vector2(0, height)))
         {
             if (table)
             {
-                ImGui.TableSetupScrollFreeze(0, 1);
-                ImGui.TableSetupColumn("##tick");
-                ImGui.TableSetupColumn("Row");
-                ImGui.TableSetupColumn("Route");
-                ImGui.TableSetupColumn("Rec Build");
-                ImGui.TableSetupColumn("Gil/Hr");
-                ImGui.TableSetupColumn("Problem", ImGuiTableColumnFlags.WidthStretch);
-                ImGui.TableHeadersRow();
+                Ui.ScrollFreeze(0, 1);
+                Ui.SetupColumn("##tick");
+                Ui.SetupColumn("Row");
+                Ui.SetupColumn("Route");
+                Ui.SetupColumn("Rec Build");
+                Ui.SetupColumn("Gil/Hr");
+                Ui.SetupColumn("Problem", ImGuiTableColumnFlags.WidthStretch);
+                Ui.HeadersRow();
                 foreach (var row in read.Rows)
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
+                    Ui.NextRow();
+                    Ui.NextColumn();
                     var on = fightClubTicked.Contains(row.RowNumber);
-                    if (ImGui.Checkbox($"##fc{row.RowNumber}", ref on))
+                    if (Ui.Checkbox($"##fc{row.RowNumber}", ref on))
                     {
                         if (on) fightClubTicked.Add(row.RowNumber); else fightClubTicked.Remove(row.RowNumber);
                     }
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
                     RightNumber(row.RowNumber);
-                    ImGui.TableNextColumn();
-                    if (row.Data["route"] is string route) ImGui.TextUnformatted(route); else Colored(Dim, "(blank)");
-                    ImGui.TableNextColumn();
-                    if (row.Data["rec_build_notes"] is string build) ImGui.TextUnformatted(build); else Colored(Dim, "-");
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
+                    if (row.Data["route"] is string route) Ui.Text(route); else Colored(Dim, "(blank)");
+                    Ui.NextColumn();
+                    if (row.Data["rec_build_notes"] is string build) Ui.Text(build); else Colored(Dim, "-");
+                    Ui.NextColumn();
                     if (row.Data["gil_hr"] is double gil) Tinted(Palette.Gil, gil.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)); else Colored(Dim, "-");
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
                     if (row.HasIssue)
                         using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                            ImGui.TextWrapped(string.Join("; ", row.Issues));
+                            Ui.Wrapped(string.Join("; ", row.Issues));
                 }
             }
         }

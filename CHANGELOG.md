@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.0 - unreleased
+
+- **Export any table**, as the app does: every table has an **Export** button (beside Columns) with **Copy table**, to
+  paste into a spreadsheet, and **Export to CSV**, which saves the same file the app does (Documents to start with).
+  It's the whole table in the order shown, every row (not only those on screen), each cell as it reads: a tick as Yes
+  or No, a box's number, a list's choice.
+
 ## 2.3.1 - 2026-11-10
 
 - **Trends: salvage shows "Gained a day".** Salvage value and salvage items climb, then drop back when you sell, so "A

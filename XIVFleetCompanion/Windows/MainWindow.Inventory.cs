@@ -34,24 +34,24 @@ public partial class MainWindow
         new List<FleetColumn<HoldingRow>>
         {
             new("character", "Character", h => CharacterCell(h.Who, h.World), h => h.Who),
-            new("location", "Location", h => ImGui.TextUnformatted(FleetOrder.CharacterLocation(h)), h => FleetOrder.CharacterLocation(h)),
-            new("item", "Item", h => ImGui.TextUnformatted(ItemName(h.ItemId, h.Hq)), h => ItemName(h.ItemId, h.Hq), Locked: true),
+            new("location", "Location", h => Ui.Text(FleetOrder.CharacterLocation(h)), h => FleetOrder.CharacterLocation(h)),
+            new("item", "Item", h => Ui.Text(ItemName(h.ItemId, h.Hq)), h => ItemName(h.ItemId, h.Hq), Locked: true),
             new("quantity", "Quantity", h => RightNumber(h.Quantity), h => h.Quantity),
         });
 
     private FleetTable<HoldingRow> FcInventoryTable => fcInventoryTable ??= new FleetTable<HoldingRow>("inventoryFcs", plugin.Configuration,
         new List<FleetColumn<HoldingRow>>
         {
-            new("fc", "FC", h => ImGui.TextUnformatted(h.Who), h => h.Who),
-            new("tab", "Tab", h => ImGui.TextUnformatted($"Tab {h.Container - 20000 + 1}"), h => h.Container),
-            new("item", "Item", h => ImGui.TextUnformatted(ItemName(h.ItemId, h.Hq)), h => ItemName(h.ItemId, h.Hq), Locked: true),
+            new("fc", "FC", h => Ui.Text(h.Who), h => h.Who),
+            new("tab", "Tab", h => Ui.Text($"Tab {h.Container - 20000 + 1}"), h => h.Container),
+            new("item", "Item", h => Ui.Text(ItemName(h.ItemId, h.Hq)), h => ItemName(h.ItemId, h.Hq), Locked: true),
             new("quantity", "Quantity", h => RightNumber(h.Quantity), h => h.Quantity),
         });
 
     private FleetTable<ItemTotalRow> FleetTotalsTable => fleetTotalsTable ??= new FleetTable<ItemTotalRow>("inventoryTotals", plugin.Configuration,
         new List<FleetColumn<ItemTotalRow>>
         {
-            new("item", "Item", t => ImGui.TextUnformatted(ItemName(t.ItemId, t.Hq)), t => ItemName(t.ItemId, t.Hq), Locked: true),
+            new("item", "Item", t => Ui.Text(ItemName(t.ItemId, t.Hq)), t => ItemName(t.ItemId, t.Hq), Locked: true),
             new("total", "Total Quantity", t => RightNumber(t.Total), t => t.Total),
         });
 
@@ -92,7 +92,7 @@ public partial class MainWindow
         foreach (var o in options)
         {
             var on = chosen.Contains(key(o));
-            if (ImGui.Checkbox($"{name(o)}##{key(o)}", ref on))
+            if (Ui.Checkbox($"{name(o)}##{key(o)}", ref on))
             {
                 if (on) chosen.Add(key(o)); else chosen.Remove(key(o));
             }
@@ -104,7 +104,7 @@ public partial class MainWindow
     {
         ImGui.SameLine();
         var hide = plugin.Configuration.HideEquippedGear;
-        if (ImGui.Checkbox("Hide equipped gear##hideEquipped", ref hide))
+        if (Ui.Checkbox("Hide equipped gear##hideEquipped", ref hide))
         {
             plugin.Configuration.HideEquippedGear = hide;
             plugin.Configuration.Save();
@@ -125,7 +125,7 @@ public partial class MainWindow
         HideEquippedBox();
         if (inventoryCharacters.Count == 0)
         {
-            ImGui.TextWrapped("Choose one or more characters to see what they and their retainers hold.");
+            Ui.Wrapped("Choose one or more characters to see what they and their retainers hold.");
             return;
         }
         var ids = inventoryCharacters.ToArray();
@@ -146,7 +146,7 @@ public partial class MainWindow
         FilterBox(ref inventoryFilter, "inventory");
         if (inventoryFcs.Count == 0)
         {
-            ImGui.TextWrapped("Choose one or more Free Companies to see what their chests hold.");
+            Ui.Wrapped("Choose one or more Free Companies to see what their chests hold.");
             return;
         }
         var ids = inventoryFcs.ToArray();
@@ -161,13 +161,13 @@ public partial class MainWindow
         if (reader.HoldingsKey != key || reader.Holdings.Data == null)
         {
             if (reader.HoldingsKey == key && reader.Holdings.Error != null) Colored(Amber, reader.Holdings.Error);
-            else ImGui.TextUnformatted("Reading...");
+            else Ui.Text("Reading...");
             return;
         }
         ReadLine(reader.Holdings, FleetReader.ListsEvery);
         var rows = reader.Holdings.Data.Where(h => Matches(inventoryFilter, ItemName(h.ItemId, h.Hq), h.Who, h.Place));
         var list = order(rows);
-        if (list.Count == 0) { ImGui.TextUnformatted(inventoryFilter.Length > 0 ? "Nothing matches." : "Nothing held."); return; }
+        if (list.Count == 0) { Ui.Text(inventoryFilter.Length > 0 ? "Nothing matches." : "Nothing held."); return; }
         table.Draw(list);
     }
 
@@ -196,24 +196,24 @@ public partial class MainWindow
         ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Item name##whereIsIt", ref whereIsItSearch, 64);
         ImGui.SameLine();
-        ImGui.Checkbox("Group by account##whereIsIt", ref whereByAccount);
+        Ui.Checkbox("Group by account##whereIsIt", ref whereByAccount);
         HideEquippedBox();
         var held = reader.HeldItems.Data;
         if (reader.HeldItems.Error != null) Colored(Amber, reader.HeldItems.Error);
         var term = whereIsItSearch.Trim();
         if (term.Length < 2)
         {
-            ImGui.TextWrapped("Type at least two letters of an item's name to see every place the fleet holds it: bags, saddlebags, " +
+            Ui.Wrapped("Type at least two letters of an item's name to see every place the fleet holds it: bags, saddlebags, " +
                               "armoury, retainers (and what they have for sale) and the Free Company chests. HQ copies count with the normal ones.");
             return;
         }
-        if (held == null) { ImGui.TextUnformatted("Reading..."); return; }
+        if (held == null) { Ui.Text("Reading..."); return; }
 
         // Which held items match, by their names in the game's files.
         var matches = held.Select(id => (Id: id, Name: GameNames.Item(id)))
             .Where(x => FleetOrder.MatchesWords(x.Name, term))
             .OrderBy(x => x.Name, StringComparer.CurrentCulture).ToList();
-        if (matches.Count == 0) { ImGui.TextUnformatted("Nothing the fleet holds matches."); return; }
+        if (matches.Count == 0) { Ui.Text("Nothing the fleet holds matches."); return; }
         var more = matches.Count > WhereIsItLimit;
         var ids = matches.Take(WhereIsItLimit).Select(x => x.Id).OrderBy(x => x).ToArray();
         var key = "where:" + string.Join(",", ids);
@@ -221,7 +221,7 @@ public partial class MainWindow
         if (reader.HoldingsKey != key || reader.Holdings.Data == null)
         {
             if (reader.HoldingsKey == key && reader.Holdings.Error != null) Colored(Amber, reader.Holdings.Error);
-            else ImGui.TextUnformatted("Reading...");
+            else Ui.Text("Reading...");
             return;
         }
         if (more) Colored(Dim, $"The first {WhereIsItLimit} items that match; type more of the name to narrow it down.");
@@ -235,39 +235,47 @@ public partial class MainWindow
             ? FleetOrder.WhereIsIt(reader.Holdings.Data.Where(h => !h.Equipped), id => ItemName(id, false)).ToList()
             : all;
         var widths = WhereWidths(reader.Holdings.Data, all);
-        if (items.Count == 0) ImGui.TextUnformatted("Only equipped gear matches.");
+        TableExportUi.Button("whereIsIt", "Where is it", () =>
+        {
+            var rows = new List<List<string>> { new() { "Item", "Character / FC", "World", "Where", "Quantity" } };
+            foreach (var item in items)
+                foreach (var p in item.Places)
+                    rows.Add(new List<string> { item.Name, WhoText(p), p.World, p.Where, p.Quantity.ToString("N0", CultureInfo.CurrentCulture) });
+            return rows;
+        });
+        if (items.Count == 0) Ui.Text("Only equipped gear matches.");
         foreach (var item in items)
         {
             if (!ImGui.CollapsingHeader($"{item.Name}: {item.Total:N0}##where{item.ItemId}", ImGuiTreeNodeFlags.DefaultOpen)) continue;
             var groups = whereByAccount ? FleetOrder.ByAccount(item.Places, p => p.Account) : new List<(string, List<ItemPlace>)> { ("", item.Places) };
-            using var table = ImRaii.Table($"##whereTable{item.ItemId}", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg);
+            using var table = Ui.Table($"##whereTable{item.ItemId}", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg);
             if (!table) continue;
             // The same widths in every item's table (from the widest text in all of them), so the columns line up.
-            ImGui.TableSetupColumn("Character / FC", ImGuiTableColumnFlags.WidthFixed, widths[0]);
-            ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthFixed, widths[1]);
-            ImGui.TableSetupColumn("Where", ImGuiTableColumnFlags.WidthFixed, widths[2]);
-            ImGui.TableSetupColumn("Quantity", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableHeadersRow();
+            Ui.SetupColumn("Character / FC", ImGuiTableColumnFlags.WidthFixed, widths[0]);
+            Ui.SetupColumn("World", ImGuiTableColumnFlags.WidthFixed, widths[1]);
+            Ui.SetupColumn("Where", ImGuiTableColumnFlags.WidthFixed, widths[2]);
+            Ui.SetupColumn("Quantity", ImGuiTableColumnFlags.WidthStretch);
+            Ui.HeadersRow();
             foreach (var (label, places) in groups)
             {
                 if (whereByAccount)
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableSetColumnIndex(0);
-                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(ImGuiCol.TableHeaderBg));
-                    ImGui.TextUnformatted(label);
+                    Ui.NextRow();
+                    Ui.SetColumnIndex(0);
+                    Ui.SetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(ImGuiCol.TableHeaderBg));
+                    Ui.Text(label);
                 }
                 foreach (var p in places)
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(WhoText(p));
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(p.World);
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(p.Where);
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(p.Quantity.ToString("N0", CultureInfo.CurrentCulture));
+                    Ui.NextRow();
+                    Ui.NextColumn();
+                    Ui.Text(WhoText(p));
+                    Ui.NextColumn();
+                    Ui.Text(p.World);
+                    Ui.NextColumn();
+                    Ui.Text(p.Where);
+                    Ui.NextColumn();
+                    Ui.Text(p.Quantity.ToString("N0", CultureInfo.CurrentCulture));
                 }
             }
         }

@@ -41,7 +41,7 @@ public partial class MainWindow
 
     private List<FleetColumn<ComparedListing>> ListingColumns(bool rivals, bool cheaperBy) => new List<FleetColumn<ComparedListing>>
     {
-        new("item", "Item", x => ImGui.TextUnformatted(ItemName(x.Listing.ItemId, x.Listing.Hq)), x => ItemName(x.Listing.ItemId, x.Listing.Hq), Locked: true),
+        new("item", "Item", x => Ui.Text(ItemName(x.Listing.ItemId, x.Listing.Hq)), x => ItemName(x.Listing.ItemId, x.Listing.Hq), Locked: true),
         new("qty", "Qty", x => RightNumber(x.Listing.Quantity), x => x.Listing.Quantity),
         new("price", "Price each", x => GilCell(x.Listing.UnitPrice), x => x.Listing.UnitPrice),
         new("vendor", "Vendor price", x =>
@@ -58,15 +58,15 @@ public partial class MainWindow
     {
         new("total", "Total", x => GilCell(x.Listing.Value), x => x.Listing.Value),
         // Amber once it's unsold for a while.
-        new("age", "Up for", x => { if (x.Listing.Stale) Colored(Amber, Age(x.Listing.AgeDays)); else ImGui.TextUnformatted(Age(x.Listing.AgeDays)); }, x => x.Listing.AgeDays),
-        new("retainer", "Retainer", x => ImGui.TextUnformatted(x.Listing.RetainerName ?? "—"), x => x.Listing.RetainerName ?? ""),
+        new("age", "Up for", x => { if (x.Listing.Stale) Colored(Amber, Age(x.Listing.AgeDays)); else Ui.Text(Age(x.Listing.AgeDays)); }, x => x.Listing.AgeDays),
+        new("retainer", "Retainer", x => Ui.Text(x.Listing.RetainerName ?? "—"), x => x.Listing.RetainerName ?? ""),
         new("character", "Character", x => CharacterCell(x.Listing.OwnerName ?? "—", x.Listing.World ?? ""), x => x.Listing.OwnerName ?? ""),
-        new("account", "Account", x => ImGui.TextUnformatted(x.Listing.Account is { Length: > 0 } a ? a : "—"), x => x.Listing.Account ?? "", Hidden: true),
+        new("account", "Account", x => Ui.Text(x.Listing.Account is { Length: > 0 } a ? a : "—"), x => x.Listing.Account ?? "", Hidden: true),
     }).ToList();
 
     private FleetTable<MarketAccountRow> MarketAccountsTable => marketAccountsTable ??= new FleetTable<MarketAccountRow>("marketAccounts", plugin.Configuration, new List<FleetColumn<MarketAccountRow>>
     {
-        new("account", "Account", a => ImGui.TextUnformatted(a.Account), a => a.Account, Locked: true),
+        new("account", "Account", a => Ui.Text(a.Account), a => a.Account, Locked: true),
         new("characters", "Characters", a => RightNumber(a.Characters), a => a.Characters),
         new("characterGil", "Character gil", a => GilCell(a.CharacterGil), a => a.CharacterGil),
         new("retainers", "Retainers", a => RightNumber(a.Retainers), a => a.Retainers),
@@ -125,7 +125,7 @@ public partial class MainWindow
             Heading("Undercut listings");
             Colored(Dim, "Your listings that someone else sells cheaper on the same world (same item and quality), from Universalis, with the cheapest on the data center and region. Biggest gap first.");
             var undercut = kept.Undercut;
-            if (undercut.Count == 0) ImGui.TextUnformatted("None of your listings is undercut on its world.");
+            if (undercut.Count == 0) Ui.Text("None of your listings is undercut on its world.");
             else
             {
                 undercutTable ??= new FleetTable<ComparedListing>("marketUndercut", plugin.Configuration, ListingColumns(rivals: true, cheaperBy: true));
@@ -139,7 +139,7 @@ public partial class MainWindow
         Colored(Dim, $"Up for {m.Settings.StaleDays} days or more, since the plugin first saw each listing (a repriced listing keeps its time). Oldest first.");
         StaleDaysEditor(m.Settings.StaleDays);
         var unsold = kept.Unsold;
-        if (unsold.Count == 0) { ImGui.TextUnformatted($"Nothing has been up for {m.Settings.StaleDays} days or more."); return; }
+        if (unsold.Count == 0) { Ui.Text($"Nothing has been up for {m.Settings.StaleDays} days or more."); return; }
         // With live prices, the cheapest rivals too (a table of its own, so each keeps its own columns).
         var table = live
             ? unsoldLiveTable ??= new FleetTable<ComparedListing>("marketUnsoldLive", plugin.Configuration, ListingColumns(rivals: true, cheaperBy: false))

@@ -55,7 +55,7 @@ public partial class MainWindow
             CharacterCell(s.Character, s.World);
             TrendButton("character", s.Cid.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Character);
         }, s => s.Character, Locked: true),
-        new("account", "Account", s => ImGui.TextUnformatted(s.Account.Length > 0 ? s.Account : "—"), s => s.Account, Hidden: true),
+        new("account", "Account", s => Ui.Text(s.Account.Length > 0 ? s.Account : "—"), s => s.Account, Hidden: true),
         new("standard", "Standard Salvage", s => { RightNumber(s.Standard); SalvageBreakdown(s, true); }, s => s.Standard),
         new("extravagant", "Extravagant Salvage", s => { RightNumber(s.Extravagant); SalvageBreakdown(s, false); }, s => s.Extravagant),
         new("gil", "Value", s => GilCell(s.Gil), s => s.Gil),
@@ -77,16 +77,16 @@ public partial class MainWindow
         ImGui.Spacing();
         GilLine("Fleet-Wide Salvage Total:", rows.Sum(s => s.Gil), rows.Count < salvage.Count ? " (the characters shown)" : "");
         ImGui.Separator();
-        ImGui.TextUnformatted($"{Number(rows.Sum(s => s.Standard))} standard, {Number(rows.Sum(s => s.Extravagant))} extravagant");
+        Ui.Text($"{Number(rows.Sum(s => s.Standard))} standard, {Number(rows.Sum(s => s.Extravagant))} extravagant");
         Colored(Dim, "Salvage in bags, retainers and saddlebags, and in the FC chest (counted on one member), at the fixed salvage prices.");
-        if (rows.Count == 0) { ImGui.TextUnformatted(salvage.Count == 0 ? "No salvage held." : "Nothing matches."); return; }
+        if (rows.Count == 0) { Ui.Text(salvage.Count == 0 ? "No salvage held." : "Nothing matches."); return; }
         SalvageTable.Draw(rows);
     }
 
     private FleetTable<IncomeRow> IncomeTable => incomeTable ??= new FleetTable<IncomeRow>("income", plugin.Configuration, new List<FleetColumn<IncomeRow>>
     {
         new("character", "Character", c => CharacterCell(c.Character, c.World), c => c.Character, Locked: true),
-        new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
+        new("account", "Account", c => Ui.Text(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("subs", "Subs", c => RightNumber(c.Subs), c => c.Subs),
         new("salvage", "Salvage / day", c =>
         {
@@ -132,11 +132,11 @@ public partial class MainWindow
     private List<FleetColumn<FleetReader.VentureSummary>> VentureColumns(bool live) => new List<FleetColumn<FleetReader.VentureSummary>>
         {
             new("character", "Character", v => CharacterCell(v.Character, v.World), v => v.Character, Locked: true),
-            new("account", "Account", v => ImGui.TextUnformatted(v.Account.Length > 0 ? v.Account : "—"), v => v.Account, Hidden: true),
+            new("account", "Account", v => Ui.Text(v.Account.Length > 0 ? v.Account : "—"), v => v.Account, Hidden: true),
             new("retainers", "Retainers", v => RightNumber(v.Retainers), v => v.Retainers),
             new("rewards", "Rewards", v => RightNumber(v.Rewards), v => v.Rewards),
             new("perDay", "Vendor value / day", v => TableCells.Right(Gil(v.PerDay), Green), v => v.PerDay),
-            new("top", "Most valuable", v => ImGui.TextUnformatted(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
+            new("top", "Most valuable", v => Ui.Text(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
         }.Concat(live ? Universalis.Scopes.Select(s => new FleetColumn<FleetReader.VentureSummary>($"market{s}", $"Market / day ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})",
             v => { if (VentureMarketOf(v.Cid, s) is double g) TableCells.Right(Gil(g), Green); else Colored(Dim, "—"); },
             v => VentureMarketOf(v.Cid, s) ?? 0)) : Enumerable.Empty<FleetColumn<FleetReader.VentureSummary>>()).ToList();
@@ -175,10 +175,10 @@ public partial class MainWindow
         HeadingRuns(T("Fleet real net per day: "), GilRun(counted.Sum(c => c.PerDay)));
         Runs(GilRun(counted.Sum(c => c.SalvagePerDay), ""), T(" salvage − ", Dim), GilRun(counted.Sum(c => c.KitPerDay), ""), T($" repairs, over the last {income.WindowDays} days.", Dim));
         IncomeWindowEditor(income.WindowDays);
-        ImGui.TextWrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted).");
+        Ui.Wrapped("Salvage: every piece that came into a character's bags or retainers, at its vendor price (selling or moving it is not counted).");
         if (income.KitCost > 0) Runs(T("Repairs: repair kits used at "), GilRun(income.KitCost), T(" each."));
-        else ImGui.TextWrapped("Repairs: set the repair kit cost in Settings" + (WithApp ? " (here or in the app)" : "") + " to count them.");
-        ImGui.TextWrapped((notEnough > 0 ? $"{notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history. " : "") +
+        else Ui.Wrapped("Repairs: set the repair kit cost in Settings" + (WithApp ? " (here or in the app)" : "") + " to count them.");
+        Ui.Wrapped((notEnough > 0 ? $"{notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history. " : "") +
                           "Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current Gil/Day).");
         // As the app's Against expected and Below expected tiles.
         var compared = counted.Where(c => Share(c) != null).ToList();
@@ -195,7 +195,7 @@ public partial class MainWindow
         }
         IncomeTable.DrawControls();
         var rows = income.Characters.Where(c => Matches(incomeFilter, c.Character, c.World, c.Account)).ToList();
-        if (rows.Count == 0) { ImGui.TextUnformatted(income.Characters.Count == 0 ? "No characters with subs built yet." : "Nothing matches."); return; }
+        if (rows.Count == 0) { Ui.Text(income.Characters.Count == 0 ? "No characters with subs built yet." : "Nothing matches."); return; }
         IncomeTable.Draw(rows);
     }
 
@@ -246,9 +246,9 @@ public partial class MainWindow
     private List<FleetColumn<LootSub>> LootSubColumns(bool live) => new List<FleetColumn<LootSub>>
         {
             new("character", "Character", s => { if (s.Character != null) CharacterCell(s.Character, s.World ?? ""); else Colored(Dim, "—"); }, s => s.Character ?? "", Locked: true),
-            new("account", "Account", s => ImGui.TextUnformatted(string.IsNullOrEmpty(s.Account) ? "—" : s.Account), s => s.Account ?? "", Hidden: true),
-            new("sub", "Sub", s => ImGui.TextUnformatted(s.SubName ?? "—"), s => s.SubName ?? ""),
-            new("route", "Route", s => { ImGui.TextUnformatted(s.Route); Hover("The route it ran most often"); }, s => s.Route),
+            new("account", "Account", s => Ui.Text(string.IsNullOrEmpty(s.Account) ? "—" : s.Account), s => s.Account ?? "", Hidden: true),
+            new("sub", "Sub", s => Ui.Text(s.SubName ?? "—"), s => s.SubName ?? ""),
+            new("route", "Route", s => { Ui.Text(s.Route); Hover("The route it ran most often"); }, s => s.Route),
             new("voyages", "Voyages", s => RightNumber(s.Voyages), s => s.Voyages),
             new("perVoyage", "Vendor gil / voyage", s => GilCell((long)SubRoutes.Round(s.PerVoyage)), s => s.PerVoyage),
             new("perDay", "Vendor value / day", s => TableCells.Right(Gil(s.PerDay), Green), s => s.PerDay),
@@ -260,7 +260,7 @@ public partial class MainWindow
 
     private List<FleetColumn<LootRoute>> LootRouteColumns(bool live) => new List<FleetColumn<LootRoute>>
         {
-            new("route", "Route", r => ImGui.TextUnformatted(r.Route), r => r.Route, Locked: true),
+            new("route", "Route", r => Ui.Text(r.Route), r => r.Route, Locked: true),
             new("subs", "Subs", r => RightNumber(r.Subs), r => r.Subs),
             new("voyages", "Voyages", r => RightNumber(r.Voyages), r => r.Voyages),
             new("perVoyage", "Vendor gil / voyage", r => GilCell((long)SubRoutes.Round(r.PerVoyage)), r => r.PerVoyage),
@@ -272,7 +272,7 @@ public partial class MainWindow
     {
         if (reader.Loot.Error is { } error) { Colored(Amber, $"Loot per Voyage: {error}"); return; }
         var loot = LootSummary(income);
-        if (loot == null) { ImGui.TextUnformatted("Working out..."); return; }
+        if (loot == null) { Ui.Text("Working out..."); return; }
         lootMarket = marketCache.LootMarketFor(reader.Market.Data, loot, lootLetters, id => ListingVendor(id));
         var live = lootMarket != null;
         HeadingRuns(T("Loot per Voyage: "), GilRun(loot.PerDay), T(" a day"));
@@ -285,14 +285,14 @@ public partial class MainWindow
         else if (reader.Market.Data?.Settings.LivePrices == true && marketCache.Working) Colored(Dim, "Working out market prices...");
         if (loot.Subs.Count == 0)
         {
-            ImGui.TextUnformatted("No voyages recorded in this time. Submarine Tracker records a voyage when its loot is collected on a PC running it.");
+            Ui.Text("No voyages recorded in this time. Submarine Tracker records a voyage when its loot is collected on a PC running it.");
             return;
         }
         var subTable = live ? lootSubsLiveTable ??= new FleetTable<LootSub>("lootSubsLive", plugin.Configuration, LootSubColumns(true), s => s.Account ?? "", "subs")
                             : lootSubsTable ??= new FleetTable<LootSub>("lootSubs", plugin.Configuration, LootSubColumns(false), s => s.Account ?? "", "subs");
         subTable.DrawControls();
         var subs = loot.Subs.Where(s => Matches(incomeFilter, s.Character, s.World, s.Account, s.SubName, s.Route)).ToList();
-        if (subs.Count == 0) ImGui.TextUnformatted("Nothing matches.");
+        if (subs.Count == 0) Ui.Text("Nothing matches.");
         else subTable.Draw(FleetOrder.Roster(subs, s => s.SortIndex ?? int.MaxValue, s => s.Character ?? ""));
         Heading("By route");
         Colored(Dim, "Each route's voyages, best gil a voyage first.");
@@ -315,7 +315,7 @@ public partial class MainWindow
         var table = ventureMarket != null ? VenturesLiveTable : VenturesTable;
         table.DrawControls();
         var rows = ventures.Where(v => Matches(incomeFilter, v.Character, v.World, v.Account)).ToList();
-        if (rows.Count == 0) { ImGui.TextUnformatted(ventures.Count == 0 ? "No venture rewards recorded in this time (AutoRetainer: \"Record statistics\")." : "Nothing matches."); return; }
+        if (rows.Count == 0) { Ui.Text(ventures.Count == 0 ? "No venture rewards recorded in this time (AutoRetainer: \"Record statistics\")." : "Nothing matches."); return; }
         table.Draw(rows);
     }
 }

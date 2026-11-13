@@ -29,7 +29,7 @@ public partial class MainWindow
         if (last.Error == null) Colored(Green, $"Saved: {last.What}.");
         else
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"Couldn't save {last.What}: {last.Error}");
+                Ui.Wrapped($"Couldn't save {last.What}: {last.Error}");
     }
 
     // ---- Craft? (Subs page) ----
@@ -48,7 +48,7 @@ public partial class MainWindow
     {
         if (cid == 0 || reader.Parts.Data?.Inputs == null) { Colored(Dim, "—"); return; }
         var on = CraftOf(cid, subName);
-        if (ImGui.Checkbox($"##craft{cid}|{subName}", ref on))
+        if (Ui.Checkbox($"##craft{cid}|{subName}", ref on))
         {
             craftPending[$"{cid}|{subName}"] = (on, DateTime.Now);
             reader.Edit($"Craft? for {subName}", async c => { await FleetEdits.SetCraft(c, Inv(cid), subName, on); return null; });
@@ -106,7 +106,7 @@ public partial class MainWindow
     {
         if (parts.Inputs == null)
         {
-            ImGui.TextWrapped("The Sub Rules need the app's 1.8.0 views. Update the app and open it once.");
+            Ui.Wrapped("The Sub Rules need the app's 1.8.0 views. Update the app and open it once.");
             return;
         }
         EditLine();
@@ -114,96 +114,102 @@ public partial class MainWindow
         var characters = parts.Inputs.Characters.OrderBy(c => c.SortIndex ?? int.MaxValue).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
         var rules = parts.Inputs.Rules.OrderBy(r => r.Rank).ThenBy(r => r.Id).Select(DraftOf).Concat(newRules).ToList();
         if (ImGui.Button("Add a rule##subRules")) newRules.Add(new RuleDraft());
-        using var table = ImRaii.Table("##subRules", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
-        if (!table) return;
-        foreach (var h in new[] { "Rank", "Applies to", "Hull", "Stern", "Bow", "Bridge", "Character", "", "" }) ImGui.TableSetupColumn(h);
-        ImGui.TableHeadersRow();
-        var scale = ImGuiHelpers.GlobalScale;
-        foreach (var d in rules)
+        void SubRulesTable()
         {
-            using var id = ImRaii.PushId(d.Id is long n ? $"rule{n}" : $"new{newRules.IndexOf(d)}");
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.SetNextItemWidth(70 * scale);
-            ImGui.InputInt("##rank", ref d.Rank, 0);
-            ImGui.TableNextColumn();
-            var (all, slots) = FilterSlots(d.Filter);
-            if (ImGui.Checkbox("All##slots", ref all) && all) d.Filter = "";
-            for (var s = 1; s <= 4; s++)
+            using var table = Ui.Table("##subRules", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
+            if (!table) return;
+            foreach (var h in new[] { "Rank", "Applies to", "Hull", "Stern", "Bow", "Bridge", "Character", "", "" }) Ui.SetupColumn(h);
+            Ui.HeadersRow();
+            var scale = ImGuiHelpers.GlobalScale;
+            foreach (var d in rules)
             {
-                ImGui.SameLine();
-                var on = !all && slots.Contains(s);
-                if (ImGui.Checkbox($"{s}##slot{s}", ref on))
-                    d.Filter = SlotsFilter(false, on ? (all ? new List<int>() : slots).Append(s) : slots.Where(x => x != s));
-            }
-            foreach (var (label, get, set) in new (string, Func<string>, Action<string>)[]
-                     {
-                         ("hull", () => d.Hull, v => d.Hull = v), ("stern", () => d.Stern, v => d.Stern = v),
-                         ("bow", () => d.Bow, v => d.Bow = v), ("bridge", () => d.Bridge, v => d.Bridge = v),
-                     })
-            {
-                ImGui.TableNextColumn();
-                ImGui.SetNextItemWidth(60 * scale);
-                using var combo = ImRaii.Combo($"##{label}", get().Length > 0 ? get() : "—");
-                if (combo)
-                    foreach (var letter in PartLetters)
-                        if (ImGui.Selectable(letter.Length > 0 ? letter : "—", get() == letter)) set(letter);
-            }
-            ImGui.TableNextColumn();
-            ImGui.SetNextItemWidth(200 * scale);
-            var who = d.Cid == null ? "Everyone" : characters.FirstOrDefault(c => Inv(c.Cid) == d.Cid) is { } ch ? $"{ch.Name} ({ch.World})" : d.Cid;
-            using (var combo = ImRaii.Combo("##character", who))
-            {
-                if (combo)
+                using var id = ImRaii.PushId(d.Id is long n ? $"rule{n}" : $"new{newRules.IndexOf(d)}");
+                Ui.NextRow();
+                Ui.NextColumn();
+                ImGui.SetNextItemWidth(70 * scale);
+                Ui.InputInt("##rank", ref d.Rank, 0);
+                Ui.NextColumn();
+                var (all, slots) = FilterSlots(d.Filter);
+                if (Ui.Checkbox("All##slots", ref all) && all) d.Filter = "";
+                for (var s = 1; s <= 4; s++)
                 {
-                    if (ImGui.Selectable("Everyone", d.Cid == null)) d.Cid = null;
-                    foreach (var c in characters)
-                        if (ImGui.Selectable($"{c.Name} ({c.World})##{c.Cid}", d.Cid == Inv(c.Cid))) d.Cid = Inv(c.Cid);
+                    ImGui.SameLine();
+                    var on = !all && slots.Contains(s);
+                    if (Ui.Checkbox($"{s}##slot{s}", ref on))
+                        d.Filter = SlotsFilter(false, on ? (all ? new List<int>() : slots).Append(s) : slots.Where(x => x != s));
                 }
-            }
-            ImGui.TableNextColumn();
-            using (ImRaii.Disabled(reader.Editing))
-            {
-                if (ImGui.SmallButton("Save"))
+                foreach (var (label, get, set) in new (string, Func<string>, Action<string>)[]
+                         {
+                             ("hull", () => d.Hull, v => d.Hull = v), ("stern", () => d.Stern, v => d.Stern = v),
+                             ("bow", () => d.Bow, v => d.Bow = v), ("bridge", () => d.Bridge, v => d.Bridge = v),
+                         })
                 {
-                    var rule = new FleetEdits.Rule(d.Id, d.Rank, d.Cid, d.Filter, d.Hull, d.Stern, d.Bow, d.Bridge);
-                    var draft = d;
-                    reader.Edit($"the rank {d.Rank} rule", async c =>
-                    {
-                        if (rule.Id == null) await FleetEdits.AddRule(c, rule); else await FleetEdits.UpdateRule(c, rule);
-                        return null;
-                    }, error =>
-                    {
-                        if (error != null) return;
-                        // Saved: shown as read from now on.
-                        if (draft.Id is long saved) ruleDrafts.Remove(saved); else newRules.Remove(draft);
-                    });
+                    Ui.NextColumn();
+                    ImGui.SetNextItemWidth(60 * scale);
+                    using var combo = Ui.Combo($"##{label}", get().Length > 0 ? get() : "—");
+                    if (combo)
+                        foreach (var letter in PartLetters)
+                            if (Ui.Selectable(letter.Length > 0 ? letter : "—", get() == letter)) set(letter);
                 }
-            }
-            ImGui.TableNextColumn();
-            if (d.Id == null)
-            {
-                if (ImGui.SmallButton("Cancel")) newRules.Remove(d);
-            }
-            else if (!d.ConfirmDelete)
-            {
-                if (ImGui.SmallButton("Delete")) d.ConfirmDelete = true;
-            }
-            else
-            {
-                using (ImRaii.PushColor(ImGuiCol.Button, Red with { W = 0.6f }))
+                Ui.NextColumn();
+                ImGui.SetNextItemWidth(200 * scale);
+                var who = d.Cid == null ? "Everyone" : characters.FirstOrDefault(c => Inv(c.Cid) == d.Cid) is { } ch ? $"{ch.Name} ({ch.World})" : d.Cid;
+                using (var combo = Ui.Combo("##character", who))
                 {
-                    if (ImGui.SmallButton("Delete it"))
+                    if (combo)
                     {
-                        var ruleId = d.Id.Value;
-                        reader.Edit($"deleting the rank {d.Rank} rule", async c => { await FleetEdits.DeleteRule(c, ruleId); return null; },
-                            error => { if (error == null) ruleDrafts.Remove(ruleId); });
+                        if (Ui.Selectable("Everyone", d.Cid == null)) d.Cid = null;
+                        foreach (var c in characters)
+                            if (Ui.Selectable($"{c.Name} ({c.World})##{c.Cid}", d.Cid == Inv(c.Cid))) d.Cid = Inv(c.Cid);
                     }
                 }
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Keep")) d.ConfirmDelete = false;
+                Ui.NextColumn();
+                using (ImRaii.Disabled(reader.Editing))
+                {
+                    if (ImGui.SmallButton("Save"))
+                    {
+                        var rule = new FleetEdits.Rule(d.Id, d.Rank, d.Cid, d.Filter, d.Hull, d.Stern, d.Bow, d.Bridge);
+                        var draft = d;
+                        reader.Edit($"the rank {d.Rank} rule", async c =>
+                        {
+                            if (rule.Id == null) await FleetEdits.AddRule(c, rule); else await FleetEdits.UpdateRule(c, rule);
+                            return null;
+                        }, error =>
+                        {
+                            if (error != null) return;
+                            // Saved: shown as read from now on.
+                            if (draft.Id is long saved) ruleDrafts.Remove(saved); else newRules.Remove(draft);
+                        });
+                    }
+                }
+                Ui.NextColumn();
+                if (d.Id == null)
+                {
+                    if (ImGui.SmallButton("Cancel")) newRules.Remove(d);
+                }
+                else if (!d.ConfirmDelete)
+                {
+                    if (ImGui.SmallButton("Delete")) d.ConfirmDelete = true;
+                }
+                else
+                {
+                    using (ImRaii.PushColor(ImGuiCol.Button, Red with { W = 0.6f }))
+                    {
+                        if (ImGui.SmallButton("Delete it"))
+                        {
+                            var ruleId = d.Id.Value;
+                            reader.Edit($"deleting the rank {d.Rank} rule", async c => { await FleetEdits.DeleteRule(c, ruleId); return null; },
+                                error => { if (error == null) ruleDrafts.Remove(ruleId); });
+                        }
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Keep")) d.ConfirmDelete = false;
+                }
             }
         }
+        ImGui.SameLine();
+        TableExportUi.Button("subRules", "Sub Rules", () => TableCapture.Run(SubRulesTable));
+        SubRulesTable();
     }
 
     // ---- Gear targets (Retainers page) ----
@@ -214,7 +220,7 @@ public partial class MainWindow
     private void TargetCell(RetainerRow r)
     {
         if (r.TargetMode == null) Colored(Dim, "—");
-        else ImGui.TextUnformatted($"{(r.TargetMode == "level" ? "Level" : "ilvl")} {r.TargetValue}{(r.OnlyCrafted ? ", crafted only" : "")}");
+        else Ui.Text($"{(r.TargetMode == "level" ? "Level" : "ilvl")} {r.TargetValue}{(r.OnlyCrafted ? ", crafted only" : "")}");
         ImGui.SameLine();
         var popupId = $"target##{r.RetainerId}";
         if (ImGui.SmallButton($"Edit##target{r.RetainerId}"))
@@ -224,20 +230,20 @@ public partial class MainWindow
         }
         using var popup = ImRaii.Popup(popupId);
         if (!popup) return;
-        ImGui.TextUnformatted($"Gear target for {r.Name}");
+        Ui.Text($"Gear target for {r.Name}");
         ImGui.SetNextItemWidth(110 * ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("Target mode##targetMode", targetDraft.Mode == "level" ? "Level" : targetDraft.Mode == "ilvl" ? "ilvl" : "—"))
+        using (var combo = Ui.Combo("Target mode##targetMode", targetDraft.Mode == "level" ? "Level" : targetDraft.Mode == "ilvl" ? "ilvl" : "—"))
         {
             if (combo)
                 foreach (var (mode, label) in new[] { ("", "—"), ("level", "Level"), ("ilvl", "ilvl") })
-                    if (ImGui.Selectable(label, targetDraft.Mode == mode)) targetDraft.Mode = mode;
+                    if (Ui.Selectable(label, targetDraft.Mode == mode)) targetDraft.Mode = mode;
         }
         using (ImRaii.Disabled(targetDraft.Mode.Length == 0))
         {
             ImGui.SetNextItemWidth(110 * ImGuiHelpers.GlobalScale);
-            ImGui.InputInt("Target value##targetValue", ref targetDraft.Value, 0);
+            Ui.InputInt("Target value##targetValue", ref targetDraft.Value, 0);
         }
-        ImGui.Checkbox("Only crafted gear counts##targetCrafted", ref targetDraft.OnlyCrafted);
+        Ui.Checkbox("Only crafted gear counts##targetCrafted", ref targetDraft.OnlyCrafted);
         using (ImRaii.Disabled(reader.Editing))
         {
             if (ImGui.Button("Save##target"))
@@ -278,29 +284,29 @@ public partial class MainWindow
         }
         ImGui.SameLine();
         if (ImGui.Button("Cancel##rosterOrder")) rosterOrderDraft = null;
-        using var table = ImRaii.Table("##rosterOrder", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY,
+        using var table = Ui.Table("##rosterOrder", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY,
             new Vector2(0, Math.Max(160 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y)));
         if (!table) return;
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("#");
-        ImGui.TableSetupColumn("Character");
-        ImGui.TableSetupColumn("Move");
-        ImGui.TableHeadersRow();
+        Ui.ScrollFreeze(0, 1);
+        Ui.SetupColumn("#");
+        Ui.SetupColumn("Character");
+        Ui.SetupColumn("Move");
+        Ui.HeadersRow();
         for (var i = 0; i < draft.Count; i++)
         {
             var c = draft[i];
             using var id = ImRaii.PushId($"order{c.Cid}");
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
+            Ui.NextRow();
+            Ui.NextColumn();
             RightNumber(i + 1, Dim);
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             CharacterCell(c.Character, c.World);
             if (c.Account.Length > 0)
             {
                 ImGui.SameLine();
                 Colored(Dim, $"· {c.Account}");
             }
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             using (ImRaii.Disabled(i == 0))
             {
                 if (ImGui.SmallButton("Up")) (draft[i - 1], draft[i]) = (draft[i], draft[i - 1]);
@@ -323,7 +329,7 @@ public partial class MainWindow
     {
         if (staleDaysDraft == 0) staleDaysDraft = current;
         ImGui.SetNextItemWidth(90 * ImGuiHelpers.GlobalScale);
-        ImGui.InputInt("days counts as unsold for a while##staleDays", ref staleDaysDraft, 1);
+        Ui.InputInt("days counts as unsold for a while##staleDays", ref staleDaysDraft, 1);
         staleDaysDraft = Math.Clamp(staleDaysDraft, 1, FleetEdits.MaxStaleDays);
         ImGui.SameLine();
         using (ImRaii.Disabled(reader.Editing || staleDaysDraft == current))
@@ -340,11 +346,11 @@ public partial class MainWindow
     private void IncomeWindowEditor(int current)
     {
         ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("Income over##incomeWindow", $"{current} days"))
+        using (var combo = Ui.Combo("Income over##incomeWindow", $"{current} days"))
         {
             if (combo)
                 foreach (var d in FleetEdits.WindowChoices)
-                    if (ImGui.Selectable($"{d} days", d == current) && d != current)
+                    if (Ui.Selectable($"{d} days", d == current) && d != current)
                         reader.Edit("the Income window", c => FleetEdits.SaveIncomeWindow(c, d));
         }
         Hover("How many days the Income page (and Loot per Voyage) counts" + (WithApp ? ", for the app too." : "."));
@@ -361,30 +367,30 @@ public partial class MainWindow
     private void SupplyDaysEditor(int window, int target)
     {
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Use per day measured over");
+        Ui.Text("Use per day measured over");
         Hover("How many days back the use per day is measured" + (WithApp ? ", for the app too." : "."));
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("##supplyWindow", $"{window} days"))
+        using (var combo = Ui.Combo("##supplyWindow", $"{window} days"))
         {
             if (combo)
                 foreach (var d in FleetEdits.WindowChoices)
-                    if (ImGui.Selectable($"{d} days", d == window) && d != window)
+                    if (Ui.Selectable($"{d} days", d == window) && d != window)
                         reader.Edit("the Supplies days", c => FleetEdits.SaveSupplyDays(c, d, target));
         }
         ImGui.SameLine();
         Colored(Dim, "·");
         ImGui.SameLine();
-        ImGui.TextUnformatted("Buy enough for");
+        Ui.Text("Buy enough for");
         Hover($"The To buy column: enough supplies to last this many days (1 to {FleetEdits.MaxRestockDays})" + (WithApp ? ", for the app too." : "."));
         // The box follows what was read until it's changed here.
         if (restockShown != target) { restockShown = target; restockDraft = target; }
         ImGui.SameLine();
         ImGui.SetNextItemWidth(90 * ImGuiHelpers.GlobalScale);
-        ImGui.InputInt("##restockDays", ref restockDraft, 1);
+        Ui.InputInt("##restockDays", ref restockDraft, 1);
         restockDraft = Math.Clamp(restockDraft, 1, FleetEdits.MaxRestockDays);
         ImGui.SameLine();
-        ImGui.TextUnformatted("days");
+        Ui.Text("days");
         if (restockDraft != target)
         {
             ImGui.SameLine();
@@ -443,17 +449,17 @@ public partial class MainWindow
         // What's being typed stays until the box is left (then saved).
         var made = madeTyping.TryGetValue(p.ItemId, out var typing) ? typing : (int)MadeOf(p);
         ImGui.SetNextItemWidth(60 * ImGuiHelpers.GlobalScale);
-        if (ImGui.InputInt($"##made{p.ItemId}", ref made, 0)) madeTyping[p.ItemId] = made;
+        if (Ui.InputInt($"##made{p.ItemId}", ref made, 0)) madeTyping[p.ItemId] = made;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
             madeTyping.Remove(p.ItemId);
             SaveMade(p, made);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted($"of {Number(p.Crafts)}");
+        Ui.Text($"of {Number(p.Crafts)}");
         ImGui.SameLine();
         var all = MadeOf(p) >= p.Crafts;
-        if (ImGui.Checkbox($"all made##allMade{p.ItemId}", ref all)) SaveMade(p, all ? (int)p.Crafts : 0);
+        if (Ui.Checkbox($"all made##allMade{p.ItemId}", ref all)) SaveMade(p, all ? (int)p.Crafts : 0);
         Hover("Tick parts off as you craft them; " + (WithApp ? "every PC sees it (in the app too)." : "every game on this PC sees it.") + " Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
     }
 
