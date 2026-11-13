@@ -95,7 +95,7 @@ public class SettingsTab : IDisposable
     // The shared database's connection (Shared between PCs): Local or Remote, and its saved login.
     public void DrawDatabaseConnection()
     {
-        ImGui.Text("Connection Mode");
+        Ui.Text("Connection Mode");
 
         var useRemote = configuration.UseRemoteConnection;
         if (ImGui.RadioButton("Local", !useRemote))
@@ -117,7 +117,7 @@ public class SettingsTab : IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text($"Database Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
+        Ui.Text($"Database Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
 
         ImGui.InputText("Host", ref pgHost, 100);
         ImGui.InputText("Port", ref pgPort, 10);
@@ -125,7 +125,7 @@ public class SettingsTab : IDisposable
         ImGui.InputText("Username", ref pgUsername, 100);
         ImGui.InputText("Password", ref pgPassword, 100, ImGuiInputTextFlags.Password);
         if (pgHasSavedPassword)
-            ImGui.TextDisabled("A password is saved. Leave the box empty to keep it.");
+            Ui.Disabled("A password is saved. Leave the box empty to keep it.");
 
         if (ImGui.Button("Save Database Credentials"))
             pgSaveResult = SaveCredential();
@@ -150,7 +150,7 @@ public class SettingsTab : IDisposable
 
         if (!string.IsNullOrEmpty(pgSaveResult))
         {
-            ImGui.TextWrapped(pgSaveResult);
+            Ui.Wrapped(pgSaveResult);
         }
     }
 
@@ -183,13 +183,13 @@ public class SettingsTab : IDisposable
         var list = knownCharacters!;
         if (list.Count == 0)
         {
-            ImGui.TextWrapped("AutoRetainer is not running or knows no characters on this client.");
+            Ui.Wrapped("AutoRetainer is not running or knows no characters on this client.");
             return;
         }
 
         var syncing = list.Count(c => configuration.ShouldSync(c.Cid));
-        ImGui.Text($"Syncing {syncing} of {list.Count} characters.");
-        ImGui.TextDisabled("Left-out characters are not read or sent." + (configuration.FleetStore == FleetStoreChoice.ThisPc
+        Ui.Text($"Syncing {syncing} of {list.Count} characters.");
+        Ui.Disabled("Left-out characters are not read or sent." + (configuration.FleetStore == FleetStoreChoice.ThisPc
             ? " What they sent before stays until they're synced again."
             : " Anything they sent before can be removed with the app's Remove button on the Roster."));
 
@@ -201,7 +201,7 @@ public class SettingsTab : IDisposable
                 {
                     var sync = configuration.ShouldSync(c.Cid);
                     var subs = c.Subs > 0 ? $"  ({c.Subs} sub{(c.Subs == 1 ? "" : "s")})" : "";
-                    if (ImGui.Checkbox($"{c.Name} @ {c.World}{subs}##{c.Cid}", ref sync))
+                    if (Ui.Checkbox($"{c.Name} @ {c.World}{subs}##{c.Cid}", ref sync))
                         SetSync(c.Cid, sync);
                 }
             }
@@ -209,7 +209,7 @@ public class SettingsTab : IDisposable
     }
 
     // Fills the form from the saved credential for the current connection mode (or the defaults).
-    private void LoadSavedCredential()
+    public void LoadSavedCredential()
     {
         var saved = PostgresCredentialStore.Load(configuration.UseRemoteConnection);
         pgHost = saved?.Host ?? "";
@@ -227,7 +227,7 @@ public class SettingsTab : IDisposable
     {
         // Can't ref a property, so use a local copy
         var enabled = configuration.Enabled;
-        if (ImGui.Checkbox("Fleet Sync Enabled", ref enabled))
+        if (Ui.Checkbox("Fleet Sync Enabled", ref enabled))
         {
             configuration.Enabled = enabled;
             configuration.Save();
@@ -242,11 +242,11 @@ public class SettingsTab : IDisposable
         if (string.IsNullOrWhiteSpace(configuration.AccountLabel))
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Theme.Status(configuration.Theme, configuration.ColourBlindStatus).Warn))
-                ImGui.TextWrapped(Configuration.NoAccountLabelText);
+                Ui.Wrapped(Configuration.NoAccountLabelText);
         }
 
         var syncInterval = configuration.SyncIntervalMinutes;
-        if (ImGui.InputInt("Sync Interval (minutes)", ref syncInterval))
+        if (Ui.InputInt("Sync Interval (minutes)", ref syncInterval))
         {
             if (syncInterval < 1)
                 syncInterval = 1;
@@ -256,7 +256,7 @@ public class SettingsTab : IDisposable
         }
 
         var syncAfterLogout = configuration.SyncAfterLogout;
-        if (ImGui.Checkbox("Also sync right after a character logs out", ref syncAfterLogout))
+        if (Ui.Checkbox("Also sync right after a character logs out", ref syncAfterLogout))
         {
             configuration.SyncAfterLogout = syncAfterLogout;
             configuration.Save();
@@ -265,7 +265,7 @@ public class SettingsTab : IDisposable
             ImGui.SetTooltip("AutoRetainer logs a character out when it has finished with it, so its subs show a few seconds later instead of at the next interval.");
 
         var showInInfoBar = configuration.ShowInInfoBar;
-        if (ImGui.Checkbox("Show Fleet in the game's info bar", ref showInInfoBar))
+        if (Ui.Checkbox("Show Fleet in the game's info bar", ref showInInfoBar))
         {
             configuration.ShowInInfoBar = showInInfoBar;
             configuration.Save();
@@ -275,17 +275,17 @@ public class SettingsTab : IDisposable
 
         // The look of this window (Theme.cs): only it changes, never the game or other plugins. The app has the same looks.
         ImGui.Spacing();
-        ImGui.TextUnformatted("Look:");
+        Ui.Text("Look:");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
         var current = Theme.Info(configuration.Theme);
-        using (var combo = ImRaii.Combo("##look", current.Name))
+        using (var combo = Ui.Combo("##look", current.Name))
         {
             if (combo)
             {
                 foreach (var look in Theme.Looks)
                 {
-                    if (ImGui.Selectable($"{look.Name}##look{look.Key}", look.Choice == configuration.Theme))
+                    if (Ui.Selectable($"{look.Name}##look{look.Key}", look.Choice == configuration.Theme))
                     {
                         configuration.Theme = look.Choice;
                         configuration.Save();
@@ -298,9 +298,9 @@ public class SettingsTab : IDisposable
         }
         ImGui.SameLine();
         Swatches(configuration.Theme);
-        ImGui.TextDisabled(current.About);
+        Ui.Disabled(current.About);
         var colourBlind = configuration.ColourBlindStatus;
-        if (ImGui.Checkbox("Colour-blind friendly status colors", ref colourBlind))
+        if (Ui.Checkbox("Colour-blind friendly status colors", ref colourBlind))
         {
             configuration.ColourBlindStatus = colourBlind;
             configuration.Save();
@@ -322,8 +322,8 @@ public class SettingsTab : IDisposable
         ImGui.Spacing();
         if (configuration.FleetStore == FleetStoreChoice.ThisPc)
         {
-            ImGui.Text("Fleet data: Just this PC");
-            ImGui.TextWrapped($"Every game on this PC keeps your fleet in {FileDatabase.DefaultPath}, backed up once a day " +
+            Ui.Text("Fleet data: Just this PC");
+            Ui.Wrapped($"Every game on this PC keeps your fleet in {FileDatabase.DefaultPath}, backed up once a day " +
                               "(the Status page has Back up now). There's no database to connect to.");
         }
         else
@@ -332,8 +332,8 @@ public class SettingsTab : IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text("FC Tracker Config Path");
-        ImGui.TextWrapped("Points at FC Tracker's config file for this XIVLauncher install, used to read FC/housing data.");
+        Ui.Text("FC Tracker Config Path");
+        Ui.Wrapped("Points at FC Tracker's config file for this XIVLauncher install, used to read FC/housing data.");
 
         var fcTrackerPath = configuration.FCTrackerConfigPath;
         if (ImGui.InputText("##FCTrackerPath", ref fcTrackerPath, 260))
@@ -377,7 +377,7 @@ public class SettingsTab : IDisposable
         var status = Theme.Status(configuration.Theme, configuration.ColourBlindStatus);
         using (ImRaii.PushColor(ImGuiCol.Text, fcTrackerFileFound ? status.Good : status.Warn))
         {
-            ImGui.TextWrapped(fcTrackerFileFound
+            Ui.Wrapped(fcTrackerFileFound
                 ? "Found."
                 : "Not found: Free Company and housing details are not synced until this points at FC Tracker's config file.");
         }

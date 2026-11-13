@@ -42,7 +42,7 @@ public partial class MainWindow
 
     private void CharacterCell(string name, string world)
     {
-        ImGui.TextUnformatted(name.Length > 0 ? name : "—");
+        Ui.Text(name.Length > 0 ? name : "—");
         if (world.Length == 0) return;
         ImGui.SameLine(0, 6 * ImGuiHelpers.GlobalScale);
         Colored(Dim, world);
@@ -94,8 +94,8 @@ public partial class MainWindow
                 Hover($"{behind / 60} h {behind % 60} min behind the rest of its account: unticked in the plugin, or its AutoRetainer no longer has it.");
             }
         }, c => c.Character, Locked: true),
-        new("world", "World", c => ImGui.TextUnformatted(c.World), c => c.World, Hidden: true),
-        new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
+        new("world", "World", c => Ui.Text(c.World), c => c.World, Hidden: true),
+        new("account", "Account", c => Ui.Text(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("fc", "FC", c =>
         {
             if (c.FcName == null) Colored(Dim, "—"); else Tinted(Palette.Fc, c.FcName);
@@ -135,7 +135,7 @@ public partial class MainWindow
         }, c => c.LastSynced ?? DateTime.MinValue),
         new("syncedBy", "Synced by", c =>
         {
-            ImGui.TextUnformatted(FleetReader.SyncedBy(c.LoginPc, c.LoginLabel));
+            Ui.Text(FleetReader.SyncedBy(c.LoginPc, c.LoginLabel));
             Hover(c.LoginPc != null && c.LoggedInAt.HasValue
                 ? $"Last logged in on this setup {c.LoggedInAt.Value:g}. Only this setup syncs the character; others that have it leave it alone."
                 : "No login recorded yet: every setup that has the character syncs it.");
@@ -174,7 +174,7 @@ public partial class MainWindow
     private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)> RetainersTable => retainersTable ??=
         new FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>("retainers", plugin.Configuration, new List<FleetColumn<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>>
     {
-        new("retainer", "Retainer", x => ImGui.TextUnformatted(x.R.Name), x => x.R.Name, Locked: true),
+        new("retainer", "Retainer", x => Ui.Text(x.R.Name), x => x.R.Name, Locked: true),
         // The owner once, on their first retainer (while the table isn't sorted by a column).
         new("owner", "Owner", x =>
         {
@@ -182,7 +182,7 @@ public partial class MainWindow
             CharacterCell(x.R.Owner, x.R.World);
             if (x.R.Account.Length > 0) Hover($"Account: {x.R.Account}");
         }, x => x.R.Owner),
-        new("account", "Account", x => ImGui.TextUnformatted(x.R.Account.Length > 0 ? x.R.Account : "—"), x => x.R.Account, Hidden: true),
+        new("account", "Account", x => Ui.Text(x.R.Account.Length > 0 ? x.R.Account : "—"), x => x.R.Account, Hidden: true),
         // The class in its role's colour, the level softer.
         new("job", "Class/Level", x =>
         {
@@ -200,7 +200,7 @@ public partial class MainWindow
             if (x.Check != null) Hover(x.Check == "meets" ? "Every slot meets the gear target." : "Short of the gear target" + (WithApp ? ": the app's Retainers tab shows which slots (hover Avg ilvl there)." : "."));
             if (!x.R.ItemsSeen) Hover("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
         }, x => x.Ilvl ?? 0, x => x.Ilvl == null),
-        new("venture", "Venture", x => ImGui.TextUnformatted(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
+        new("venture", "Venture", x => Ui.Text(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
         // Status: done first, then the soonest done; idle last either way.
         new("status", "Status", x =>
         {
@@ -210,7 +210,7 @@ public partial class MainWindow
             else
             {
                 // The countdown, then when it's done, softer.
-                ImGui.TextUnformatted(status);
+                Ui.Text(status);
                 ImGui.SameLine();
                 Colored(Dim, FleetReader.FinishClock(x.R.VentureEndsAt, DateTime.Now));
             }
@@ -278,25 +278,25 @@ public partial class MainWindow
 
     private FleetTable<PcRow> PcsTable => pcsTable ??= new FleetTable<PcRow>("pcs", plugin.Configuration, new List<FleetColumn<PcRow>>
     {
-        new("pc", "PC", p => ImGui.TextUnformatted(p.Account.Length > 0 ? $"{p.Pc} ({p.Account})" : p.Pc), p => p.Pc, Locked: true),
+        new("pc", "PC", p => Ui.Text(p.Account.Length > 0 ? $"{p.Pc} ({p.Account})" : p.Pc), p => p.Pc, Locked: true),
         new("plugin", "Plugin", p =>
         {
             var newest = reader.Pcs.Data?.Select(x => x.PluginVersion).Aggregate("0", (v, x) => FleetReader.CompareVersions(x, v) > 0 ? x! : v) ?? "0";
             var old = FleetReader.CompareVersions(p.PluginVersion, newest) < 0;
-            if (old) Colored(Amber, p.PluginVersion ?? "—"); else ImGui.TextUnformatted(p.PluginVersion ?? "—");
+            if (old) Colored(Amber, p.PluginVersion ?? "—"); else Ui.Text(p.PluginVersion ?? "—");
             if (old) Hover($"Older than {newest} {(WithApp ? "on another PC" : "in another game on this PC")}: update it in /xlplugins there.");
         }, p => string.Join(".", (p.PluginVersion ?? "").Split('.').Select(n => n.PadLeft(5, '0'))), p => p.PluginVersion == null),
         new("lastSync", "Last sync", p =>
             {
                 // A PC whose plugin only reads (it syncs no characters) checks in too.
                 if (p.LastSync == null && p.LastRead is { } read) Colored(Dim, $"Only reads (seen {FleetReader.Ago(read, DateTime.Now)})");
-                else ImGui.TextUnformatted(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, DateTime.Now) : "never");
+                else Ui.Text(p.LastSync.HasValue ? FleetReader.Ago(p.LastSync.Value, DateTime.Now) : "never");
                 if (p.LastRead is { } seen) Hover($"Its plugin last read {(WithApp ? "the database" : "the fleet file")} {FleetReader.Ago(seen, DateTime.Now)}.");
             },
             p => p.LastSync ?? DateTime.MinValue, p => p.LastSync == null),
         new("characters", "Characters", p =>
         {
-            ImGui.TextUnformatted(FleetReader.PcCharacters(p.Characters, p.LeftOut, p.Elsewhere));
+            Ui.Text(FleetReader.PcCharacters(p.Characters, p.LeftOut, p.Elsewhere));
             if (p.Elsewhere > 0) Hover($"{p.Elsewhere} of this setup's characters last logged in on another setup, so that setup syncs them (the Roster's Synced by column says which).");
         }, p => p.Characters ?? 0, p => p.Characters == null),
         new("autoretainer", "AutoRetainer", p =>
@@ -338,7 +338,7 @@ public partial class MainWindow
         if (pcs == null) return;
         if (pcs.Count == 0)
         {
-            ImGui.TextWrapped("No PC has reported yet. Each setup reports here at its next sync.");
+            Ui.Wrapped("No PC has reported yet. Each setup reports here at its next sync.");
             return;
         }
         var checks = pcs.Where(p => p.CheckText != null).ToList();
@@ -357,7 +357,7 @@ public partial class MainWindow
             if (ImGui.CollapsingHeader($"Check what I can see: {who}, {when}, {toFix}##check{p.Pc}|{p.Account}"))
             {
                 foreach (var line in p.CheckText!.Split('\n'))
-                    ImGui.TextWrapped(line.TrimEnd('\r'));
+                    Ui.Wrapped(line.TrimEnd('\r'));
             }
         }
     }
@@ -377,15 +377,15 @@ public partial class MainWindow
             }
             TrendButton("fc", f.FcId.ToString(System.Globalization.CultureInfo.InvariantCulture), f.Name.Length > 0 ? f.Name : "Free Company");
         }, f => f.Name, Locked: true),
-        new("leader", "Leader", f => ImGui.TextUnformatted(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
-        new("account", "Account", f => ImGui.TextUnformatted(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
+        new("leader", "Leader", f => Ui.Text(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
+        new("account", "Account", f => Ui.Text(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
         new("points", "FC Points", f => RightNumber(f.Points, Palette.FcPoints), f => f.Points ?? 0, f => f.Points == null),
         new("members", "Members", f => RightNumber(f.Members), f => f.Members ?? 0, f => f.Members == null),
         new("house", "House", f =>
         {
             if (f.HasHouse) { if (f.House != null) Tinted(Palette.Address, f.House); else Colored(Dim, "—"); return; }
             var text = f.Eligibility ?? "—";
-            if (text == "Eligible") Colored(Green, text); else ImGui.TextUnformatted(text);
+            if (text == "Eligible") Colored(Green, text); else Ui.Text(text);
             if (f.EligibleAt.HasValue) Hover($"Can bid on a house from {f.EligibleAt.Value:g} (30 days after it was founded), at rank 6 or higher.");
         }, f => f.HasHouse ? 1 : 0),
         // Unknown dates sort as the oldest, since they are the ones to check.
@@ -394,7 +394,7 @@ public partial class MainWindow
             if (!f.HasHouse) { Colored(Dim, "—"); return; }
             var text = f.HouseDays == null ? "Unknown" : f.HouseDays == 0 ? "Today" : $"{f.HouseDays} day{(f.HouseDays == 1 ? "" : "s")} ago";
             var color = f.HouseLevel switch { "danger" or "unknown" => (Vector4?)Red, "warn" => Amber, _ => Green };
-            if (color is Vector4 c) Colored(c, text); else ImGui.TextUnformatted(text);
+            if (color is Vector4 c) Colored(c, text); else Ui.Text(text);
             Hover(f.LastEntered.HasValue
                 ? $"Last entered {f.LastEntered.Value:g}. The game can demolish a house after 45 days without a member entering{(f.DemolitionInDays is int left ? $" ({left} days left)" : "")}."
                 : "FC Tracker has no date for this house yet.");
@@ -414,7 +414,7 @@ public partial class MainWindow
         if (fcs == null) return;
         if (fcs.Count == 0)
         {
-            ImGui.TextWrapped("No Free Companies yet. They appear once FC Tracker has seen them on a PC running the plugin.");
+            Ui.Wrapped("No Free Companies yet. They appear once FC Tracker has seen them on a PC running the plugin.");
             return;
         }
         FcsTable.Draw(fcs.Where(f => Matches(fcsFilter, f.Name, f.Leader, f.Account, f.House, GameNames.World(f.HomeWorld))).ToList());

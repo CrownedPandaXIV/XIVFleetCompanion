@@ -49,16 +49,16 @@ public partial class MainWindow
     {
         // The character once, on its first part (while the table isn't sorted by a column).
         new("character", "Character", n => { if (!PartsTable.SameAsAbove) CharacterCell(n.Character, n.World); }, n => n.Character),
-        new("account", "Account", n => ImGui.TextUnformatted(n.Account.Length > 0 ? n.Account : "—"), n => n.Account, Hidden: true),
-        new("sub", "Sub", n => ImGui.TextUnformatted(n.SubName), n => n.SubName, Locked: true),
+        new("account", "Account", n => Ui.Text(n.Account.Length > 0 ? n.Account : "—"), n => n.Account, Hidden: true),
+        new("sub", "Sub", n => Ui.Text(n.SubName), n => n.SubName, Locked: true),
         new("rank", "Rank", n =>
         {
             if (n.Rank > 0) RightNumber(n.Rank);
             else { TableCells.Right("new", Dim); Hover("A sub not built yet: its first build."); }
         }, n => n.Rank),
         // The class, then the slot ("Shark Hull").
-        new("needed", "Needed", n => ImGui.TextUnformatted(n.Needed), n => n.Needed),
-        new("slot", "Slot", n => ImGui.TextUnformatted(n.Slot), n => System.Array.IndexOf(PartsPlanner.Slots, n.Slot)),
+        new("needed", "Needed", n => Ui.Text(n.Needed), n => n.Needed),
+        new("slot", "Slot", n => Ui.Text(n.Slot), n => System.Array.IndexOf(PartsPlanner.Slots, n.Slot)),
         // Look ahead: when a build coming up is due (needed now: blank).
         new("due", "Due", n =>
         {
@@ -81,8 +81,8 @@ public partial class MainWindow
     private FleetTable<(string Slot, string Needed, int Count)> PartsCraftTable => partsCraftTable ??= new FleetTable<(string Slot, string Needed, int Count)>("partsCraft",
         plugin.Configuration, new List<FleetColumn<(string Slot, string Needed, int Count)>>
         {
-            new("needed", "Needed", x => ImGui.TextUnformatted(x.Needed), x => x.Needed, Locked: true),
-            new("slot", "Slot", x => ImGui.TextUnformatted(x.Slot), x => System.Array.IndexOf(PartsPlanner.Slots, x.Slot)),
+            new("needed", "Needed", x => Ui.Text(x.Needed), x => x.Needed, Locked: true),
+            new("slot", "Slot", x => Ui.Text(x.Slot), x => System.Array.IndexOf(PartsPlanner.Slots, x.Slot)),
             new("count", "Still to craft", x => RightNumber(x.Count, Amber), x => x.Count),
         });
 
@@ -96,11 +96,11 @@ public partial class MainWindow
         if (parts == null) return;
         // Look ahead, as the app's Parts tab.
         ImGui.SetNextItemWidth(120 * Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("Look ahead##partsAhead", partsAheadDays == 0 ? "Now only" : $"{partsAheadDays} days"))
+        using (var combo = Ui.Combo("Look ahead##partsAhead", partsAheadDays == 0 ? "Now only" : $"{partsAheadDays} days"))
         {
             if (combo)
                 foreach (var d in AheadChoices)
-                    if (ImGui.Selectable(d == 0 ? "Now only" : $"{d} days", d == partsAheadDays)) partsAheadDays = d;
+                    if (Ui.Selectable(d == 0 ? "Now only" : $"{d} days", d == partsAheadDays)) partsAheadDays = d;
         }
         Hover("Also the parts of each sub's next build due within that many days (the Subs page's Next Build), after what's needed now, soonest first.");
         if (partsAheadDays > 0 && reader.Routes.Data == null) Colored(Dim, reader.Routes.Error is { } routesError ? $"Look ahead needs the routes: {routesError}" : "Reading the routes...");
@@ -123,7 +123,7 @@ public partial class MainWindow
             {
                 PartsTable.DrawControls();
                 var rows = needs.Where(n => Matches(partsFilter, n.Character, n.World, n.Account, n.SubName, n.Slot, n.Needed, PartStatus(n))).ToList();
-                if (rows.Count == 0) ImGui.TextUnformatted(needs.Count == 0 ? "Nothing to change." : "Nothing matches.");
+                if (rows.Count == 0) Ui.Text(needs.Count == 0 ? "Nothing to change." : "Nothing matches.");
                 else PartsTable.Draw(FleetOrder.Roster(rows, n => n.SortIndex ?? int.MaxValue, n => n.Character));
             }
         }
@@ -132,7 +132,7 @@ public partial class MainWindow
             if (tab)
             {
                 var craft = PartsPlanner.ToCraft(needs.Where(n => Matches(partsFilter, n.Character, n.World, n.Account, n.SubName, n.Slot, n.Needed)));
-                if (craft.Count == 0) ImGui.TextUnformatted("Nothing needs crafting: every part needed is covered by a spare or another sub's old part.");
+                if (craft.Count == 0) Ui.Text("Nothing needs crafting: every part needed is covered by a spare or another sub's old part.");
                 else
                 {
                     PartsCraftTable.DrawControls();

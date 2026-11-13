@@ -79,7 +79,7 @@ public partial class MainWindow
     private void Note(string text)
     {
         using (ImRaii.PushColor(ImGuiCol.Text, Dim))
-            ImGui.TextWrapped(text);
+            Ui.Wrapped(text);
     }
 
     // ---- Cells ----
@@ -92,7 +92,7 @@ public partial class MainWindow
     {
         if (r.Places.Count == 0) return;
         var who = r.Places.Select(p => p.Who).Distinct().Count();
-        if (who == 1) ImGui.TextUnformatted(HeldText(r.Places));
+        if (who == 1) Ui.Text(HeldText(r.Places));
         else
         {
             Colored(Dim, $"{who} places");
@@ -167,9 +167,9 @@ public partial class MainWindow
         if (!priced && shopPartsTable != null) return shopPartsTable;
         var columns = new List<FleetColumn<ShopRow>>
         {
-            new("part", "Part", p => ImGui.TextUnformatted(p.Name), p => p.Name, Locked: true),
+            new("part", "Part", p => Ui.Text(p.Name), p => p.Name, Locked: true),
             new("craft", "Craft", p => RightNumber(p.Crafts, p.Made >= p.Crafts ? Dim : Amber), p => p.Crafts),
-            new("crafter", "Crafter", p => ImGui.TextUnformatted(p.Job ?? "?"), p => p.Job ?? ""),
+            new("crafter", "Crafter", p => Ui.Text(p.Job ?? "?"), p => p.Job ?? ""),
         };
         if (priced)
         {
@@ -200,7 +200,7 @@ public partial class MainWindow
 
     private FleetTable<ShopRow> ShopBuyTable => shopBuyTable ??= new FleetTable<ShopRow>("shoppingBuy", plugin.Configuration, new List<FleetColumn<ShopRow>>
     {
-        new("item", "Item", r => ImGui.TextUnformatted(r.Name), r => r.Name, Locked: true),
+        new("item", "Item", r => Ui.Text(r.Name), r => r.Name, Locked: true),
         new("need", "Need", r => RightNumber(r.Need), r => r.Need),
         new("have", "Have", r => RightNumber(r.Have, r.Have > 0 ? null : Dim), r => r.Have),
         new("buy", "Buy", r => RightNumber(r.Short, r.Short > 0 ? Amber : Dim), r => r.Short),
@@ -217,7 +217,7 @@ public partial class MainWindow
         var craft = kind == "craft";
         var columns = new List<FleetColumn<ShopRow>>
         {
-            new("item", "Item", r => ImGui.TextUnformatted(r.Name), r => r.Name, Locked: true),
+            new("item", "Item", r => Ui.Text(r.Name), r => r.Name, Locked: true),
             new("need", "Need", r => RightNumber(r.Need), r => r.Need),
             new("have", "Have", r => RightNumber(r.Have, r.Have > 0 ? null : Dim), r => r.Have),
             new("missing", craft ? "Make" : "Short", r =>
@@ -230,14 +230,14 @@ public partial class MainWindow
                 }
             }, r => r.Short),
         };
-        if (craft) columns.Add(new("crafter", "Crafter", r => ImGui.TextUnformatted(r.Job ?? "?"), r => r.Job ?? ""));
+        if (craft) columns.Add(new("crafter", "Crafter", r => Ui.Text(r.Job ?? "?"), r => r.Job ?? ""));
         columns.Add(new("vendor", "Vendor", r => ShopGil(r.VendorPrice), r => r.VendorPrice ?? 0));
         if (priced)
         {
             columns.Add(new("market", "Market board", r => MarketCell(r, shoppingList?.Market.Kind), r => r.Market?.Price ?? double.MaxValue));
             columns.Add(new("cheapest", "Cheapest", r =>
             {
-                if (r.Cheapest != null) ImGui.TextUnformatted(SourceLabels[r.Cheapest]);
+                if (r.Cheapest != null) Ui.Text(SourceLabels[r.Cheapest]);
                 else
                 {
                     Colored(Dim, "—");
@@ -255,7 +255,7 @@ public partial class MainWindow
         var showHeld = plugin.Configuration.ShoppingShowHeld;
         var visible = showHeld ? rows : rows.Where(r => r.Short > 0).ToList();
         ImGui.Spacing();
-        ImGui.TextUnformatted(title);
+        Ui.Text(title);
         if (total != null)
         {
             ImGui.SameLine(0, ImGui.CalcTextSize("  ").X);
@@ -263,7 +263,7 @@ public partial class MainWindow
         }
         ImGui.Separator();
         if (note != null) Note(note);
-        if (visible.Count == 0) ImGui.TextUnformatted(rows.Count > 0 ? "Everything here is already held." : "Nothing.");
+        if (visible.Count == 0) Ui.Text(rows.Count > 0 ? "Everything here is already held." : "Nothing.");
         else
         {
             table.DrawControls();
@@ -277,19 +277,19 @@ public partial class MainWindow
     {
         var config = plugin.Configuration;
         ImGui.SameLine(0, ImGui.CalcTextSize("    ").X);
-        ImGui.TextUnformatted("Prices from");
+        Ui.Text("Prices from");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(200 * Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale);
-        using (var combo = ImRaii.Combo("##shoppingScope", market.Label ?? "—"))
+        using (var combo = Ui.Combo("##shoppingScope", market.Label ?? "—"))
         {
             if (combo)
                 foreach (var (kind, label) in new[] { ("world", "World"), ("dc", "Data center"), ("region", "Region") })
                 {
                     var these = (market.Choices ?? new()).Where(c => c.Kind == kind).ToList();
                     if (these.Count == 0) continue;
-                    ImGui.TextDisabled(label);
+                    Ui.Disabled(label);
                     foreach (var c in these)
-                        if (ImGui.Selectable($"  {c.Label}##{c.Value}", c.Value == market.Scope))
+                        if (Ui.Selectable($"  {c.Label}##{c.Value}", c.Value == market.Scope))
                         {
                             config.ShoppingPriceScope = c.Value;
                             config.Save();
@@ -306,7 +306,7 @@ public partial class MainWindow
         if (market.Error != null)
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"Market board prices are not shown: {market.Error}");
+                Ui.Wrapped($"Market board prices are not shown: {market.Error}");
             return;
         }
         static string Missing(int none, int few)
@@ -336,36 +336,36 @@ public partial class MainWindow
         if (reader.Shopping.Error != null && reader.Shopping.Data == null)
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped(reader.Shopping.Error);
+                Ui.Wrapped(reader.Shopping.Error);
             return;
         }
         if (reader.Shopping.Data is not { } shop)
         {
-            ImGui.TextUnformatted("Reading what the fleet holds...");
+            Ui.Text("Reading what the fleet holds...");
             return;
         }
         UpdateShopping(parts, shop);
         var list = shoppingList;
         if (list == null)
         {
-            ImGui.TextUnformatted("Working out the shopping list...");
+            Ui.Text("Working out the shopping list...");
             return;
         }
         if (list.Error != null)
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped(list.Error);
+                Ui.Wrapped(list.Error);
             return;
         }
         if (list.Empty)
         {
-            ImGui.TextWrapped("Nothing needs crafting: every need is either met, covered by a spare, or covered by a reused old part"
+            Ui.Wrapped("Nothing needs crafting: every need is either met, covered by a spare, or covered by a reused old part"
                 + (partsAheadDays > 0 ? ", with no new build due in that time." : "."));
             return;
         }
 
         var buy = config.ShoppingBuyFromVendors;
-        if (ImGui.Checkbox("Buy from vendors where they sell it", ref buy))
+        if (Ui.Checkbox("Buy from vendors where they sell it", ref buy))
         {
             config.ShoppingBuyFromVendors = buy;
             config.Save();
@@ -373,7 +373,7 @@ public partial class MainWindow
         Hover("Anything an NPC sells for gil is bought at its vendor price instead of being crafted or gathered, so its materials aren't needed.");
         ImGui.SameLine(0, ImGui.CalcTextSize("    ").X);
         var showHeld = config.ShoppingShowHeld;
-        if (ImGui.Checkbox("Show items already held in full", ref showHeld))
+        if (Ui.Checkbox("Show items already held in full", ref showHeld))
         {
             config.ShoppingShowHeld = showHeld;
             config.Save();
@@ -398,11 +398,11 @@ public partial class MainWindow
         var noRecipe = list.Parts.Where(p => p.NoRecipe).ToList();
         if (noRecipe.Count > 0)
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"No recipe found for {string.Join(", ", noRecipe.Select(p => p.Name))}.");
+                Ui.Wrapped($"No recipe found for {string.Join(", ", noRecipe.Select(p => p.Name))}.");
 
         var priced = list.Priced;
         ImGui.Spacing();
-        ImGui.TextUnformatted("Sub parts to craft");
+        Ui.Text("Sub parts to craft");
         ImGui.Separator();
         EditLine();
         Note("Tick parts off as you craft them" + (WithApp ? " (here or in the app); every PC sees it." : "; every game on this PC sees it.") + " Once the plugin sees a crafted part in bags, " +

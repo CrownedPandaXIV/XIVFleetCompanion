@@ -1,0 +1,49 @@
+{
+ "conf": [
+  [
+   "#listen_addresses = 'localhost'\t\t# what IP\r\nport = 5433\r\nmax_connections = 100\r\n",
+   "#listen_addresses = 'localhost'\t\t# what IP\r\nlisten_addresses = '*'\r\nport = 5433\r\nmax_connections = 100\r\n",
+   5433
+  ],
+  [
+   "listen_addresses = 'localhost'\nport=5432",
+   "listen_addresses = '*'\t\t# was: listen_addresses = 'localhost'\nport=5432",
+   5432
+  ],
+  [
+   "listen_addresses = '*'\n",
+   "listen_addresses = '*'\n",
+   5432
+  ],
+  [
+   "max_connections = 100",
+   "max_connections = 100\nlisten_addresses = '*'\n",
+   5432
+  ],
+  [
+   "shared_buffers = 128MB\n# nothing\n",
+   "shared_buffers = 128MB\n# nothing\nlisten_addresses = '*'\n",
+   5432
+  ]
+ ],
+ "hba": [
+  [
+   "# TYPE  DATABASE        USER            ADDRESS                 METHOD\r\nhost    all             all             127.0.0.1/32            scram-sha-256\r\nhost    replication     all             127.0.0.1/32            scram-sha-256\r\n",
+   "scram-sha-256",
+   "# TYPE  DATABASE        USER            ADDRESS                 METHOD\r\nhost    all             all             127.0.0.1/32            scram-sha-256\r\nhost    replication     all             127.0.0.1/32            scram-sha-256\r\n\r\n# Added by XIV Fleet Companion (Let other PCs connect):\r\nhost    all             all             100.64.0.0/10           scram-sha-256\r\nhost    all             all             192.168.1.0/24          scram-sha-256\r\n",
+   "# TYPE  DATABASE        USER            ADDRESS                 METHOD\r\nhost    all             all             127.0.0.1/32            scram-sha-256\r\nhost    replication     all             127.0.0.1/32            scram-sha-256\r\n"
+  ],
+  [
+   "local all all trust\nhost all all 127.0.0.1/32 md5\nhost all all 100.64.0.0/10 md5\n",
+   "md5",
+   "local all all trust\nhost all all 127.0.0.1/32 md5\nhost all all 100.64.0.0/10 md5\n\n# Added by XIV Fleet Companion (Let other PCs connect):\nhost    all             all             192.168.1.0/24          md5\n",
+   "local all all trust\nhost all all 127.0.0.1/32 md5\nhost all all 100.64.0.0/10 md5\n"
+  ],
+  [
+   "host all all 127.0.0.1/32 trust",
+   "scram-sha-256",
+   "host all all 127.0.0.1/32 trust\n\n# Added by XIV Fleet Companion (Let other PCs connect):\nhost    all             all             100.64.0.0/10           scram-sha-256\nhost    all             all             192.168.1.0/24          scram-sha-256\n",
+   "host all all 127.0.0.1/32 trust\n"
+  ]
+ ]
+}

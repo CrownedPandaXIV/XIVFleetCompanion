@@ -39,6 +39,11 @@
     <Compile Include="..\..\XIVFleetCompanion\FileDatabase.cs" Link="FileDatabase.cs" />
     <Compile Include="..\..\XIVFleetCompanion\ForecastWriter.cs" Link="ForecastWriter.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FleetMove.cs" Link="FleetMove.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\TableExport.cs" Link="TableExport.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\PgBackups.cs" Link="PgBackups.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Setup\DatabaseAdmin.cs" Link="Setup/DatabaseAdmin.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Setup\WindowsSetup.cs" Link="Setup/WindowsSetup.cs" />
+    <EmbeddedResource Include="..\..\XIVFleetCompanion\Setup\elevated.ps1" LogicalName="Setup/elevated.ps1" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\*.sql;..\..\XIVFleetCompanion\Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\sqlite\*.sql" LogicalName="Database/sqlite/%(Filename)%(Extension)" />

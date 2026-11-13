@@ -34,6 +34,9 @@ public sealed class Plugin : IDalamudPlugin
     public FleetReader Fleet { get; }
     // Keeps the database's tables and views up to date (DatabaseUpkeep).
     public DatabaseKeeper Keeper { get; }
+
+    /// <summary>Settings → Backups for a shared database (the app's backups, made from the game too).</summary>
+    public SharedBackups Backups { get; }
     // "Fleet" in the game's info bar (top right): what needs attention; click opens the Summary.
     private IDtrBarEntry? infoBar;
     private DateTime infoBarCheckedAt = DateTime.MinValue;
@@ -111,6 +114,10 @@ public sealed class Plugin : IDalamudPlugin
 
         // Brings the database up to date with the app's own update files (DatabaseUpkeep), before reads and syncs.
         Keeper = new DatabaseKeeper(DatabaseUpkeep.Files.Embedded, $"plugin {VersionText}", text => Log.Information($"Fleet Companion: {text}"));
+        Backups = new SharedBackups(
+            () => PostgresCredentialStore.Load(Configuration.UseRemoteConnection) is { } c ? new PgLogin(c.Host, c.Port, c.Database, c.Username, c.Password) : null,
+            () => Configuration.FleetStore == FleetStoreChoice.SharedDatabase,
+            text => Log.Information($"Fleet Companion: {text}"));
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
         Fleet = new FleetReader(FleetLocation, GameNames.SubGame, OpenFleetAsync,
             () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText), Keeper);
@@ -281,6 +288,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         NoteLogin();
         UpdateInfoBar();
+        Backups.Tick(DateTime.Now);
         if (!Configuration.Enabled) return;
 
         var now = DateTime.UtcNow;
@@ -1117,6 +1125,26 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>True when the fleet is kept in the one file on this PC (Just this PC).</summary>
     public bool OnThisPc => Configuration.FleetStore == FleetStoreChoice.ThisPc;
+
+    /// <summary>Uses a database this PC just made or moved to (Set up this PC, New database, Move the database to this
+    /// PC): saved as this PC's connection (local or remote by where it is), and the fleet on the shared database.</summary>
+    public void UseConnection(Setup.DatabaseAdmin.Connection c)
+    {
+        var remote = !XIVFleetCompanion.Setup.WindowsSetup.IsThisPc(c.Host, XIVFleetCompanion.Setup.WindowsSetup.Addresses());
+        PostgresCredentialStore.Save(remote, c.Host, c.Port, c.Database, c.User, c.Password);
+        Configuration.UseRemoteConnection = remote;
+        Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+        Configuration.Save();
+        SaveChoiceForPc(Configuration);
+    }
+
+    /// <summary>Forgets this PC's saved database connections (Remove everything).</summary>
+    public void ForgetConnection()
+    {
+        PostgresCredentialStore.Delete(false);
+        PostgresCredentialStore.Delete(true);
+        Configuration.Save();
+    }
 
     /// <summary>
     /// Where the fleet is, or null when nothing is set up: the fleet file (Just this PC), else the shared database's

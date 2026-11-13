@@ -35,9 +35,9 @@ public partial class MainWindow
     private void DrawStoreChoice()
     {
         ImGui.Spacing();
-        ImGui.Text("Where should your fleet data live?");
+        Ui.Text("Where should your fleet data live?");
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-            ImGui.TextWrapped("The plugin keeps your characters, subs, retainers and their history somewhere it can read them back. Choose one; " +
+            Ui.Wrapped("The plugin keeps your characters, subs, retainers and their history somewhere it can read them back. Choose one; " +
                               "you can move your fleet to the other later (Settings → Move your fleet). Every game on this PC uses the same.");
         ImGui.Spacing();
 
@@ -48,12 +48,12 @@ public partial class MainWindow
         {
             if (card.Success)
             {
-                ImGui.Text("Just this PC");
+                Ui.Text("Just this PC");
                 ImGui.Spacing();
-                ImGui.TextWrapped("Every game on this PC keeps your fleet in one file. Nothing else to install or set up.");
+                Ui.Wrapped("Every game on this PC keeps your fleet in one file. Nothing else to install or set up.");
                 ImGui.Spacing();
                 using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                    ImGui.TextWrapped("You see your fleet here, in the game, and in the XIV Fleet Companion app on this PC (1.10 or later). " +
+                    Ui.Wrapped("You see your fleet here, in the game, and in the XIV Fleet Companion app on this PC (1.10 or later). " +
                                       "Backed up once a day; the last 7 are kept.");
                 ImGui.Spacing();
                 if (ImGui.Button("Keep it on this PC")) ChooseThisPc();
@@ -64,12 +64,12 @@ public partial class MainWindow
         {
             if (card.Success)
             {
-                ImGui.Text("Shared between PCs");
+                Ui.Text("Shared between PCs");
                 ImGui.Spacing();
-                ImGui.TextWrapped("Your fleet lives in a database that several PCs and the XIV Fleet Companion app can all use.");
+                Ui.Wrapped("Your fleet lives in a database that several PCs and the XIV Fleet Companion app can all use.");
                 ImGui.Spacing();
                 using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                    ImGui.TextWrapped("Set the database up with the app (its Database Helper is enough on the PC that keeps it), " +
+                    Ui.Wrapped("Set the database up with the app (its Database Helper is enough on the PC that keeps it), " +
                                       "then enter the same details in this plugin's Settings.");
                 ImGui.Spacing();
                 if (ImGui.Button("Use a shared database"))
@@ -87,7 +87,7 @@ public partial class MainWindow
         {
             ImGui.Spacing();
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped(storeProblem);
+                Ui.Wrapped(storeProblem);
         }
     }
 
@@ -118,14 +118,14 @@ public partial class MainWindow
 
     private void DrawFileStatus()
     {
-        ImGui.BulletText("Fleet data: Just this PC");
+        Ui.Bullet("Fleet data: Just this PC");
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-            ImGui.TextWrapped($"File: {FileDatabase.DefaultPath}");
+            Ui.Wrapped($"File: {FileDatabase.DefaultPath}");
 
         // Health.
         var health = plugin.Keeper.Health;
         using (ImRaii.PushColor(ImGuiCol.Text, health is { Ok: false } ? Amber : Palette.Dim))
-            ImGui.TextWrapped(health?.Text ?? "Not checked for damage yet (once a week, the first time the game reads the file).");
+            Ui.Wrapped(health?.Text ?? "Not checked for damage yet (once a week, the first time the game reads the file).");
         using (ImRaii.Disabled(plugin.Moving))
         {
             if (ImGui.Button("Check now")) plugin.CheckFileNow();
@@ -142,13 +142,13 @@ public partial class MainWindow
         }
         ImGui.Spacing();
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-            ImGui.TextWrapped(backupList.Count == 0
+            Ui.Wrapped(backupList.Count == 0
                 ? "Backups: none yet (one is made the first time the game reads or syncs each day)."
                 : $"Backups: {backupList.Count}, the newest from {backupList[0].LastWriteTime:g}, in {FileDatabase.BackupFolder(FileDatabase.DefaultPath)} " +
                   $"(the last {FileDatabase.BackupsKept} are kept).");
         if (plugin.Keeper.BackupProblem is { } problem)
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"The last backup didn't work: {problem}");
+                Ui.Wrapped($"The last backup didn't work: {problem}");
 
         using (ImRaii.Disabled(backingUp || plugin.Moving))
         {
@@ -181,13 +181,13 @@ public partial class MainWindow
         if (backupResult != null)
         {
             ImGui.SameLine();
-            ImGui.TextWrapped(backupResult);
+            Ui.Wrapped(backupResult);
         }
 
         if (backupList.Count > 0 && ImGui.TreeNode($"Restore a backup##restore"))
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                ImGui.TextWrapped("Puts the fleet back as it was in that backup. Games can keep running: they see it straight away. " +
+                Ui.Wrapped("Puts the fleet back as it was in that backup. Games can keep running: they see it straight away. " +
                                   "Your fleet as it is now is backed up first, so a restore can be undone the same way.");
             foreach (var backup in backupList)
             {
@@ -209,7 +209,7 @@ public partial class MainWindow
                     }
                 }
                 ImGui.SameLine();
-                ImGui.TextUnformatted($"{backup.LastWriteTime:g}");
+                Ui.Text($"{backup.LastWriteTime:g}");
                 ImGui.SameLine();
                 Colored(Dim, $"{backup.Name}, {backup.Length / 1024.0 / 1024.0:0.0} MB");
             }
@@ -217,7 +217,7 @@ public partial class MainWindow
         }
         if (plugin.FileActionStatus is { } done)
             using (ImRaii.PushColor(ImGuiCol.Text, plugin.FileActionFailed ? Amber : Palette.Dim))
-                ImGui.TextWrapped(done);
+                Ui.Wrapped(done);
     }
 
     // ---- Moving the fleet (Settings) ----
@@ -231,19 +231,19 @@ public partial class MainWindow
         var toShared = plugin.OnThisPc;
         if (toShared)
         {
-            ImGui.TextWrapped("Your fleet is in a file on this PC. Moving it to a shared database lets your other PCs and the XIV Fleet Companion app use it too.");
+            Ui.Wrapped("Your fleet is in a file on this PC. Moving it to a shared database lets your other PCs and the XIV Fleet Companion app use it too.");
             using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                ImGui.TextWrapped("1. Set up an empty database with the app (its Database Helper is enough). 2. Enter its details below and save them. " +
+                Ui.Wrapped("1. Set up an empty database with the app (its Database Helper is enough). 2. Enter its details below and save them. " +
                                   "3. Move. Every table is copied and checked before anything switches; the file stays as it is, as a backup.");
             ImGui.Spacing();
             settings.DrawDatabaseConnection();
         }
         else
         {
-            ImGui.TextWrapped("Your fleet is in a shared database. Moving it to this PC keeps it in one file here instead, with nothing else to install: " +
+            Ui.Wrapped("Your fleet is in a shared database. Moving it to this PC keeps it in one file here instead, with nothing else to install: " +
                               "for when this is the only PC you play on.");
             using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                ImGui.TextWrapped("Every table is copied and checked before anything switches. The shared database is left as it is. " +
+                Ui.Wrapped("Every table is copied and checked before anything switches. The shared database is left as it is. " +
                                   "Afterwards you see your fleet in the game, and in the XIV Fleet Companion app on this PC (1.10 or later).");
             // Other PCs still syncing to the database would carry on there, not in this PC's file.
             reader.ReadIfDue(withLists: true);
@@ -251,7 +251,7 @@ public partial class MainWindow
                                                      && p.LastSync is { } at && DateTime.Now - at < TimeSpan.FromDays(1)).Select(p => p.Pc).Distinct().ToList();
             if (others is { Count: > 0 })
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                    ImGui.TextWrapped($"{string.Join(", ", others)} synced to the shared database in the last day. After the move, {(others.Count == 1 ? "it keeps" : "they keep")} " +
+                    Ui.Wrapped($"{string.Join(", ", others)} synced to the shared database in the last day. After the move, {(others.Count == 1 ? "it keeps" : "they keep")} " +
                                       "syncing there, not to this PC: only move if you've stopped playing there.");
         }
 
@@ -284,6 +284,6 @@ public partial class MainWindow
             ImGui.SetTooltip("Syncing waits while it copies. If anything goes wrong, nothing changes.");
         if (plugin.MoveStatus is { } status)
             using (ImRaii.PushColor(ImGuiCol.Text, plugin.MoveFailed ? Amber : plugin.MoveWasTrial ? Palette.Good : Palette.Dim))
-                ImGui.TextWrapped(status);
+                Ui.Wrapped(status);
     }
 }

@@ -221,12 +221,12 @@ public partial class MainWindow
                 }
             using (ImRaii.Tooltip())
             {
-                ImGui.TextUnformatted(TrendTime(timestamps[index]));
+                Ui.Text(TrendTime(timestamps[index]));
                 foreach (var (name, color, values) in lines)
                 {
                     Colored(color, "■");
                     ImGui.SameLine();
-                    ImGui.TextUnformatted($"{TrendsMath.Full(values[index])}  {name}");
+                    Ui.Text($"{TrendsMath.Full(values[index])}  {name}");
                 }
                 if (zoomable) Colored(Dim, "Drag across the chart to zoom into that span.");
             }
@@ -282,30 +282,30 @@ public partial class MainWindow
     // and its lowest and highest.
     private void TrendStatsTable(string id, string metricKey, IReadOnlyList<double> timestamps, IReadOnlyList<(string Name, Vector4 Color, IReadOnlyList<double?> Values)> lines)
     {
-        using var table = ImRaii.Table($"##trendStats{id}", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
+        using var table = Ui.Table($"##trendStats{id}", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
         if (!table) return;
-        foreach (var label in new[] { lines.Count == 1 ? "" : "Line", "Now", "Change", "Change %", RateLabel(metricKey), "Lowest", "Highest" }) ImGui.TableSetupColumn(label);
-        ImGui.TableHeadersRow();
+        foreach (var label in new[] { lines.Count == 1 ? "" : "Line", "Now", "Change", "Change %", RateLabel(metricKey), "Lowest", "Highest" }) Ui.SetupColumn(label);
+        Ui.HeadersRow();
         foreach (var (name, color, values) in lines)
         {
             var s = TrendsMath.Stats(values, timestamps);
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
+            Ui.NextRow();
+            Ui.NextColumn();
             Colored(color, "■");
             ImGui.SameLine();
-            ImGui.TextUnformatted(lines.Count == 1 && name.Length == 0 ? "" : name);
-            ImGui.TableNextColumn();
+            Ui.Text(lines.Count == 1 && name.Length == 0 ? "" : name);
+            Ui.NextColumn();
             TableCells.Right(TrendsMath.Full(s.Current));
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             TableCells.Right(Signed(s.Change), s.Change > 0 ? Green : s.Change < 0 ? Amber : null);
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             TableCells.Right(s.Percent is double p ? $"{(p > 0 ? "+" : "")}{p:0.0}%" : "—", s.Change > 0 ? Green : s.Change < 0 ? Amber : null);
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             TableCells.Right(Signed(Rate(metricKey, s)));
             Hover(RateHint(metricKey));
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             TableCells.Right(TrendsMath.Full(s.Low));
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             TableCells.Right(TrendsMath.Full(s.High));
         }
     }
@@ -322,7 +322,7 @@ public partial class MainWindow
         ReadLine(reader.Trends, FleetReader.TrendsEvery);
         if (reader.Trends.Data is not { } meta)
         {
-            if (reader.Trends.Error == null) ImGui.TextUnformatted("Reading what's been recorded...");
+            if (reader.Trends.Error == null) Ui.Text("Reading what's been recorded...");
             return;
         }
         if (trendDetail is { } detail)
@@ -335,11 +335,11 @@ public partial class MainWindow
         var scale = ImGuiHelpers.GlobalScale;
         // Value, whose, the span and chart or table, as the app's.
         ImGui.SetNextItemWidth(190 * scale);
-        using (var combo = ImRaii.Combo("Value##trendMetric", metric.Label))
+        using (var combo = Ui.Combo("Value##trendMetric", metric.Label))
         {
             if (combo)
                 foreach (var m in TrendsMath.Metrics)
-                    if (ImGui.Selectable(m.Label, m.Key == metric.Key))
+                    if (Ui.Selectable(m.Label, m.Key == metric.Key))
                     {
                         TrendMetricKey = m.Key;
                         var type = trendScope == "characters" ? "character" : trendScope == "fcs" ? "fc" : null;
@@ -351,13 +351,13 @@ public partial class MainWindow
         ImGui.SameLine(0, 16 * scale);
         ImGui.SetNextItemWidth(210 * scale);
         var scopeLabel = trendScope == "characters" ? "Characters (compare)" : trendScope == "fcs" ? "Free Companies (compare)" : "Whole fleet (total)";
-        using (var combo = ImRaii.Combo("Show##trendScope", scopeLabel))
+        using (var combo = Ui.Combo("Show##trendScope", scopeLabel))
         {
             if (combo)
             {
-                if (ImGui.Selectable("Whole fleet (total)", trendScope == "fleet")) PickTrendScope("fleet", meta);
-                if (metric.Character != null && ImGui.Selectable("Characters (compare)", trendScope == "characters")) PickTrendScope("characters", meta);
-                if (metric.Fc != null && ImGui.Selectable("Free Companies (compare)", trendScope == "fcs")) PickTrendScope("fcs", meta);
+                if (Ui.Selectable("Whole fleet (total)", trendScope == "fleet")) PickTrendScope("fleet", meta);
+                if (metric.Character != null && Ui.Selectable("Characters (compare)", trendScope == "characters")) PickTrendScope("characters", meta);
+                if (metric.Fc != null && Ui.Selectable("Free Companies (compare)", trendScope == "fcs")) PickTrendScope("fcs", meta);
             }
         }
         foreach (var r in TrendsMath.Ranges)
@@ -399,18 +399,18 @@ public partial class MainWindow
         if (error != null) Colored(Amber, $"Could not chart this: {error}");
         if (request == null)
         {
-            if (trendScope != "fleet") ImGui.TextUnformatted("Pick at least one to chart.");
+            if (trendScope != "fleet") Ui.Text("Pick at least one to chart.");
             return;
         }
         var (result, readError, loading) = reader.Trend("trends", request);
         if (readError != null)
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"Could not read this chart: {readError}");
+                Ui.Wrapped($"Could not read this chart: {readError}");
         }
         if (result == null)
         {
-            if (loading) ImGui.TextUnformatted("Reading...");
+            if (loading) Ui.Text("Reading...");
             return;
         }
         var lines = trendScope == "fleet"
@@ -419,7 +419,7 @@ public partial class MainWindow
                 (IReadOnlyList<double?>)(result.Series.FirstOrDefault(x => x.SubjectId == s.Id)?.Values ?? Enumerable.Repeat<double?>(null, result.Timestamps.Count).ToList()))).ToList();
         if (!lines.Any(l => l.Item3.Any(v => v != null)))
         {
-            ImGui.TextWrapped("No history recorded for this yet in this time span." + (firstRecorded is double first ? $" Recording of this value began {TrendTime(first)}." : ""));
+            Ui.Wrapped("No history recorded for this yet in this time span." + (firstRecorded is double first ? $" Recording of this value began {TrendTime(first)}." : ""));
             return;
         }
 
@@ -434,21 +434,29 @@ public partial class MainWindow
             ImGui.Spacing();
             Runs(T("Now "), T(TrendsMath.Full(s.Current), TrendValueColor(metric.Key)));
             ImGui.SameLine(0, 24 * scale);
-            ImGui.TextUnformatted($"Change over this span {Signed(s.Change)}");
+            Ui.Text($"Change over this span {Signed(s.Change)}");
             ImGui.SameLine();
             ChangeText(s);
             ImGui.SameLine(0, 24 * scale);
-            ImGui.TextUnformatted($"{RateLabel(metric.Key)} {Signed(Rate(metric.Key, s))}");
+            Ui.Text($"{RateLabel(metric.Key)} {Signed(Rate(metric.Key, s))}");
             Hover(RateHint(metric.Key));
         }
-        if (trendTable) DrawTrendTable(result, lines);
+        if (trendTable)
+        {
+            TableExportUi.Button("trendTable", metric.Label, () => TableCapture.Run(() => DrawTrendTable(result, lines)));
+            DrawTrendTable(result, lines);
+        }
         else
         {
             var picked = TrendChart("trends", result.Timestamps, lines, 320 * scale, loading);
             if (picked != null) trendZoom = picked;
             Colored(Dim, "Drag across the chart to zoom into that span; hover for the values.");
         }
-        if (lines.Count > 1) TrendStatsTable("trends", metric.Key, result.Timestamps, lines);
+        if (lines.Count > 1)
+        {
+            TableExportUi.Button("trendStats", $"{metric.Label} - lines", () => TableCapture.Run(() => TrendStatsTable("trends", metric.Key, result.Timestamps, lines)));
+            TrendStatsTable("trends", metric.Key, result.Timestamps, lines);
+        }
     }
 
     private void PickTrendScope(string scope, TrendsMeta meta)
@@ -467,7 +475,7 @@ public partial class MainWindow
         {
             Colored(TrendColors[slot % TrendColors.Length], "■");
             ImGui.SameLine();
-            ImGui.TextUnformatted(items.FirstOrDefault(x => x.Id == id).Label ?? id);
+            Ui.Text(items.FirstOrDefault(x => x.Id == id).Label ?? id);
             ImGui.SameLine();
             if (ImGui.SmallButton($"x##trendRemove{id}")) trendSelection.RemoveAll(s => s.Id == id);
             Hover("Take this off the chart");
@@ -481,7 +489,7 @@ public partial class MainWindow
         }
         var noun = trendScope == "characters" ? "a character" : "a Free Company";
         ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
-        using var combo = ImRaii.Combo("##trendAdd", $"Add {noun}...");
+        using var combo = Ui.Combo("##trendAdd", $"Add {noun}...");
         if (!combo) return;
         ImGui.SetNextItemWidth(-1);
         ImGui.InputText("##trendFind", ref trendFind, 64);
@@ -491,7 +499,7 @@ public partial class MainWindow
         {
             if (chosen.Contains(id) || !Matches(trendFind, label)) continue;
             if (++shown > 60) break;
-            if (ImGui.Selectable($"{label}##trendPick{id}"))
+            if (Ui.Selectable($"{label}##trendPick{id}"))
             {
                 var used = trendSelection.Select(s => s.Slot).ToHashSet();
                 var slot = 0;
@@ -507,21 +515,21 @@ public partial class MainWindow
     private void DrawTrendTable(TrendResult result, List<(string Name, Vector4 Color, IReadOnlyList<double?> Values)> lines)
     {
         var height = 320 * ImGuiHelpers.GlobalScale;
-        using var table = ImRaii.Table("##trendTable", lines.Count + 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit,
+        using var table = Ui.Table("##trendTable", lines.Count + 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit,
             new Vector2(0, height));
         if (!table) return;
-        ImGui.TableSetupScrollFreeze(1, 1);
-        ImGui.TableSetupColumn("Time");
-        foreach (var l in lines) ImGui.TableSetupColumn(l.Name);
-        ImGui.TableHeadersRow();
+        Ui.ScrollFreeze(1, 1);
+        Ui.SetupColumn("Time");
+        foreach (var l in lines) Ui.SetupColumn(l.Name);
+        Ui.HeadersRow();
         for (var i = 0; i < result.Timestamps.Count; i++)
         {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(TrendTime(result.Timestamps[i]));
+            Ui.NextRow();
+            Ui.NextColumn();
+            Ui.Text(TrendTime(result.Timestamps[i]));
             foreach (var l in lines)
             {
-                ImGui.TableNextColumn();
+                Ui.NextColumn();
                 TableCells.Right(TrendsMath.Full(l.Values[i]), l.Values[i] == null ? Dim : null);
             }
         }
@@ -538,7 +546,7 @@ public partial class MainWindow
         var metric = TrendsMath.Metric(metricKey);
         var now = NowMs;
         var (request, _) = TrendAsk(metric, scope, subjectId == null ? null : new List<string> { subjectId }, now - days * TrendsMath.Day, now, 120);
-        ImGui.TextUnformatted(title);
+        Ui.Text(title);
         if (request == null)
         {
             Colored(Dim, "Not recorded for this.");
@@ -596,7 +604,7 @@ public partial class MainWindow
     {
         if (ImGui.Button("Back to Trends##trendDetail")) trendDetail = null;
         ImGui.SameLine(0, 16 * ImGuiHelpers.GlobalScale);
-        ImGui.TextUnformatted($"{detail.Name}: {(detail.Kind == "character" ? "character" : "Free Company")} trends");
+        Ui.Text($"{detail.Name}: {(detail.Kind == "character" ? "character" : "Free Company")} trends");
         foreach (var (d, label) in new[] { (30, "30 days"), (90, "90 days"), (365, "1 year") })
         {
             ImGui.SameLine(0, d == 30 ? 16 * ImGuiHelpers.GlobalScale : 2);
@@ -610,13 +618,13 @@ public partial class MainWindow
             : new[] { ("FC points", "fc_points"), ("Salvage value in the FC chest (gil)", "salvage_value"), ("Salvage items in the FC chest", "salvage_items") };
         // Only what's recorded for it.
         var recorded = meta.Catalog.Where(r => r.SubjectType == detail.Kind).Select(r => r.Metric).ToHashSet();
-        using var table = ImRaii.Table("##trendDetailCards", 2, ImGuiTableFlags.SizingStretchSame);
+        using var table = Ui.Table("##trendDetailCards", 2, ImGuiTableFlags.SizingStretchSame);
         if (!table) return;
         foreach (var (title, key) in cards)
         {
             var metric = TrendsMath.Metric(key);
             if (metric.PartsFor(detail.Kind)?.Any(p => recorded.Contains(p.Metric)) != true) continue;
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             TrendCard(title, key, detail.Kind, detail.Id, trendDetailDays, 150 * ImGuiHelpers.GlobalScale, ownDays: false);
             ImGui.Spacing();
         }
@@ -641,11 +649,11 @@ public partial class MainWindow
         }
         // The span moves on by the minute, so the charts are read again then, not every frame.
         var now = Math.Floor(NowMs / 60000) * 60000;
-        using var table = ImRaii.Table("##trendTiles", metrics.Count, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV);
+        using var table = Ui.Table("##trendTiles", metrics.Count, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV);
         if (!table) return;
         foreach (var metric in metrics)
         {
-            ImGui.TableNextColumn();
+            Ui.NextColumn();
             Colored(Dim, metric.Label);
             var (request, _) = TrendAsk(metric, "fleet", null, now - 30 * TrendsMath.Day, now, 30);
             var (result, _, _) = request != null ? reader.Trend($"tile:{metric.Key}", request) : (null, null, false);

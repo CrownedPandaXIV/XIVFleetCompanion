@@ -377,6 +377,34 @@ internal static partial class Program
         await Exec(conn, "DROP SCHEMA trends_check CASCADE");
     }
 
+    // Copy table and Export to CSV: the same file the app's shared/csv.js writes (its output for these rows, as JSON),
+    // and a table read as text the way the window's capture reads it.
+    private static void TableExportChecks()
+    {
+        var rows = new List<IReadOnlyList<string>>
+        {
+            new[] { "Name", "Gil", "Note" }, new[] { "Ann", "1,234", "=SUM(A1)" }, new[] { "Bo, the 2nd", "-1,234", "say \"hi\"\nnext" },
+            new[] { "", "+5%", "@x" }, new[] { "Ünïcode", "-", "−3" },
+        };
+        var app = "﻿Name,Gil,Note\r\nAnn,\"1,234\",'=SUM(A1)\r\n\"Bo, the 2nd\",\"-1,234\",\"say \"\"hi\"\"\nnext\"\r\n,+5%,'@x\r\nÜnïcode,'-,−3\r\n";
+        Check(TableExport.Csv(rows) == app, "export: the CSV is the app's, byte for byte (quotes, formulas made text, plain numbers left alone): " + TableExport.Csv(rows).Replace("\r\n", "|"));
+        Check(TableExport.FileName("Supplies - Ceruleum: from/FC?", new DateTime(2026, 10, 7)) == "Supplies - Ceruleum from FC 2026-10-07.csv",
+            "export: the file name is the app's: " + TableExport.FileName("Supplies - Ceruleum: from/FC?", new DateTime(2026, 10, 7)));
+        Check(TableExport.Tsv(new[] { new[] { "a\tb", "c\nd" }, new[] { "1", "2" } }) == "a b\tc d\n1\t2", "copy: tab-separated, a cell's tabs and line breaks as spaces");
+        var read = TableCapture.Run(() =>
+        {
+            var c = TableCapture.Current!;
+            c.Header("Character"); c.Header("##tick"); c.Header("A day##kits");
+            c.HeadersRow();
+            c.Add("outside any cell");
+            c.NextRow(); c.NextColumn(); c.Add("Ann"); c.Add("  Ravana "); c.NextColumn(); c.Add("Yes"); c.NextColumn(); c.Add("12");
+            c.NextRow(); c.SetColumn(0); c.Add("Account 2");
+        });
+        Check(read.Count == 3 && string.Join("|", read[0]) == "Character||A day" && string.Join("|", read[1]) == "Ann Ravana|Yes|12" && string.Join("|", read[2]) == "Account 2",
+            "export: a table read as text: headings as they read, each cell's pieces joined by a space, a band as a row of its own: " + string.Join(" / ", read.Select(r => string.Join("|", r))));
+        Check(TableCapture.Cell(() => TableCapture.Current!.Add("5.86M")) == "5.86M" && TableCapture.Current == null, "export: one cell read on its own, and reading ends after");
+    }
+
     // The Trends page's own working out: the numbers under a chart, the axis and the short numbers.
     private static void TrendsMathChecks()
     {
@@ -2051,6 +2079,9 @@ internal static partial class Program
         await FileChecks();
         await BigFleetChecks(conn, Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres");
         TrendsMathChecks();
+        TableExportChecks();
+        await BackupChecks(conn, Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres");
+        await SetupChecks(conn, Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres");
         await Exec(conn, "DROP VIEW fleet_holdings_view, fleet_item_totals_view, fleet_salvage_view, fleet_income_view, fleet_venture_income_view");
 
         var reader = new FleetReader(() => null);

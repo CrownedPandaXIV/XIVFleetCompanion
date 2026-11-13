@@ -103,7 +103,7 @@ public class SpeedTestWindow : Window, IDisposable
     public void DrawPage()
     {
         NoteFrame();
-        ImGui.TextWrapped("For XIV Fleet Companion 2.0: times reading from the database what the in-game Summary, Subs and " +
+        Ui.Wrapped("For XIV Fleet Companion 2.0: times reading from the database what the in-game Summary, Subs and " +
                           "Supplies windows will need. It runs in the background, so the game shouldn't stutter; the longest " +
                           "game frame is shown to check. Only reads; nothing is changed.");
         using (ImRaii.Disabled(running))
@@ -120,11 +120,11 @@ public class SpeedTestWindow : Window, IDisposable
             }
         }
         ImGui.SameLine();
-        ImGui.Text(status);
+        Ui.Text(status);
 
         using var child = ImRaii.Child("##speedresults", Vector2.Zero, true);
         if (!child.Success || text == null || running) return;
         foreach (var line in text.Split('\n'))
-            ImGui.TextWrapped(line.TrimEnd('\r'));
+            Ui.Wrapped(line.TrimEnd('\r'));
     }
 }

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>2.3.1</Version>
+    <Version>2.4.0</Version>
       <NoWarn>$(NoWarn);CS0618</NoWarn>
     <!-- Manifest fields (see https://github.com/goatcorp/DalamudPackager/blob/827d88dc/DalamudPackager/DalamudPackager.cs#L420) -->
     <Author>CrownedPandaXIV</Author>
@@ -68,6 +68,7 @@
     <EmbeddedResource Include="Database\*.sql;Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Database\sqlite\*.sql" LogicalName="Database/sqlite/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Setup\elevated.ps1" LogicalName="Setup/elevated.ps1" />
   </ItemGroup>
 
   <ItemGroup>

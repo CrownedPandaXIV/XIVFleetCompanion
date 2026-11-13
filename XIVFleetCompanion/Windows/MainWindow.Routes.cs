@@ -97,7 +97,7 @@ public partial class MainWindow
             return;
         }
         var text = (r.Method == "calculated" ? "≈ " : "") + TimeUntil(when, NowMs);
-        if (color is Vector4 c) Colored(c, text); else ImGui.TextUnformatted(text);
+        if (color is Vector4 c) Colored(c, text); else Ui.Text(text);
         Hover($"{label} about {LocalDate(when)}{(voyages is int n ? $" ({n} voyage{(n == 1 ? "" : "s")})" : "")}. {RankUpBasis(r)}");
     }
 
@@ -120,7 +120,7 @@ public partial class MainWindow
         }
         // Due now in green (it can switch already).
         var now = b.Rank <= s.Rank;
-        if (now) Colored(Green, $"{b.Build} at {b.Rank}"); else ImGui.TextUnformatted($"{b.Build} at {b.Rank}");
+        if (now) Colored(Green, $"{b.Build} at {b.Rank}"); else Ui.Text($"{b.Build} at {b.Rank}");
         if (b.FightClub is { } f)
             Hover($"From Fight Club (your Sub Rules have no change ahead): on {f.Route}, {Gil(f.Net)} gil a day after repair kits" + (f.Gain is double g ? $", {Gil(g)} more than now." : "."));
         ImGui.SameLine(0, 0);
@@ -143,7 +143,7 @@ public partial class MainWindow
             Hover(m.Name.Length > 0 ? m.Name : $"Map {m.Id}");
             ImGui.SameLine(0, 0);
         }
-        ImGui.TextUnformatted(route);
+        Ui.Text(route);
     }
 
     private void GilDayCell(double? gil, string why)
@@ -186,11 +186,11 @@ public partial class MainWindow
     private FleetTable<SubRoute> RoutesTable => routesTable ??= new FleetTable<SubRoute>("routeOpt", plugin.Configuration, new List<FleetColumn<SubRoute>>
     {
         new("character", "Character", s => CharacterCell(CharacterOf(s.Cid).Name, CharacterOf(s.Cid).World), s => CharacterOf(s.Cid).Name, Locked: true),
-        new("sub", "Sub", s => ImGui.TextUnformatted(s.SubName), s => s.SubName),
+        new("sub", "Sub", s => Ui.Text(s.SubName), s => s.SubName),
         new("rank", "Rank", s => RightNumber(s.Rank), s => s.Rank),
         new("currentRoute", "Current Route", s => RouteCell(s.CurrentRoute, s.CurrentMap), s => s.CurrentRoute),
         new("currentGil", "Current Gil/Day", s => GilDayCell(s.CurrentGilDay, NoCurrentGil), s => s.CurrentGilDay ?? double.MinValue, s => s.CurrentGilDay == null),
-        new("targetRoute", "Target Route", s => ImGui.TextUnformatted(s.TargetRoute), s => s.TargetRoute),
+        new("targetRoute", "Target Route", s => Ui.Text(s.TargetRoute), s => s.TargetRoute),
         new("targetGil", "Target Gil/Day", s => GilDayCell(s.TargetGilDay, NoTargetGil), s => s.TargetGilDay ?? double.MinValue, s => s.TargetGilDay == null),
         new("gain", "Gil/Day Gain", s =>
         {
@@ -224,7 +224,7 @@ public partial class MainWindow
         Colored(Dim, "Subs from rank 85 whose route isn't Fight Club's best at their rank (most gil a day after repair kits). Biggest gain first; " +
                      "a sub on a route Fight Club doesn't list has no gain worked out but should still switch.");
         var rows = subs.Where(s => Matches(routesFilter, CharacterOf(s.Cid).Name, CharacterOf(s.Cid).World, s.SubName, s.CurrentRoute, s.TargetRoute)).ToList();
-        if (rows.Count == 0) { if (subs.Count > 0) ImGui.TextUnformatted("Nothing matches."); return; }
+        if (rows.Count == 0) { if (subs.Count > 0) Ui.Text("Nothing matches."); return; }
         RoutesTable.DrawControls();
         RoutesTable.Draw(rows);
     }

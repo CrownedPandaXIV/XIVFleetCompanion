@@ -111,6 +111,19 @@ same one. The plugin keeps it up to date itself.
   copies into a place that already has a fleet, and leaves the side it came from as it was. Every game on the PC
   follows at its next sync.
 
+### Shared between PCs, without the app
+
+Everything the app does for a shared database is in the plugin's Settings too, so a PC can do without the app:
+
+- **Database tools**: **Set up this PC** (installs PostgreSQL and Tailscale, lets other PCs connect, makes the
+  database), **New database on this PC**, **Let other PCs connect**, **Move the database to this PC**, **Leftovers
+  from moving the database**, **What another PC needs**, and **Remove everything from this PC**. Steps that change
+  Windows ask for its permission once.
+- **Backups of the shared database**: Back up now, a daily backup while a game runs (the app's scheduled task makes it
+  instead where the app is installed), Test, Restore, Restore from a file, and Get the backup tools. They're the same
+  backups and settings as the app's.
+- Every table has **Export**: Copy table, or Export to CSV.
+
 ## Using it
 
 - **`/xivfleet`** opens the main window. It shows when the last sync was and, if syncing isn't getting through (for

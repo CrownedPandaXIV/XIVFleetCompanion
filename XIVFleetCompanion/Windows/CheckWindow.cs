@@ -196,7 +196,7 @@ public class CheckWindow : Window, IDisposable
 
     public void DrawPage()
     {
-        ImGui.TextWrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the character's " +
+        Ui.Wrapped("Goes through every character this plugin syncs and shows what it can see: AutoRetainer, the character's " +
                           "items, each retainer's and the FC chest's (from Allagan Tools; each filled slot counts once, with where they " +
                           "are: bags, crystals, armoury...), the house (from FC Tracker) and when each was last stored. Only the result " +
                           "itself is saved, for the PCs page" + (plugin.OnThisPc ? "." : " here and in the app."));
@@ -214,7 +214,7 @@ public class CheckWindow : Window, IDisposable
             }
         }
         ImGui.SameLine();
-        ImGui.Text(status);
+        Ui.Text(status);
 
         using var child = ImRaii.Child("##checkresults", Vector2.Zero, true);
         if (!child.Success || text == null) return;
@@ -225,11 +225,11 @@ public class CheckWindow : Window, IDisposable
             if (trimmed.TrimStart().StartsWith("!"))
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, amber))
-                    ImGui.TextWrapped(trimmed);
+                    Ui.Wrapped(trimmed);
             }
             else
             {
-                ImGui.TextWrapped(trimmed);
+                Ui.Wrapped(trimmed);
             }
         }
     }

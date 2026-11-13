@@ -115,6 +115,8 @@ public partial class MainWindow : Window, IDisposable
             if (side.Success) DrawSidebar(folded);
         }
         ImGui.SameLine();
+        TableExportUi.Draw();
+        TableExportUi.Page = PageNames.TryGetValue(shown, out var pageName) ? pageName : "";
         using var page = ImRaii.Child("##page", Vector2.Zero, false);
         if (!page.Success) return;
         if (NeedsStoreChoice)
@@ -149,12 +151,24 @@ public partial class MainWindow : Window, IDisposable
                     DrawFightClubImport();
                     ImGui.Spacing();
                     DrawMoveFleet();
+                    ImGui.Spacing();
+                    DrawSharedBackups();
+                    ImGui.Spacing();
+                    DrawDatabaseTools();
                 });
                 break;
         }
     }
 
     // --- The sidebar: the submarine, the pages in groups with what needs attention beside them, and this PC's sync. ---
+
+    // Each page's name, as the sidebar shows it (an export's file name starts with it).
+    private static readonly Dictionary<Tab, string> PageNames = new()
+    {
+        [Tab.Summary] = "Summary", [Tab.Trends] = "Trends", [Tab.Subs] = "Subs", [Tab.Routes] = "Route Optimization", [Tab.Parts] = "Parts",
+        [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Roster", [Tab.Retainers] = "Retainers",
+        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs",
+    };
 
     // The sidebar's groups (the app's sidebar has the same).
     private static readonly string[] Groups = { "Overview", "Submarines", "Characters", "Gil", "Tools", "System" };
@@ -286,12 +300,12 @@ public partial class MainWindow : Window, IDisposable
         {
             using (ImRaii.PushFont(UiBuilder.IconFont))
             using (ImRaii.PushColor(ImGuiCol.Text, plugin.SyncProblem != null ? p.Warn : config.Enabled ? p.Good : p.Dim))
-                ImGui.TextUnformatted(FontAwesomeIcon.Sync.ToIconString());
+                Ui.Text(FontAwesomeIcon.Sync.ToIconString());
         }
         else
         {
             using (ImRaii.PushColor(ImGuiCol.Text, lineColor))
-                ImGui.TextUnformatted(config.Enabled ? line : "Syncing is off");
+                Ui.Text(config.Enabled ? line : "Syncing is off");
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(plugin.SyncProblem != null ? $"Not syncing ({plugin.SyncProblemAt:t}): {plugin.SyncProblem}" :
@@ -310,7 +324,7 @@ public partial class MainWindow : Window, IDisposable
     {
         var start = ImGui.GetCursorPos();
         var rowHeight = ImGui.GetTextLineHeight() * 1.5f;
-        if (ImGui.Selectable($"##page{tab}", shown == tab, ImGuiSelectableFlags.None, new Vector2(0, rowHeight))) Show(tab);
+        if (Ui.Selectable($"##page{tab}", shown == tab, ImGuiSelectableFlags.None, new Vector2(0, rowHeight))) Show(tab);
         var hovered = ImGui.IsItemHovered();
         // A look with a glow (Princess): the page shown glows, and its edge is lit.
         if (shown == tab && Theme.Glow(plugin.Configuration.Theme) is { } glow)
@@ -326,16 +340,16 @@ public partial class MainWindow : Window, IDisposable
         ImGui.SetCursorPos(new Vector2(start.X + 6 * ImGuiHelpers.GlobalScale, start.Y + pad));
         using (ImRaii.PushFont(UiBuilder.IconFont))
         using (ImRaii.PushColor(ImGuiCol.Text, badgeColor, folded && badge != null))
-            ImGui.TextUnformatted(icon.ToIconString());
+            Ui.Text(icon.ToIconString());
         if (!folded)
         {
             ImGui.SameLine(start.X + 30 * ImGuiHelpers.GlobalScale);
-            ImGui.TextUnformatted(label);
+            Ui.Text(label);
             if (badge != null)
             {
                 ImGui.SameLine();
                 using (ImRaii.PushColor(ImGuiCol.Text, badgeColor))
-                    ImGui.TextUnformatted($"· {badge}");
+                    Ui.Text($"· {badge}");
             }
         }
         ImGui.SetCursorPos(after);
@@ -349,7 +363,7 @@ public partial class MainWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-            ImGui.TextWrapped($"XIV Fleet Companion v{Plugin.VersionText} by CrownedPandaXIV. Thanks to kawaii, NightmareXIV and the Puni.sh team (AutoRetainer), " +
+            Ui.Wrapped($"XIV Fleet Companion v{Plugin.VersionText} by CrownedPandaXIV. Thanks to kawaii, NightmareXIV and the Puni.sh team (AutoRetainer), " +
                               "Critical_Impact (Allagan Tools), erdelf (FC Tracker) and Infi (Submarine Tracker) for their plugins.");
     }
 
@@ -383,7 +397,7 @@ public partial class MainWindow : Window, IDisposable
     {
         RefreshStatus();
 
-        ImGui.Text($"Sync interval: {plugin.Configuration.SyncIntervalMinutes} minute(s){(plugin.Configuration.SyncAfterLogout ? ", and right after a character logs out" : "")}.");
+        Ui.Text($"Sync interval: {plugin.Configuration.SyncIntervalMinutes} minute(s){(plugin.Configuration.SyncAfterLogout ? ", and right after a character logs out" : "")}.");
 
         if (ImGui.Button("Check what I can see"))
         {
@@ -407,66 +421,66 @@ public partial class MainWindow : Window, IDisposable
         // --- Fleet Companion Status ---
         using (ImRaii.PushId("FleetStatus"))
         {
-            ImGui.Text("Fleet Companion Status");
+            Ui.Text("Fleet Companion Status");
             ImGui.Spacing();
 
             // Enabled toggle (mirrors Configuration.Enabled)
             var enabled = plugin.Configuration.Enabled;
-            if (ImGui.Checkbox("Enabled", ref enabled))
+            if (Ui.Checkbox("Enabled", ref enabled))
             {
                 plugin.Configuration.Enabled = enabled;
                 plugin.Configuration.Save();
             }
 
-            ImGui.Text(plugin.Configuration.LastSyncTimestamp.HasValue
+            Ui.Text(plugin.Configuration.LastSyncTimestamp.HasValue
                 ? $"Last sync: {plugin.Configuration.LastSyncTimestamp.Value:g}"
                 : "Last sync: never");
 
             // Characters this setup's AutoRetainer knows that last logged in on another setup (another account).
             var elsewhere = plugin.SyncedElsewhere;
             if (elsewhere > 0)
-                ImGui.TextWrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last logged in on another setup, so that setup syncs {(elsewhere == 1 ? "it" : "them")} instead.");
+                Ui.Wrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last logged in on another setup, so that setup syncs {(elsewhere == 1 ? "it" : "them")} instead.");
 
             // The database's version: this plugin brings it up to date itself (DatabaseUpkeep), as the app does.
             var keeper = plugin.Keeper;
             if (keeper.Problem != null || keeper.LastResult is { Newer: true } || keeper.LastFile is { Newer: true })
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                    ImGui.TextWrapped(keeper.StatusText);
+                    Ui.Wrapped(keeper.StatusText);
             }
             else
-                ImGui.TextWrapped(keeper.StatusText);
+                Ui.Wrapped(keeper.StatusText);
 
             // Why syncing isn't getting through right now (the database PC is off, a wrong password...).
             var problem = plugin.SyncProblem;
             if (problem != null)
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                    ImGui.TextWrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
+                    Ui.Wrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
             }
 
             if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel))
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                    ImGui.TextWrapped(Configuration.NoAccountLabelText);
+                    Ui.Wrapped(Configuration.NoAccountLabelText);
             }
 
             ImGui.Spacing();
-            ImGui.Text("Connections:");
+            Ui.Text("Connections:");
 
             if (plugin.OnThisPc)
                 DrawFileStatus();
             else if (plugin.Configuration.FleetStore == FleetStoreChoice.NotChosen)
-                ImGui.BulletText("Fleet data: not chosen yet (open the Summary to choose)");
+                Ui.Bullet("Fleet data: not chosen yet (open the Summary to choose)");
             else
             {
                 var mode = statusRemote ? "Remote" : "Local";
-                ImGui.BulletText(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+                Ui.Bullet(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
             }
-            ImGui.BulletText(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
-            ImGui.BulletText(allaganToolsReady ? "Allagan Tools: running" : "Allagan Tools: not running");
-            ImGui.BulletText(OptionalLine("FC Tracker", fcTrackerRunning));
-            ImGui.BulletText(OptionalLine("Submarine Tracker", subTrackerRunning));
+            Ui.Bullet(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
+            Ui.Bullet(allaganToolsReady ? "Allagan Tools: running" : "Allagan Tools: not running");
+            Ui.Bullet(OptionalLine("FC Tracker", fcTrackerRunning));
+            Ui.Bullet(OptionalLine("Submarine Tracker", subTrackerRunning));
 
             if (!plugin.OnThisPc)
             {
@@ -488,7 +502,7 @@ public partial class MainWindow : Window, IDisposable
                     }
                 }
 
-                ImGui.TextWrapped(connectionTestResult);
+                Ui.Wrapped(connectionTestResult);
             }
         }
 
@@ -506,13 +520,13 @@ public partial class MainWindow : Window, IDisposable
     // Text in a color that says what it is (gil, an address, an FC's name), or plain when the look has none.
     private static void Tinted(Vector4? color, string text)
     {
-        if (color is Vector4 c) Colored(c, text); else ImGui.TextUnformatted(text);
+        if (color is Vector4 c) Colored(c, text); else Ui.Text(text);
     }
 
     private static void Colored(Vector4 color, string text)
     {
         using (ImRaii.PushColor(ImGuiCol.Text, color))
-            ImGui.TextUnformatted(text);
+            Ui.Text(text);
     }
 
     private static void Heading(string text)
@@ -525,13 +539,13 @@ public partial class MainWindow : Window, IDisposable
     // "Label: 1,234 gil" with the amount in gil's gold (plain in a look without one).
     private void GilLine(string label, double gil, string after = "")
     {
-        ImGui.TextUnformatted(label);
+        Ui.Text(label);
         ImGui.SameLine(0, ImGui.CalcTextSize(" ").X);
         Tinted(Palette.Gil, $"{Number((long)Math.Round(gil))} gil");
         if (after.Length > 0)
         {
             ImGui.SameLine(0, 0);
-            ImGui.TextUnformatted(after);
+            Ui.Text(after);
         }
     }
 
@@ -561,7 +575,7 @@ public partial class MainWindow : Window, IDisposable
         if (read.Error != null)
         {
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped(read.Error);
+                Ui.Wrapped(read.Error);
         }
         if (read.At.HasValue)
             Colored(Dim, $"Updated {FleetReader.Ago(read.At.Value, DateTime.Now)} (every {(every.TotalMinutes >= 1 ? $"{every.TotalMinutes:0} minutes" : $"{every.TotalSeconds:0} seconds")}).");
@@ -603,7 +617,7 @@ public partial class MainWindow : Window, IDisposable
             foreach (var alert in alerts)
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, alert.Level == "danger" ? Red : Amber))
-                    ImGui.TextWrapped($"{alert.Subject}: {alert.Detail}");
+                    Ui.Wrapped($"{alert.Subject}: {alert.Detail}");
             }
             if (back == 0 && ready.Count == 0 && alerts.Count == 0) Colored(Green, "Nothing needs you right now.");
         }
@@ -614,23 +628,23 @@ public partial class MainWindow : Window, IDisposable
         var subsOn = reader.Settings.Data?.UsesSubs ?? true;
         var retainersOn = reader.Settings.Data?.UsesRetainers ?? true;
         ImGui.Spacing();
-        using (var boxes = ImRaii.Table("##summaryBoxes", (subsOn ? 2 : 0) + (retainersOn ? 1 : 0), ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.PadOuterX))
+        using (var boxes = Ui.Table("##summaryBoxes", (subsOn ? 2 : 0) + (retainersOn ? 1 : 0), ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.PadOuterX))
         {
             if (boxes)
             {
                 if (subsOn)
                 {
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
                     SummarySubsBox(back, now);
                 }
                 if (retainersOn)
                 {
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
                     SummaryRetainersBox();
                 }
                 if (subsOn)
                 {
-                    ImGui.TableNextColumn();
+                    Ui.NextColumn();
                     SummarySuppliesBox();
                 }
             }
@@ -646,34 +660,39 @@ public partial class MainWindow : Window, IDisposable
         var craft = partsData?.Needs.Count(n => n.ToCraft) ?? 0;
         HeadingRuns(T("Subs ready for new parts"), T(craft > 0 ? $"  ·  {craft} part{(craft == 1 ? "" : "s")} to craft" : "", Amber));
         if (partsData == null) Colored(Dim, reader.Parts.Error == null ? "Reading..." : "");
-        else if (ready.Count == 0) ImGui.TextUnformatted("No sub has reached the rank of its next build, and no new sub to build.");
+        else if (ready.Count == 0) Ui.Text("No sub has reached the rank of its next build, and no new sub to build.");
         else
         {
-            using var table = ImRaii.Table("##summaryParts", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
-            if (table)
+            void PartsTable()
             {
-                foreach (var h in new[] { "Character", "Sub", "Rank", "New parts" }) ImGui.TableSetupColumn(h);
-                ImGui.TableHeadersRow();
-                foreach (var (sub, subParts) in ready)
+                using var table = Ui.Table("##summaryParts", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
+                if (table)
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    CharacterCell(sub.Character, sub.World);
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(sub.SubName);
-                    ImGui.TableNextColumn();
-                    if (sub.IsNew) Colored(Dim, "new"); else RightNumber(sub.Rank);
-                    ImGui.TableNextColumn();
-                    // The class, then the slot ("Shark Hull"), and where it comes from, softer.
-                    foreach (var x in subParts)
+                    foreach (var h in new[] { "Character", "Sub", "Rank", "New parts" }) Ui.SetupColumn(h);
+                    Ui.HeadersRow();
+                    foreach (var (sub, subParts) in ready)
                     {
-                        ImGui.TextUnformatted($"{x.Needed} {x.Slot}");
-                        ImGui.SameLine();
-                        var from = x.ToCraft ? "to craft" : $"spare in {x.SpareLocation}";
-                        Colored(x.ToCraft ? Amber : Dim, $"({from})");
+                        Ui.NextRow();
+                        Ui.NextColumn();
+                        CharacterCell(sub.Character, sub.World);
+                        Ui.NextColumn();
+                        Ui.Text(sub.SubName);
+                        Ui.NextColumn();
+                        if (sub.IsNew) Colored(Dim, "new"); else RightNumber(sub.Rank);
+                        Ui.NextColumn();
+                        // The class, then the slot ("Shark Hull"), and where it comes from, softer.
+                        foreach (var x in subParts)
+                        {
+                            Ui.Text($"{x.Needed} {x.Slot}");
+                            ImGui.SameLine();
+                            var from = x.ToCraft ? "to craft" : $"spare in {x.SpareLocation}";
+                            Colored(x.ToCraft ? Amber : Dim, $"({from})");
+                        }
                     }
                 }
             }
+            TableExportUi.Button("summaryParts", "Subs ready for new parts", () => TableCapture.Run(PartsTable));
+            PartsTable();
         }
 
         // As the app's Summary: a small trend line for each fleet-wide value (Trends page).
@@ -696,7 +715,7 @@ public partial class MainWindow : Window, IDisposable
         BoxTitle("Subs", back > 0 ? $"{back} back" : "None back", back > 0 ? Green : null);
         var outNow = subs.Where(x => x.ReturnTime > now).ToList();
         var inPort = subs.Count(x => x.ReturnTime <= 0);
-        ImGui.TextUnformatted(outNow.Count == 0 ? "None out" : $"{outNow.Count} out, the next back in {FleetReader.Countdown(outNow.Min(x => x.ReturnTime) - now)}");
+        Ui.Text(outNow.Count == 0 ? "None out" : $"{outNow.Count} out, the next back in {FleetReader.Countdown(outNow.Min(x => x.ReturnTime) - now)}");
         if (inPort > 0) Colored(Amber, $"{inPort} in port (not sent out)");
         // As the app's Route Optimizations Possible tile.
         if (reader.Routes.Data != null)
@@ -719,7 +738,7 @@ public partial class MainWindow : Window, IDisposable
         if (counts == null) { BoxTitle("Retainers", "—", null); return; }
         BoxTitle("Retainers", counts.VenturesDone > 0 ? $"{counts.VenturesDone} venture{(counts.VenturesDone == 1 ? "" : "s")} done" : "No ventures done",
             counts.VenturesDone > 0 ? Green : null);
-        ImGui.TextUnformatted($"{counts.Retainers} retainer{(counts.Retainers == 1 ? "" : "s")} with a class");
+        Ui.Text($"{counts.Retainers} retainer{(counts.Retainers == 1 ? "" : "s")} with a class");
         if (counts.Idle > 0) Colored(Amber, $"{counts.Idle} without a venture");
         // As the app's Venture Income tile: the rewards over the Income window, at what a vendor pays.
         var ventures = reader.Ventures.Data;
@@ -774,7 +793,7 @@ public partial class MainWindow : Window, IDisposable
               "\n\nSubs and what needs attention every 30 seconds; the rest every 5 minutes.");
         foreach (var (name, _, error) in reads.Where(r => r.Error != null))
             using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                ImGui.TextWrapped($"{name}: {error}");
+                Ui.Wrapped($"{name}: {error}");
     }
 
     private FleetTable<SubRow>? subsTable;
@@ -789,8 +808,8 @@ public partial class MainWindow : Window, IDisposable
             CharacterCell(sub.Character, sub.World);
             if (sub.Account.Length > 0) Hover($"Account: {sub.Account}");
         }, sub => sub.Character),
-        new("account", "Account", sub => ImGui.TextUnformatted(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
-        new("sub", "Sub", sub => ImGui.TextUnformatted(sub.SubName), sub => sub.SubName, Locked: true),
+        new("account", "Account", sub => Ui.Text(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
+        new("sub", "Sub", sub => Ui.Text(sub.SubName), sub => sub.SubName, Locked: true),
         // A thin bar for how far to the next rank, the rank right after it (both on the left, so stretching the column
         // doesn't pull them apart; the bar's fixed width lines the numbers up).
         new("rank", "Rank", sub =>
@@ -802,7 +821,7 @@ public partial class MainWindow : Window, IDisposable
             }
             else ImGui.Dummy(new Vector2(36 * ImGuiHelpers.GlobalScale, ImGui.GetTextLineHeight()));
             ImGui.SameLine();
-            ImGui.TextUnformatted(sub.Rank.ToString(System.Globalization.CultureInfo.CurrentCulture));
+            Ui.Text(sub.Rank.ToString(System.Globalization.CultureInfo.CurrentCulture));
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => sub.Rank),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
@@ -814,7 +833,7 @@ public partial class MainWindow : Window, IDisposable
             var status = FleetReader.SubStatus(sub.ReturnTime, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             if (status == "Back") Colored(Green, status);
             else if (status == "In port") Colored(Dim, status);
-            else ImGui.TextUnformatted(status);
+            else Ui.Text(status);
         }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
         // Routes stage: when it ranks up and changes build, its route and gil a day (Fight Club's, after repair kits).
         new("nextRank", "Next Rank", sub => NextRankCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt ?? double.MaxValue,
@@ -853,7 +872,7 @@ public partial class MainWindow : Window, IDisposable
                 Colored(Dim, "-");
                 ImGui.SameLine(0, 0);
             }
-            ImGui.TextUnformatted(parts[i]);
+            Ui.Text(parts[i]);
         }
     }
 
@@ -883,7 +902,7 @@ public partial class MainWindow : Window, IDisposable
             CharacterCell(c.Character, c.World);
             Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}{(c.LastSynced.HasValue ? $"\nLast synced {c.LastSynced.Value:g}" : "")}");
         }, c => c.Character, Locked: true),
-        new("account", "Account", c => ImGui.TextUnformatted(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
+        new("account", "Account", c => Ui.Text(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("ceruleum", "Ceruleum", c => RightNumber(c.Ceruleum, DaysColor(c.CeruleumDaysLeft) ?? (c.CeruleumPerDay != null ? Green : (Vector4?)null)), c => c.Ceruleum),
         new("ceruleumPerDay", "A day##ceruleum", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
         new("ceruleumDays", "Days left##ceruleum", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
