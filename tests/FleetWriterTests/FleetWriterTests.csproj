@@ -40,6 +40,7 @@
     <Compile Include="..\..\XIVFleetCompanion\ForecastWriter.cs" Link="ForecastWriter.cs" />
     <Compile Include="..\..\XIVFleetCompanion\FleetMove.cs" Link="FleetMove.cs" />
     <Compile Include="..\..\XIVFleetCompanion\TableExport.cs" Link="TableExport.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\PgBackups.cs" Link="PgBackups.cs" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\*.sql;..\..\XIVFleetCompanion\Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\sqlite\*.sql" LogicalName="Database/sqlite/%(Filename)%(Extension)" />

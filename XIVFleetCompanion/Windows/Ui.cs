@@ -77,17 +77,16 @@ internal static class Ui
         if (Capture is { } c)
         {
             c.Add(preview);
-            return new Scope(null, false);
+            return new Scope(false);
         }
         var combo = flags == ImGuiComboFlags.None ? ImRaii.Combo(label, preview) : ImRaii.Combo(label, preview, flags);
-        return new Scope(combo, combo.Success);
+        return new Scope(combo);
     }
 
     public static Scope Table(string id, int columns, ImGuiTableFlags flags = ImGuiTableFlags.None, Vector2 outerSize = default)
     {
-        if (Capture != null) return new Scope(null, true);
-        var table = ImRaii.Table(id, columns, flags, outerSize);
-        return new Scope(table, table.Success);
+        if (Capture != null) return new Scope(true);
+        return new Scope(ImRaii.Table(id, columns, flags, outerSize));
     }
 
     public static void SetupColumn(string label, ImGuiTableColumnFlags flags = ImGuiTableColumnFlags.None, float width = 0)
@@ -140,21 +139,40 @@ internal static class Ui
 
     /// <summary>A table or list as ImRaii gives it (ended when disposed), or, while a table is read, one that isn't
     /// drawn: open (its rows are read) or closed (a list shows only its choice).</summary>
-    public readonly struct Scope : IDisposable
+    public ref struct Scope
     {
-        private readonly IDisposable? inner;
+        private ImRaii.TableDisposable table;
+        private ImRaii.ComboDisposable combo;
+        private readonly int kind;
 
-        public Scope(IDisposable? inner, bool success)
+        public Scope(bool success)
         {
-            this.inner = inner;
             Success = success;
+        }
+
+        public Scope(ImRaii.TableDisposable table)
+        {
+            this.table = table;
+            kind = 1;
+            Success = table.Success;
+        }
+
+        public Scope(ImRaii.ComboDisposable combo)
+        {
+            this.combo = combo;
+            kind = 2;
+            Success = combo.Success;
         }
 
         public bool Success { get; }
 
         public static implicit operator bool(Scope s) => s.Success;
 
-        public void Dispose() => inner?.Dispose();
+        public void Dispose()
+        {
+            if (kind == 1) table.Dispose();
+            else if (kind == 2) combo.Dispose();
+        }
     }
 }
 
