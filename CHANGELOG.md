@@ -11,6 +11,8 @@ All notable changes to the plugin are recorded here. Versions follow
 - **Plainer messages when the fleet file can't be used**: a full disk, a file that can't be written to or opened, and a
   damaged file (with where to restore a backup) now say so in plain words, and are logged once instead of at every
   sync.
+- **Live Market Prices say plainly when Universalis doesn't answer** in the 20 seconds allowed ("no answer in 20
+  seconds"), the same as the app's (1.10.2).
 - Messages about the shared database no longer assume you have the app: they point to your other PCs and to Settings →
   Database tools.
 - The plugin's description in Dalamud's list, and the download page, now say what the plugin does on its own since

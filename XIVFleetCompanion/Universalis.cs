@@ -126,6 +126,11 @@ namespace XIVFleetCompanion
                 request.Headers.TryAddWithoutValidation("Accept", "application/json");
                 res = await http.SendAsync(request);
             }
+            catch (TaskCanceledException) when (http.Timeout != System.Threading.Timeout.InfiniteTimeSpan)
+            {
+                // The time allowed (20 seconds, the app's too) ran out, answer included.
+                throw new InvalidOperationException($"Universalis could not be reached (no answer in {http.Timeout.TotalSeconds:0} seconds).");
+            }
             catch (Exception ex)
             {
                 throw new InvalidOperationException($"Universalis could not be reached ({ex.Message}).");

@@ -64,6 +64,30 @@ internal static partial class Program
         }
     }
 
+    // A Universalis that never answers.
+    private sealed class SilentUniversalis : System.Net.Http.HttpMessageHandler
+    {
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken token)
+        {
+            await Task.Delay(System.Threading.Timeout.Infinite, token);
+            throw new InvalidOperationException("never");
+        }
+    }
+
+    // No answer in the time allowed is said plainly, as the app says it; the plugin allows 20 seconds, as the app does.
+    private static async Task MarketGivesUpInTime()
+    {
+        var universalis = new Universalis(new System.Net.Http.HttpClient(new SilentUniversalis()) { Timeout = TimeSpan.FromSeconds(1) }, "https://universalis.test");
+        string? said = null;
+        var started = DateTime.UtcNow;
+        try { await universalis.MarketFor(new List<(string?, int)> { ("Maduin", 1) }); }
+        catch (InvalidOperationException e) { said = e.Message; }
+        var source = System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "XIVFleetCompanion", "Universalis.cs"));
+        Check(said == "Universalis could not be reached (no answer in 1 seconds)." && DateTime.UtcNow - started < TimeSpan.FromSeconds(10)
+              && source.Contains("new HttpClient { Timeout = TimeSpan.FromSeconds(20) }"),
+            $"market: a Universalis that doesn't answer is given up in the time allowed, and said plainly ({said})");
+    }
+
     private static async Task MarketAsksEachPlaceOnce()
     {
         var handler = new SlowUniversalis();
@@ -2067,6 +2091,7 @@ internal static partial class Program
         RoutesAgainstTheApp();
         await RoutesReadFromTheDatabase(conn);
         await MarketAsksEachPlaceOnce();
+        await MarketGivesUpInTime();
         MarketWorkedOutOncePerRead();
         await MarketReadFromTheDatabase(conn);
         await ShoppingReadFromTheDatabase(conn);
