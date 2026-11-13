@@ -114,6 +114,8 @@ internal static partial class Program
         // Leftovers: a copy kept under another name and one a move left behind are leftovers; the one in use isn't.
         await Exec(admin, "DROP DATABASE IF EXISTS setup_kept_before_move_20261019_1530 WITH (FORCE)");
         await Exec(admin, "CREATE DATABASE setup_kept_before_move_20261019_1530");
+        await Exec(admin, "DROP DATABASE IF EXISTS setup_not_leftover WITH (FORCE)");
+        await Exec(admin, "CREATE DATABASE setup_not_leftover");
         Func<string, Task<NpgsqlConnection>> connectTo = async name =>
         {
             var c = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(given) { Database = name, Pooling = false }.ConnectionString);
@@ -125,8 +127,10 @@ internal static partial class Program
                           "INSERT INTO companion_database_move VALUES (1, 'moved', '100.80.1.2', 5432, 'old', now(), now(), now())");
         var (left, others) = await DatabaseAdmin.FindLeftovers(admin, connectTo, "postgres_in_use");
         Check(left.Any(l => l.Name == "setup_made" && l.Kind == "moved-away" && l.MovedTo == "100.80.1.2:5432") && left.Any(l => l.Name == "setup_kept_before_move_20261019_1530" && l.Kind == "kept")
-              && !left.Any(l => l.Name == "postgres_in_use") && others.Count > 0,
-            "setup: leftovers from a move found (a copy kept, a copy left behind), as the app finds them");
+              && !left.Any(l => l.Name == "setup_not_leftover") && others.Contains("setup_not_leftover"),
+            "setup: leftovers from a move found (a copy kept, a copy left behind), as the app finds them: leftovers "
+            + string.Join(", ", left.Select(l => $"{l.Name}={l.Kind}@{l.MovedTo}")) + "; others " + string.Join(", ", others));
+        await Exec(admin, "DROP DATABASE IF EXISTS setup_not_leftover WITH (FORCE)");
         Check(await DatabaseAdmin.RemoveLeftover(admin, "postgres", connectTo, null) == "\"postgres\" isn't a leftover from a move, so it wasn't removed."
               && await DatabaseAdmin.RemoveLeftover(admin, "setup_kept_before_move_20261019_1530", connectTo, null) == null,
             "setup: only a leftover can be removed");
