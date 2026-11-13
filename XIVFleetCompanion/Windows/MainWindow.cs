@@ -151,6 +151,8 @@ public partial class MainWindow : Window, IDisposable
                     DrawFightClubImport();
                     ImGui.Spacing();
                     DrawMoveFleet();
+                    ImGui.Spacing();
+                    DrawSharedBackups();
                 });
                 break;
         }

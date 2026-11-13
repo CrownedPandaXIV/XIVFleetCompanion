@@ -154,6 +154,108 @@ namespace XIVFleetCompanion
             return !backups.Any(b => b.TakenAt >= lastDue);
         }
 
+        // ---- Get the backup tools (the app's backups/get-tools.js) ----
+
+        /// <summary>A download from PostgreSQL's maker, with its SHA-256 checksum (the app's DOWNLOADS.pgtools).</summary>
+        public sealed record Download(int Major, string Version, int SizeMb, string Url, string Sha256);
+
+        /// <summary>PostgreSQL's Windows zips, one for each version a database can run: the tools match the database's
+        /// version, as on the PC that has it (a newer pg_restore sends settings an older server doesn't know).</summary>
+        public static readonly Download[] ToolDownloads =
+        {
+            new(14, "14.24", 351, "https://get.enterprisedb.com/postgresql/postgresql-14.24-4-windows-x64-binaries.zip", "8D5B5AEF56848DBD0562E5E02D613EB5CBC7D97CAE10B290CBFDABF1B4969088"),
+            new(15, "15.19", 354, "https://get.enterprisedb.com/postgresql/postgresql-15.19-5-windows-x64-binaries.zip", "49E0690194D9FE2BB4D7D6587FDDDAA85A3EAAAFE2FD5480E0916FCB25D0143E"),
+            new(16, "16.15", 356, "https://get.enterprisedb.com/postgresql/postgresql-16.15-5-windows-x64-binaries.zip", "43BB45F173A6F08CF1D29A97A6D8DEB119E8E8093A24C00D2D1001A0CCAA8281"),
+            new(17, "17.11", 364, "https://get.enterprisedb.com/postgresql/postgresql-17.11-5-windows-x64-binaries.zip", "80379B2C04D51C30225532E0AE04509899141E9957ED096FE749D7FD9DF8F82F"),
+            new(18, "18.6", 367, "https://get.enterprisedb.com/postgresql/postgresql-18.6-5-windows-x64-binaries.zip", "E2246BA91D22345BC3D017586C09EDE52D9DF180B1EEB480F050445F1CAD84E2"),
+        };
+
+        /// <summary>What pg_dump and pg_restore need from the zip (the app's KEEP), and what must be there.</summary>
+        public static readonly Regex KeepFromZip = new(@"^pgsql/(bin/(pg_dump\.exe|pg_restore\.exe|libpq\.dll|libintl-\d+\.dll|libiconv-\d+\.dll|libwinpthread-\d+\.dll|liblz4\.dll|libzstd\.dll|zlib1\.dll|libcrypto-[\w-]+\.dll|libssl-[\w-]+\.dll)|commandlinetools_3rd_party_licenses\.txt)$");
+        private static readonly string[] Required = { "pg_dump.exe", "pg_restore.exe", "libpq.dll" };
+        private const uint DllNotFound = 0xC0000135;
+
+        /// <summary>Which download for a database whose server_version_num is <paramref name="versionNum"/>, or why none.</summary>
+        public static (Download? File, string? Message) ChooseDownload(int versionNum)
+        {
+            var major = versionNum / 10000;
+            var file = ToolDownloads.FirstOrDefault(d => d.Major == major);
+            if (file != null) return (file, null);
+            return (null, $"The database runs PostgreSQL {(major > 0 ? major.ToString(CultureInfo.InvariantCulture) : "of an unknown version")}. " +
+                          $"The tools can be fetched for PostgreSQL {ToolDownloads.Min(d => d.Major)} to {ToolDownloads.Max(d => d.Major)} only.");
+        }
+
+        /// <summary>Keeps only what the tools need from a downloaded zip (nothing else is unpacked).</summary>
+        public static void ExtractTools(string zip, string dest)
+        {
+            Directory.CreateDirectory(dest);
+            using var archive = System.IO.Compression.ZipFile.OpenRead(zip);
+            foreach (var e in archive.Entries)
+                if (KeepFromZip.IsMatch(e.FullName)) System.IO.Compression.ZipFileExtensions.ExtractToFile(e, Path.Combine(dest, e.Name), true);
+        }
+
+        /// <summary>Get the backup tools: downloads PostgreSQL's zip (its checksum checked), keeps only pg_dump, pg_restore
+        /// and what they need in <paramref name="dir"/> (the app's own tools folder, so either finds them), checks they
+        /// run, and deletes the download. Nothing is installed. The folder, or why not.</summary>
+        public static async Task<(string? Bin, string? Version, string? Message)> GetTools(Download file, string dir, string tempDir, Action<string> progress)
+        {
+            var zip = Path.Combine(tempDir, Path.GetFileName(new Uri(file.Url).AbsolutePath));
+            var fresh = dir + ".new";
+            try
+            {
+                Directory.CreateDirectory(tempDir);
+                progress("Downloading...");
+                using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(30) })
+                using (var response = await http.GetAsync(file.Url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead))
+                {
+                    response.EnsureSuccessStatusCode();
+                    var total = response.Content.Headers.ContentLength;
+                    await using var from = await response.Content.ReadAsStreamAsync();
+                    await using var to = File.Create(zip);
+                    var buffer = new byte[1 << 16];
+                    long done = 0;
+                    var shown = -1;
+                    int n;
+                    while ((n = await from.ReadAsync(buffer)) > 0)
+                    {
+                        await to.WriteAsync(buffer.AsMemory(0, n));
+                        done += n;
+                        if (total is long t && t > 0 && (int)(done * 100 / t) != shown) progress($"Downloading... {shown = (int)(done * 100 / t)}%");
+                    }
+                }
+                progress("Checking the download...");
+                string sum;
+                await using (var read = File.OpenRead(zip)) sum = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(read));
+                if (!string.Equals(sum, file.Sha256, StringComparison.OrdinalIgnoreCase))
+                    return (null, null, "The download isn't the file PostgreSQL's maker published (its checksum doesn't match), so it wasn't used. Try again later.");
+                progress("Unpacking...");
+                if (Directory.Exists(fresh)) Directory.Delete(fresh, true);
+                ExtractTools(zip, fresh);
+                var missing = Required.Where(f => !File.Exists(Path.Combine(fresh, f))).ToList();
+                if (missing.Count > 0) return (null, null, $"The download couldn't be unpacked ({string.Join(", ", missing)} not in it).");
+                progress("Checking they run...");
+                var v = await Run(Path.Combine(fresh, "pg_dump.exe"), new[] { "--version" });
+                if (!v.Ok)
+                {
+                    return (null, null, unchecked((uint)v.Code) == DllNotFound
+                        ? "The tools need Microsoft's Visual C++ runtime, which isn't on this PC. Install \"Microsoft Visual C++ Redistributable\" (x64) from Microsoft's website, then try again."
+                        : $"The tools didn't run: {(v.Stderr.Length > 0 ? v.Stderr : v.Stdout).Trim()}");
+                }
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.Move(fresh, dir);
+                return (dir, v.Stdout.Trim(), null);
+            }
+            catch (Exception e)
+            {
+                return (null, null, e.Message);
+            }
+            finally
+            {
+                try { File.Delete(zip); } catch { /* the temp folder is emptied by Windows */ }
+                try { if (Directory.Exists(fresh)) Directory.Delete(fresh, true); } catch { /* next time */ }
+            }
+        }
+
         // ---- PostgreSQL's tools ----
 
         public sealed record Tools(string Bin, string Dump, string Restore, string Version, bool FromApp);

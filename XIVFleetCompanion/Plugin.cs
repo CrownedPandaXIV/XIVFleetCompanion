@@ -34,6 +34,9 @@ public sealed class Plugin : IDalamudPlugin
     public FleetReader Fleet { get; }
     // Keeps the database's tables and views up to date (DatabaseUpkeep).
     public DatabaseKeeper Keeper { get; }
+
+    /// <summary>Settings → Backups for a shared database (the app's backups, made from the game too).</summary>
+    public SharedBackups Backups { get; }
     // "Fleet" in the game's info bar (top right): what needs attention; click opens the Summary.
     private IDtrBarEntry? infoBar;
     private DateTime infoBarCheckedAt = DateTime.MinValue;
@@ -111,6 +114,10 @@ public sealed class Plugin : IDalamudPlugin
 
         // Brings the database up to date with the app's own update files (DatabaseUpkeep), before reads and syncs.
         Keeper = new DatabaseKeeper(DatabaseUpkeep.Files.Embedded, $"plugin {VersionText}", text => Log.Information($"Fleet Companion: {text}"));
+        Backups = new SharedBackups(
+            () => PostgresCredentialStore.Load(Configuration.UseRemoteConnection) is { } c ? new PgLogin(c.Host, c.Port, c.Database, c.Username, c.Password) : null,
+            () => Configuration.FleetStore == FleetStoreChoice.SharedDatabase,
+            text => Log.Information($"Fleet Companion: {text}"));
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
         Fleet = new FleetReader(FleetLocation, GameNames.SubGame, OpenFleetAsync,
             () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText), Keeper);
@@ -281,6 +288,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         NoteLogin();
         UpdateInfoBar();
+        Backups.Tick(DateTime.Now);
         if (!Configuration.Enabled) return;
 
         var now = DateTime.UtcNow;

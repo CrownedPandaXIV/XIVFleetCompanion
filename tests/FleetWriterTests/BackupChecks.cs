@@ -61,6 +61,18 @@ internal static partial class Program
             Check(PgBackups.ServicePathsToFolders("\"C:\\Program Files\\PostgreSQL\\16\\bin\\pg_ctl.exe\" runservice -N \"postgresql-x64-16\"\r\n").SequenceEqual(new[] { "C:\\Program Files\\PostgreSQL\\16\\bin" }),
                 "backups: a PostgreSQL service's folder found from its command, as the app finds it");
 
+            // Get the backup tools: the download for the database's version, and only the tools' files kept from the zip.
+            Check(PgBackups.ChooseDownload(160004).File?.Version == "16.15" && PgBackups.ChooseDownload(130010).Message == "The database runs PostgreSQL 13. The tools can be fetched for PostgreSQL 14 to 18 only.",
+                "backups: Get the backup tools picks the database's version, and says when there is none");
+            var zip = Path.Combine(folder, "pg.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+                foreach (var name in new[] { "pgsql/bin/pg_dump.exe", "pgsql/bin/pg_restore.exe", "pgsql/bin/libpq.dll", "pgsql/bin/libssl-3-x64.dll", "pgsql/bin/psql.exe", "pgsql/bin/postgres.exe", "pgsql/commandlinetools_3rd_party_licenses.txt", "pgsql/share/x.txt" })
+                    using (var w = new StreamWriter(archive.CreateEntry(name).Open())) w.Write(name);
+            PgBackups.ExtractTools(zip, Path.Combine(folder, "tools"));
+            Check(string.Join(",", Directory.GetFiles(Path.Combine(folder, "tools")).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal))
+                  == "commandlinetools_3rd_party_licenses.txt,libpq.dll,libssl-3-x64.dll,pg_dump.exe,pg_restore.exe",
+                "backups: from PostgreSQL's zip only pg_dump, pg_restore and what they need are kept (no server, no psql)");
+
             // A real backup, test, check and restore, on a scratch database with some of the fleet's tables.
             var pgBin = Directory.Exists("/usr/lib/postgresql/16/bin") ? "/usr/lib/postgresql/16/bin" : "";
             var (tools, toolsError) = await PgBackups.FindTools(pgBin, Path.Combine(folder, "no-tools"));
