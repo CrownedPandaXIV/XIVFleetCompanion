@@ -44,6 +44,8 @@ public sealed class FleetTable<T>
     private bool resetSort;
     private bool sorted;
     private List<Line> lastLines = new();
+    // The rows sorted by a clicked column, sorted again only when they or the sort change (SortCache).
+    private readonly SortCache<T> sortCache = new();
 
     /// <summary>What the table is, after the page's name, in an export's file name ("Characters").</summary>
     public string Title { get; init; } = "";
@@ -275,8 +277,8 @@ public sealed class FleetTable<T>
         List<Line> lines;
         if (by?.SortKey != null)
         {
-            var byMissing = rows.OrderBy(r => by.Missing != null && by.Missing(r));
-            lines = (ascending ? byMissing.ThenBy(by.SortKey) : byMissing.ThenByDescending(by.SortKey)).Select(r => new Line(r, null)).ToList();
+            var sortKey = by.SortKey;
+            lines = sortCache.Sorted(rows, by.Key, ascending, r => sortKey(r), by.Missing, DateTime.UtcNow).Select(r => new Line(r, null)).ToList();
         }
         else if (account != null && GroupByAccount)
         {

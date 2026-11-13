@@ -197,6 +197,7 @@ public partial class MainWindow
                 var (db, user, pw, master, port) = (newDatabase.Trim(), newUser.Trim(), newPassword, adminPassword, localPort);
                 StartTool("new", async () =>
                 {
+                    if (DatabaseAdmin.PortProblem(port) is { } badPort) return (false, badPort);
                     await using var admin = await DatabaseAdmin.Open("localhost", port, "postgres", "postgres", master, 5);
                     if (await DatabaseAdmin.CreateDatabase(admin, db, user, pw) is { } why) return (false, why);
                     plugin.UseConnection(new DatabaseAdmin.Connection("localhost", port, db, user, pw));
@@ -238,6 +239,7 @@ public partial class MainWindow
                 var (address, port, master, install) = (moveAddress, localPort, adminPassword, moveInstall);
                 StartTool("move", async () =>
                 {
+                    if (DatabaseAdmin.PortProblem(port) is { } badPort) return (false, badPort);
                     var deps = new DatabaseAdmin.MoveDeps
                     {
                         IsThisPc = h => WindowsSetup.IsThisPc(h, WindowsSetup.Addresses()),
@@ -271,6 +273,7 @@ public partial class MainWindow
                 var port = localPort;
                 StartTool("connect", async () =>
                 {
+                    if (DatabaseAdmin.PortProblem(port) is { } badPort) return (false, badPort);
                     var r = await WindowsSetup.RunElevated(new[] { new WindowsSetup.Step("openConnections", Port: port, Ranges: ranges) }, false, _ => { });
                     if (r.Results is not { Count: > 0 } results) return (false, r.Error);
                     return (results[0].Ok, results[0].Ok ? $"Other PCs can connect. {string.Join(". ", results[0].Changed)}" : results[0].Message);
@@ -293,6 +296,7 @@ public partial class MainWindow
                 var (port, master) = (localPort, adminPassword);
                 StartTool("leftovers", async () =>
                 {
+                    if (DatabaseAdmin.PortProblem(port) is { } badPort) return (false, badPort);
                     await using var admin = await DatabaseAdmin.Open("localhost", port, "postgres", "postgres", master, 5);
                     var (found, others) = await DatabaseAdmin.FindLeftovers(admin, connectTo, current);
                     leftovers = found;
