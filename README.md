@@ -67,7 +67,8 @@ and can damage it. A setup that already had a database connection before 2.2 isn
 
 Then open the settings:
 
-- **Database** (Shared between PCs only): enter the same address, port, database name, username and password as in the app. The password is
+- **Database** (Shared between PCs only): enter the same address, port, database name, username and password as on your other PCs (and in the
+  app, if you use it), or make a database with **Database tools**. The password is
   kept in Windows Credential Manager and never shown again. Leave the box empty to keep the saved one.
 - **Characters:** sync everyone AutoRetainer knows (the default), or only the characters you tick. "Tick only those
   with subs" is handy for accounts where only a few characters matter.

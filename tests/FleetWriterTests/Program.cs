@@ -2833,6 +2833,68 @@ internal static partial class Program
               && !SyncFailure.IsExpected(new PostgresException("syntax error", "ERROR", "ERROR", PostgresErrorCodes.SyntaxError)),
             "anything else may be a bug, so it is logged in full every time");
 
+        // /xivfleet's words: every page of the window, named in the help, any case; a typo matches nothing.
+        var windowSource = System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "XIVFleetCompanion", "Windows", "MainWindow.cs"));
+        var tabLine = System.Text.RegularExpressions.Regex.Match(windowSource, @"public enum Tab \{([^}]*)\}").Groups[1].Value;
+        var tabs = tabLine.Split(',').Select(t => t.Trim().ToLowerInvariant()).Where(t => t.Length > 0).ToList();
+        var pageTabs = tabs.Where(t => t != "check" && t != "speedtest").ToList();
+        Check(tabs.Count > 0 && pageTabs.All(t => CommandWords.Pages.Contains(t)) && CommandWords.Pages.All(p => tabs.Contains(p))
+              && tabs.Contains(CommandWords.Check) && tabs.Contains(CommandWords.SpeedTest),
+            $"/xivfleet knows every page of the window ({string.Join(", ", pageTabs)})");
+        Check(CommandWords.Pages.All(p => CommandWords.Help.Contains(p)) && CommandWords.Help.Contains("routes") && CommandWords.Help.Contains("trends"),
+            "/xivfleet's help names every page, routes and trends too");
+        Check(CommandWords.Match("Trends") == "trends" && CommandWords.Match(" SPEEDTEST ") == CommandWords.SpeedTest && CommandWords.Match("check") == CommandWords.Check
+              && CommandWords.Match("subz") == null && CommandWords.Match("summary,subs") == null && CommandWords.Match("1") == null,
+            "/xivfleet matches its words in any case, and a typo matches nothing");
+        Check(CommandWords.Unknown(" subz ").Contains("\"subz\" isn't a page") && CommandWords.Unknown("subz").Contains("routes"),
+            "/xivfleet says which words there are after a typo");
+
+        // The fleet file's problems a player can fix, from the errors SQLite really throws.
+        async Task<Exception?> FailOnFile(string connectionString, string sql)
+        {
+            try
+            {
+                await using var c = new System.Data.SQLite.SQLiteConnection(connectionString);
+                await c.OpenAsync();
+                await using var cmd = c.CreateCommand();
+                cmd.CommandText = sql;
+                await cmd.ExecuteNonQueryAsync();
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+        }
+        var fileDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"sync-failure-{Guid.NewGuid():N}");
+        System.IO.Directory.CreateDirectory(fileDir);
+        try
+        {
+            var damaged = System.IO.Path.Combine(fileDir, "damaged.db");
+            System.IO.File.WriteAllBytes(damaged, Enumerable.Repeat((byte)0x5A, 8192).ToArray());
+            var notDb = await FailOnFile($"Data Source={damaged};Pooling=False", "SELECT count(*) FROM sqlite_master");
+            Check(notDb != null && SyncFailure.Describe(notDb) == SyncFailure.FileDamaged && SyncFailure.IsExpected(notDb),
+                "a damaged fleet file says to restore a backup: " + notDb?.Message);
+            var whole = System.IO.Path.Combine(fileDir, "whole.db");
+            await FailOnFile($"Data Source={whole};Pooling=False", "CREATE TABLE t (x INTEGER)");
+            var readOnly = await FailOnFile($"Data Source={whole};Pooling=False;Read Only=True", "INSERT INTO t VALUES (1)");
+            Check(readOnly != null && SyncFailure.Describe(readOnly) == SyncFailure.FileReadOnly && SyncFailure.IsExpected(readOnly),
+                "a fleet file that can't be written to is said plainly: " + readOnly?.Message);
+            var nowhere = await FailOnFile($"Data Source={System.IO.Path.Combine(fileDir, "no-such-folder", "fleet.db")};Pooling=False", "SELECT 1");
+            Check(nowhere != null && SyncFailure.Describe(nowhere) == SyncFailure.FileCantOpen && SyncFailure.IsExpected(nowhere),
+                "a fleet file that can't be opened is said plainly: " + nowhere?.Message);
+        }
+        finally
+        {
+            System.Data.SQLite.SQLiteConnection.ClearAllPools();
+            try { System.IO.Directory.Delete(fileDir, true); } catch (System.IO.IOException) { }
+        }
+        var full = new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Full, "database or disk is full");
+        var otherFile = new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Error, "no such table: x");
+        Check(SyncFailure.Describe(full) == SyncFailure.FileDiskFull && SyncFailure.IsExpected(full)
+              && SyncFailure.Describe(otherFile).StartsWith("Couldn't use the fleet file: ") && !SyncFailure.IsExpected(otherFile),
+            "a full disk is said plainly; any other fleet file error is still logged in full");
+
         var loot = new List<DetailsWriter.LootRow>
         {
             new() { FcId = 9000001, Register = 1700000000, Return = 1790000000, Sector = 15, SubName = "Sub-1", PrimaryItem = 22500, PrimaryCount = 3, AdditionalItem = 22505, AdditionalCount = 1, AdditionalHq = false, Valid = true },

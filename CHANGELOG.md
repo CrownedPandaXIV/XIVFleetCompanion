@@ -3,6 +3,19 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.1 - 2026-11-13
+
+- **`/xivfleet routes` and `/xivfleet trends`** are now in the command's help, which is made from the window's pages so
+  it can't leave one out again. A word it doesn't know (a typo) opens the window and says in chat which words there
+  are, instead of quietly closing the window when it was open.
+- **Plainer messages when the fleet file can't be used**: a full disk, a file that can't be written to or opened, and a
+  damaged file (with where to restore a backup) now say so in plain words, and are logged once instead of at every
+  sync.
+- Messages about the shared database no longer assume you have the app: they point to your other PCs and to Settings →
+  Database tools.
+- The plugin's description in Dalamud's list, and the download page, now say what the plugin does on its own since
+  2.4.0, and that the app and PostgreSQL are only needed for some setups.
+
 ## 2.4.0 - 2026-11-13
 
 Everything the app does, now in the game too: the plugin no longer needs the app for anything.

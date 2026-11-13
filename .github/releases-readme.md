@@ -1,37 +1,50 @@
 # XIV Fleet Companion
 
-Your whole FFXIV submarine and retainer fleet in one window, across every account and PC. There are two parts:
+Your whole FFXIV submarine and retainer fleet in one place, across every character, account and PC: which subs are
+back, what they brought home, what's running low, which parts to build next, what your retainers are up to and what
+you earned.
 
-- **The plugin** runs in the game on each PC that plays. It sends your characters, subs, retainers and inventories to
-  a database.
-- **The app** (Windows) shows it all: what's back, what's running low, what to build next, what you earned.
+- **The plugin** runs in the game. It keeps your fleet up to date while you play, or while AutoRetainer runs your
+  characters, and shows all of it in its own window.
+- **The app** (Windows, optional) shows the same fleet on your desktop, outside the game.
 
-You'll also need **PostgreSQL** (the database) on one PC. If your PCs aren't on the same home network, you'll need
-**Tailscale** (free) so they can reach it.
+**Where your fleet lives** is your choice, and the plugin asks the first time:
 
-## Install the app
+| | Just this PC | Shared between PCs |
+| --- | --- | --- |
+| What you install | just the plugin | the plugin, and PostgreSQL (the database) on one PC |
+| Where you see it | in the game, and in the app on this PC if you want it | in the game on every PC, and in the app |
+| Good for | playing on one PC | playing on more than one PC |
 
-1. Download `XIV-Fleet-Companion-Setup-<version>.exe` from the
-   [latest release](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases/releases/latest).
-2. Run it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
-3. Start the app. The first time, it asks what the PC is for and sets it up, installing PostgreSQL and Tailscale where
-   they're needed.
-
-The app updates itself. When a new version is ready, a bar at the top offers to restart into it.
+For **Shared between PCs**, the plugin's Settings → **Database tools** or the app's setup screen installs PostgreSQL
+for you. If your PCs aren't on the same home network, they also install **Tailscale** (free) so the PCs can reach the
+database.
 
 ## Install the plugin
 
 1. In the game, type `/xlsettings` and open the **Experimental** tab.
-2. Under **Custom Plugin Repositories**, paste this address, tick **Enabled**, then click **Save and Close**:
+2. Under **Custom Plugin Repositories**, paste this address, click **+**, tick **Enabled**, then click **Save and Close**:
 
    ```
    https://raw.githubusercontent.com/CrownedPandaXIV/XIVFleetCompanion-Releases/main/repo.json
    ```
 
-3. Type `/xlplugins`, search for **XIV Fleet Companion**, and click **Install**.
-4. Type `/xivfleet`, open its settings, and enter the same database details as the app.
+3. Do the same for AutoRetainer's address (in the table below), which the plugin needs.
+4. Type `/xlplugins`, search for **XIV Fleet Companion**, and click **Install**. Install **AutoRetainer** too, and
+   whichever of the others you want.
+5. Type `/xivfleet`. The first time, it asks where your fleet should live (see above).
 
-Dalamud keeps the plugin up to date for you.
+Dalamud keeps the plugins up to date for you.
+
+## Install the app (optional)
+
+1. Download `XIV-Fleet-Companion-Setup-<version>.exe` from the
+   [latest release](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases/releases/latest).
+2. Run it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
+3. Start the app. On a PC where the plugin keeps the fleet (Just this PC), it opens it by itself. Otherwise it asks what
+   the PC is for and sets it up, installing PostgreSQL and Tailscale where they're needed.
+
+The app updates itself. When a new version is ready, a bar at the top offers to restart into it.
 
 **Other plugins it works with:**
 
