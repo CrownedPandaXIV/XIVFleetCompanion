@@ -140,7 +140,7 @@ namespace XIVFleetCompanion
         /// for a while). Live prices are kept for 30 minutes, so Universalis is asked at most that often for an item.</summary>
         public static readonly TimeSpan MarketEvery = TimeSpan.FromMinutes(5);
         public const string MissingViewsText =
-            "The database doesn't have the fleet views yet. Update the XIV Fleet Companion app to 1.8.0 or later and open it once; it adds them.";
+            "The database isn't up to date yet: the plugin updates it at its next sync, and the app does when it opens.";
 
         public const string MissingFileViewsText =
             "The fleet file doesn't have the fleet views yet. The plugin adds them itself; the Status page says what stopped it.";
@@ -173,7 +173,7 @@ namespace XIVFleetCompanion
         public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
         /// <summary>Routes, gil a day and rank-up dates: read with Parts (the Subs page, Route Optimization, the Summary, Income's expected).</summary>
         public FleetRead<RoutesRead> Routes { get; private set; } = new(null, null, null);
-        /// <summary>How close the Next Rank dates came (the Subs page's forecast line): read with the routes.</summary>
+        /// <summary>How close the Next rank dates came (the Subs page's forecast line): read with the routes.</summary>
         public FleetRead<ForecastAccuracy> Forecasts { get; private set; } = new(null, null, null);
         public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
         /// <summary>The shared settings, read with the parts (every 5 minutes) and after an edit.</summary>
@@ -245,7 +245,7 @@ namespace XIVFleetCompanion
             return conn;
         }
 
-        // This hour's Next Rank dates (ForecastWriter). Never stops a read: a problem is tried again at the next one.
+        // This hour's Next rank dates (ForecastWriter). Never stops a read: a problem is tried again at the next one.
         private static async Task SaveForecasts(DbConnection conn, List<SubRoute> subs)
         {
             try
@@ -355,7 +355,7 @@ namespace XIVFleetCompanion
                         Settings = await Read(conn, ReadSettings, Settings);
                         Parts = await Read(conn, ReadParts, Parts);
                         Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
-                        // On the fleet file there's no app to save the Next Rank dates for the forecast line: the plugin does.
+                        // On the fleet file there's no app to save the Next rank dates for the forecast line: the plugin does.
                         if (Db.IsFile(conn) && Routes.Error == null && Routes.Data is { } planned)
                             await SaveForecasts(conn, planned.Subs);
                         Forecasts = await Read(conn, ReadForecasts, Forecasts);
@@ -745,7 +745,7 @@ namespace XIVFleetCompanion
             return new RoutesInputs(parts.Characters, subs, parts.Rules, fightClub, history, voyages);
         }
 
-        /// <summary>How close the Next Rank dates the app saved came to the real rank-ups (fleet_rankup_forecast_view,
+        /// <summary>How close the Next rank dates the app saved came to the real rank-ups (fleet_rankup_forecast_view,
         /// fleet_rankup_history_view and fleet_voyage_returns_view, app 1.8.0 and later), worked out here (ForecastMath).</summary>
         public static async Task<ForecastAccuracy> ReadForecasts(DbConnection conn)
         {
@@ -1335,7 +1335,7 @@ namespace XIVFleetCompanion
 
         /// <summary>"12 (2 left out) (3 left to another setup)", as the PCs tab.</summary>
         public static string PcCharacters(int? synced, int? leftOut, int? elsewhere) =>
-            $"{(synced.HasValue ? synced.Value.ToString(CultureInfo.InvariantCulture) : "—")}{(leftOut > 0 ? $" ({leftOut} left out)" : "")}{(elsewhere > 0 ? $" ({elsewhere} left to another setup)" : "")}";
+            $"{(synced.HasValue ? synced.Value.ToString(CultureInfo.InvariantCulture) : "—")}{(leftOut > 0 ? $" ({leftOut} left out)" : "")}{(elsewhere > 0 ? $" ({elsewhere} left to another game)" : "")}";
 
         /// <summary>Compares "2.0.0.9"-style versions, part by part.</summary>
         public static int CompareVersions(string? a, string? b)

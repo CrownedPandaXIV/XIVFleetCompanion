@@ -386,14 +386,14 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             var released = await FleetWriter.ReleaseLoginsAsync(conn, pcName, label, leftOutCids);
-            if (released > 0) Log.Information($"Fleet Companion: {released} character(s) unticked here are no longer this setup's to sync.");
+            if (released > 0) Log.Information($"Fleet Companion: {released} character(s) unticked here are no longer this game's to sync.");
 
             var owners = await FleetWriter.ReadLoginOwnersAsync(conn, characters.Select(c => c.Snapshot.Cid).ToList());
             var elsewhere = characters.Where(c => FleetWriter.OwnedElsewhere(owners, c.Snapshot.Cid, pcName, label)).ToList();
             SyncedElsewhere = elsewhere.Count;
             var names = string.Join(", ", elsewhere.Select(c => $"{c.Snapshot.Name}@{c.Snapshot.World}").OrderBy(n => n, StringComparer.Ordinal));
             if (names != lastElsewhereNames && elsewhere.Count > 0)
-                Log.Information($"Fleet Companion: left to another setup, because they last logged in there: {names}.");
+                Log.Information($"Fleet Companion: left to another game, because they last logged in there: {names}.");
             lastElsewhereNames = names;
             return elsewhere.Count == 0 ? characters : characters.Except(elsewhere).ToList();
         }
@@ -841,7 +841,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var leftOutText = leftOutCount > 0 ? $" ({leftOutCount} left out in settings)" : "";
-        if (SyncedElsewhere > 0) leftOutText += $" ({SyncedElsewhere} synced by another setup)";
+        if (SyncedElsewhere > 0) leftOutText += $" ({SyncedElsewhere} synced by another game)";
         Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount - SyncedElsewhere} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
     }
 

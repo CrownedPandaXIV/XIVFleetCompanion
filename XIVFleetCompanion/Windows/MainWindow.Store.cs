@@ -131,7 +131,7 @@ public partial class MainWindow
             if (ImGui.Button("Check now")) plugin.CheckFileNow();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("SQLite's own check that the file isn't damaged (it also runs once a week). Games carry on meanwhile.");
+            ImGui.SetTooltip("Checks the fleet file isn't damaged (this also runs once a week by itself). Games carry on meanwhile.");
 
         // Backups.
         if (DateTime.UtcNow - newestBackupAt > TimeSpan.FromSeconds(5))

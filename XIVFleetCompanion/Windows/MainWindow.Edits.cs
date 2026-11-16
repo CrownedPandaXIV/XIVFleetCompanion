@@ -10,7 +10,7 @@ using System.Numerics;
 namespace XIVFleetCompanion.Windows;
 
 // 2.x "ticking things off" stage: the edits the app makes, from the game (FleetEdits, saved in the background by
-// FleetReader.Edit, then everything read again): Craft? on the Subs page, Sub Rules on the Parts page, gear targets on
+// FleetReader.Edit, then everything read again): Fight Club builds on the Subs page, Sub Rules on the Parts page, gear targets on
 // the Retainers page, the Roster order, Gil & Market's unsold days, the Income window, removing a PC, and ticking parts
 // off on the Shopping List. The app sees each change at its next refresh, and the plugin sees the app's.
 public partial class MainWindow
@@ -32,7 +32,7 @@ public partial class MainWindow
                 Ui.Wrapped($"Couldn't save {last.What}: {last.Error}");
     }
 
-    // ---- Craft? (Subs page) ----
+    // ---- Fight Club builds (Subs page; once called Craft?) ----
 
     // Ticked or not as last saved here (until the next read shows it), else as read.
     private readonly Dictionary<string, (bool On, DateTime At)> craftPending = new();
@@ -51,7 +51,7 @@ public partial class MainWindow
         if (Ui.Checkbox($"##craft{cid}|{subName}", ref on))
         {
             craftPending[$"{cid}|{subName}"] = (on, DateTime.Now);
-            reader.Edit($"Craft? for {subName}", async c => { await FleetEdits.SetCraft(c, Inv(cid), subName, on); return null; });
+            reader.Edit($"Fight Club builds for {subName}", async c => { await FleetEdits.SetCraft(c, Inv(cid), subName, on); return null; });
         }
         Hover("Ticked: from rank 85 this sub follows Fight Club's best build after repair kits (Parts, Route Optimization). Unticked: its Sub Rules.");
     }
@@ -106,11 +106,11 @@ public partial class MainWindow
     {
         if (parts.Inputs == null)
         {
-            Ui.Wrapped("The Sub Rules need the app's 1.8.0 views. Update the app and open it once.");
+            Ui.Wrapped("The Sub Rules can't be shown until the database is up to date: the plugin updates it at its next sync.");
             return;
         }
         EditLine();
-        Colored(Dim, "The build each sub should have from a rank: for some slots and maybe one character. A sub ticked Craft? follows Fight Club's builds from rank 85 instead." + (WithApp ? " Changes are saved for the app too." : ""));
+        Colored(Dim, "The build each sub should have from a rank: for some slots and maybe one character. A sub with Fight Club builds ticked (Subs page) follows Fight Club's builds from rank 85 instead." + (WithApp ? " Changes are saved for the app too." : ""));
         var characters = parts.Inputs.Characters.OrderBy(c => c.SortIndex ?? int.MaxValue).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
         var rules = parts.Inputs.Rules.OrderBy(r => r.Rank).ThenBy(r => r.Id).Select(DraftOf).Concat(newRules).ToList();
         if (ImGui.Button("Add a rule##subRules")) newRules.Add(new RuleDraft());
@@ -273,13 +273,13 @@ public partial class MainWindow
     private void DrawRosterOrder()
     {
         var draft = rosterOrderDraft!;
-        Colored(Dim, "Move characters up or down, then save. The order is the Roster's everywhere" + (WithApp ? ", in the game and the app." : "."));
+        Colored(Dim, "Move characters up or down, then save. The order is the Character Roster's everywhere" + (WithApp ? ", in the game and the app." : "."));
         using (ImRaii.Disabled(reader.Editing))
         {
             if (ImGui.Button("Save order##rosterOrder"))
             {
                 var cids = draft.Select(c => Inv(c.Cid)).ToList();
-                reader.Edit("the Roster order", async c => { await FleetEdits.SaveOrder(c, cids); return null; }, error => { if (error == null) rosterOrderDraft = null; });
+                reader.Edit("the Character Roster order", async c => { await FleetEdits.SaveOrder(c, cids); return null; }, error => { if (error == null) rosterOrderDraft = null; });
             }
         }
         ImGui.SameLine();
@@ -353,7 +353,7 @@ public partial class MainWindow
                     if (Ui.Selectable($"{d} days", d == current) && d != current)
                         reader.Edit("the Income window", c => FleetEdits.SaveIncomeWindow(c, d));
         }
-        Hover("How many days the Income page (and Loot per Voyage) counts" + (WithApp ? ", for the app too." : "."));
+        Hover("How many days the Income page (and its loot per voyage) counts" + (WithApp ? ", for the app too." : "."));
         ImGui.SameLine();
         EditLine();
     }

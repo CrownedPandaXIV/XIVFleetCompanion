@@ -121,7 +121,7 @@ public partial class MainWindow
             Box("Low ceruleum below", "lowCeruleum", ref ceruleumBox, "", "A character with less ceruleum than this shows as low (0 turns it off).");
             Box("FC house not entered for", "houseDays", ref houseBox, "days", "1 to 44 days: the game demolishes a house not entered for 45.");
             Box("A character counts as not synced when it is", "notSynced", ref notSyncedBox, "minutes behind the rest of its account",
-                "10 to 1440 minutes. Used by the Summary and the Roster's not-synced marks.");
+                "10 to 1440 minutes. Used by the Summary and the Character Roster's not-synced marks.");
             if (ImGui.Button("Save warnings"))
             {
                 var (k, c2, h, n) = (kitsBox, ceruleumBox, houseBox, notSyncedBox);

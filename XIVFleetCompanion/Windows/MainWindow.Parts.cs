@@ -6,10 +6,10 @@ using System.Linq;
 namespace XIVFleetCompanion.Windows;
 
 // 2.x batch 4, the Parts page, as the app's Parts tab: every part a sub needs for the build it should have at its rank
-// (its Sub Rules, or Fight Club's best build for a sub ticked Craft? from rank 85), a new workshop's first sub and every
+// (its Sub Rules, or Fight Club's best build for a sub with Fight Club builds ticked, from rank 85), a new workshop's first sub and every
 // unlocked empty slot; and whether a spare covers it, the part another sub gives up when upgraded, or it needs crafting.
 // Worked out here (PartsPlanner) from the database's fleet_parts_* views, read every 5 minutes. Sub Rules (their own tab)
-// and Craft? (the Subs page) can be changed here or in the app. Look ahead: also the parts of each sub's next build due within 3, 7 or 14 days (the Subs page's Next
+// and Fight Club builds (the Subs page) can be changed here or in the app. Look ahead: also the parts of each sub's next build due within 3, 7 or 14 days (the Subs page's Next
 // Build), after what's needed now. The Shopping List tab is in MainWindow.Shopping.cs.
 public partial class MainWindow
 {
@@ -64,7 +64,7 @@ public partial class MainWindow
         {
             if (n.DueAt is not double due) return;
             Colored(Dim, TimeUntil(due, NowMs));
-            Hover($"Its next build (rank {n.Rank}), due about {LocalDate(due)}: the Subs page's Next Build.");
+            Hover($"Its next build (rank {n.Rank}), due about {LocalDate(due)}: the Subs page's Next build.");
         }, n => n.DueAt ?? 0),
         // Covered (a spare, or another sub's old part) in green, to craft in amber.
         new("status", "Status", n =>
@@ -102,7 +102,7 @@ public partial class MainWindow
                 foreach (var d in AheadChoices)
                     if (Ui.Selectable(d == 0 ? "Now only" : $"{d} days", d == partsAheadDays)) partsAheadDays = d;
         }
-        Hover("Also the parts of each sub's next build due within that many days (the Subs page's Next Build), after what's needed now, soonest first.");
+        Hover("Also the parts of each sub's next build due within that many days (the Subs page's Next build), after what's needed now, soonest first.");
         if (partsAheadDays > 0 && reader.Routes.Data == null) Colored(Dim, reader.Routes.Error is { } routesError ? $"Look ahead needs the routes: {routesError}" : "Reading the routes...");
         var now = parts.Needs;
         var needs = PartsWithAhead(parts);
@@ -112,7 +112,7 @@ public partial class MainWindow
         Heading(needs.Count == 0 ? "Every sub has the build it should have." :
             $"{needs.Count} part{(needs.Count == 1 ? "" : "s")} needed, {toCraft} to craft" + (comingUp > 0 ? $" ({comingUp} for builds coming up)" : ""));
         if (ready.Count > 0) Colored(Green, PartsPlanner.ReadyText(ready));
-        Colored(Dim, "From each sub's Sub Rules, or Fight Club's best build for a sub ticked Craft? from rank 85 (both set below and on the Subs page" + (WithApp ? ", or in the app" : "") + "). Spares in bags, " +
+        Colored(Dim, "From each sub's Sub Rules, or Fight Club's best build from rank 85 for a sub with Fight Club builds ticked (both set below and on the Subs page" + (WithApp ? ", or in the app" : "") + "). Spares in bags, " +
                      "retainers and the FC chest are used first, then the parts other subs give up when upgraded.");
 
         using var tabs = ImRaii.TabBar("##partsTabs");

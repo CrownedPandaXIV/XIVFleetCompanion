@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 namespace XIVFleetCompanion;
 
 /// <summary>
-/// Saves each sub's Next Rank date once an hour, as the app does while it's open (its ipc/subs.js saveForecasts), so the
+/// Saves each sub's Next rank date once an hour, as the app does while it's open (its ipc/subs.js saveForecasts), so the
 /// forecast line on Route Optimization can later compare it with the real rank-up. Whichever copy gets there first in an
 /// hour saves it; dates older than 30 days go. The plugin does this on the fleet file (Just this PC), where there's no
 /// app to do it.
@@ -16,10 +16,10 @@ public static class ForecastWriter
 {
     public const int KeepDays = 30;
 
-    /// <summary>One sub's Next Rank date: when (Unix milliseconds) it reaches `Rank`.</summary>
+    /// <summary>One sub's Next rank date: when (Unix milliseconds) it reaches `Rank`.</summary>
     public sealed record Forecast(long Cid, int Slot, int Rank, double PredictedAtMs, string SubName);
 
-    /// <summary>The subs with a Next Rank date to save (a slot, a next rank and its date), from Route Optimization's plan.</summary>
+    /// <summary>The subs with a Next rank date to save (a slot, a next rank and its date), from Route Optimization's plan.</summary>
     public static List<Forecast> Due(IEnumerable<SubRoute> subs) => subs
         .Where(s => s.Slot is > 0 && s.RankUp.NextRank != null && s.RankUp.NextRankAt != null)
         .Select(s => new Forecast(s.Cid, s.Slot!.Value, s.RankUp.NextRank!.Value, s.RankUp.NextRankAt!.Value, s.SubName))

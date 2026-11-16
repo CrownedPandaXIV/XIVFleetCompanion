@@ -28,7 +28,7 @@ public partial class MainWindow
         if (ReferenceEquals(read, routeIndexFor)) return;
         routeIndexFor = read;
         routeIndex = read?.Subs.GroupBy(s => (s.Cid, s.SubName)).ToDictionary(g => g.Key, g => g.First()) ?? new();
-        // Income's expected: the character's subs' Current Gil/Day added up (none when none matches Fight Club).
+        // Income's expected: the character's subs' Current gil/day added up (none when none matches Fight Club).
         expectedIndex = read?.Subs.GroupBy(s => s.Cid).ToDictionary(g => g.Key, g =>
         {
             var matched = g.Where(s => s.CurrentGilDay != null).ToList();
@@ -152,7 +152,7 @@ public partial class MainWindow
         else { Colored(Dim, "—"); Hover(why); }
     }
 
-    // "3 hours", "40 minutes", "2.5 days": how far a Next Rank date was off, as the app.
+    // "3 hours", "40 minutes", "2.5 days": how far a Next rank date was off, as the app.
     private static string OffText(double ms)
     {
         var minutes = SubRoutes.Round(Math.Abs(ms) / 60000);
@@ -166,17 +166,17 @@ public partial class MainWindow
         return $"{(SubRoutes.Round(hours / 24 * 10) / 10).ToString("0.#", CultureInfo.CurrentCulture)} days";
     }
 
-    // The Subs page's forecast line, as the app's: how close the Next Rank dates (worked out a day or more before) came
+    // The Subs page's forecast line, as the app's: how close the Next rank dates (worked out a day or more before) came
     // to the real rank-ups, each recent one on hover. The app saves the dates every hour while it's open.
     private void ForecastLine()
     {
         if (reader.Forecasts.Data is not { } a) return;
-        Colored(Dim, "Next Rank forecasts: " + (a.Count > 0 && a.AverageOff is double off
+        Colored(Dim, "Next rank forecasts: " + (a.Count > 0 && a.AverageOff is double off
             ? $"within {OffText(off)} on average over the last {a.Count} rank-up{(a.Count == 1 ? "" : "s")}" : "no rank-ups to check yet"));
         string When(double ms) => DateTime.UnixEpoch.AddMilliseconds(ms).ToLocalTime().ToString("MMM d HH:mm", CultureInfo.CurrentCulture);
         var lines = a.Checks.Select(c => $"{c.SubName}{(c.Character.Length > 0 ? $" ({c.Character})" : "")} rank {c.Rank}: said {When(c.PredictedAt)}, ranked up {When(c.At)}, " +
             $"{(Math.Abs(c.Off) < 60000 ? "on time" : $"{OffText(c.Off)} {(c.Off > 0 ? "late" : "early")}")}; worked out {OffText(c.At - c.MadeAt)} before").ToList();
-        Hover((WithApp ? "The app saves each sub's Next Rank date every hour while it's open." : "The plugin saves each sub's Next Rank date every hour while a game shows the fleet.") + " The average counts dates worked out a day or more before the rank-up, " +
+        Hover((WithApp ? "The app saves each sub's Next rank date every hour while it's open." : "The plugin saves each sub's Next rank date every hour while a game shows the fleet.") + " The average counts dates worked out a day or more before the rank-up, " +
               "early or late; a rank-up counts from when its voyage came back." + (lines.Count > 0 ? "\n\nRecent rank-ups:\n" + string.Join("\n", lines) : ""));
     }
 
@@ -188,11 +188,11 @@ public partial class MainWindow
         new("character", "Character", s => CharacterCell(CharacterOf(s.Cid).Name, CharacterOf(s.Cid).World), s => CharacterOf(s.Cid).Name, Locked: true),
         new("sub", "Sub", s => Ui.Text(s.SubName), s => s.SubName),
         new("rank", "Rank", s => RightNumber(s.Rank), s => s.Rank),
-        new("currentRoute", "Current Route", s => RouteCell(s.CurrentRoute, s.CurrentMap), s => s.CurrentRoute),
-        new("currentGil", "Current Gil/Day", s => GilDayCell(s.CurrentGilDay, NoCurrentGil), s => s.CurrentGilDay ?? double.MinValue, s => s.CurrentGilDay == null),
-        new("targetRoute", "Target Route", s => Ui.Text(s.TargetRoute), s => s.TargetRoute),
-        new("targetGil", "Target Gil/Day", s => GilDayCell(s.TargetGilDay, NoTargetGil), s => s.TargetGilDay ?? double.MinValue, s => s.TargetGilDay == null),
-        new("gain", "Gil/Day Gain", s =>
+        new("currentRoute", "Current route", s => RouteCell(s.CurrentRoute, s.CurrentMap), s => s.CurrentRoute),
+        new("currentGil", "Current gil/day", s => GilDayCell(s.CurrentGilDay, NoCurrentGil), s => s.CurrentGilDay ?? double.MinValue, s => s.CurrentGilDay == null),
+        new("targetRoute", "Target route", s => Ui.Text(s.TargetRoute), s => s.TargetRoute),
+        new("targetGil", "Target gil/day", s => GilDayCell(s.TargetGilDay, NoTargetGil), s => s.TargetGilDay ?? double.MinValue, s => s.TargetGilDay == null),
+        new("gain", "Gil/day gain", s =>
         {
             if (s.Gain is double g) TableCells.Right((g >= 0 ? "+" : "−") + Gil(Math.Abs(g)), g > 0 ? Green : g < 0 ? Red : (Vector4?)null);
             else { Colored(Dim, "—"); Hover("Its current route isn't in Fight Club, so the gain can't be worked out: it should still switch."); }
@@ -218,7 +218,7 @@ public partial class MainWindow
         ReadLine(reader.Routes, FleetReader.PartsEvery);
         if (reader.Routes.Data == null) return;
         var subs = Suboptimal();
-        Heading(subs.Count == 0 ? "Every sub from rank 85 is on its Target Route." : $"{subs.Count} sub{(subs.Count == 1 ? " isn't" : "s aren't")} on the best route for {(subs.Count == 1 ? "its" : "their")} rank");
+        Heading(subs.Count == 0 ? "Every sub from rank 85 is on its Target route." : $"{subs.Count} sub{(subs.Count == 1 ? " isn't" : "s aren't")} on the best route for {(subs.Count == 1 ? "its" : "their")} rank");
         var gain = subs.Where(s => s.Gain > 0).Sum(s => s.Gain!.Value);
         if (gain > 0) GilLine("Switching them all would make about", gain, " more gil a day.");
         Colored(Dim, "Subs from rank 85 whose route isn't Fight Club's best at their rank (most gil a day after repair kits). Biggest gain first; " +

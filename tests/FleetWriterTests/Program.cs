@@ -1172,7 +1172,7 @@ internal static partial class Program
             Check(badLoot < 0 && loot.Subs.Count > 0, $"routes: Loot per Voyage the same as the app's, at vendor and market prices, {c.GetProperty("name").GetString()} "
                 + $"({loot.VoyageCount} voyages over {windowDays} days, {loot.Subs.Count} subs, {loot.Routes.Count} routes, {loot.Subs.Count(s => s.ExpectedPerDay != null)} with expected)"
                 + (badLoot < 0 ? "" : $"\n   line {badLoot + 1}:\n   plugin [{(badLoot < mineLoot.Count ? mineLoot[badLoot] : "none")}]\n   app    [{(badLoot < appLoot.Count ? appLoot[badLoot] : "none")}]"));
-            // How close the Next Rank dates came (the Subs page's forecast line).
+            // How close the Next rank dates came (the Subs page's forecast line).
             var saved = i.GetProperty("forecasts").EnumerateArray().Select(e => new SavedForecast(PL(e, "cid") ?? 0, PI(e, "slot") ?? 0, PI(e, "rank") ?? 0,
                 PD(e, "made_at") ?? 0, PD(e, "predicted_at") ?? 0, PS(e, "sub_name"), PS(e, "fc_id"), PS(e, "character_name"))).ToList();
             var rankHistory = i.GetProperty("rankHistory").EnumerateArray().Select(e => new SubHistoryPoint(PL(e, "cid") ?? 0, PS(e, "metric") ?? "", PD(e, "recorded_at") ?? 0, PD(e, "value") ?? 0)).ToList();
@@ -1187,11 +1187,11 @@ internal static partial class Program
                 .Concat(appAcc.GetProperty("checks").EnumerateArray().Select(e => CheckLine(PS(e, "subName"), PS(e, "characterName") ?? "", PI(e, "rank") ?? 0, PD(e, "at") ?? 0,
                     PD(e, "predictedAt") ?? 0, PD(e, "madeAt") ?? 0, PD(e, "off") ?? 0)).OrderBy(x => x, StringComparer.Ordinal)).ToList();
             var badAcc = Enumerable.Range(0, Math.Max(mineAcc.Count, appAccLines.Count)).FirstOrDefault(k => k >= mineAcc.Count || k >= appAccLines.Count || mineAcc[k] != appAccLines[k], -1);
-            Check(badAcc < 0 && accuracy.Count > 0, $"routes: how close the Next Rank dates came, the same as the app's, {c.GetProperty("name").GetString()} ({accuracy.Count} rank-ups, "
+            Check(badAcc < 0 && accuracy.Count > 0, $"routes: how close the Next rank dates came, the same as the app's, {c.GetProperty("name").GetString()} ({accuracy.Count} rank-ups, "
                 + $"{(accuracy.AverageOff ?? 0) / 3600000:0.0}h off on average)"
                 + (badAcc < 0 ? "" : $"\n   line {badAcc + 1}:\n   plugin [{(badAcc < mineAcc.Count ? mineAcc[badAcc] : "none")}]\n   app    [{(badAcc < appAccLines.Count ? appAccLines[badAcc] : "none")}]"));
-            Check(first < 0, $"routes: the same as the app's Subs tab, {c.GetProperty("name").GetString()} ({app.Count} subs:{plan.Count(s => s.TargetRoute.Length > 0)} with a Target Route, "
-                + $"{plan.Count(s => s.CurrentGilDay != null)} a Current Gil/Day, {plan.Count(s => s.RankUp.NextRankAt != null)} a Next Rank date, {plan.Count(s => s.RankUp.NextBuild != null)} a Next Build)"
+            Check(first < 0, $"routes: the same as the app's Subs tab, {c.GetProperty("name").GetString()} ({app.Count} subs:{plan.Count(s => s.TargetRoute.Length > 0)} with a Target route, "
+                + $"{plan.Count(s => s.CurrentGilDay != null)} a Current gil/day, {plan.Count(s => s.RankUp.NextRankAt != null)} a Next rank date, {plan.Count(s => s.RankUp.NextBuild != null)} a Next build)"
                 + (first < 0 ? "" : $"\n   sub {first + 1}:\n   plugin [{(first < mine.Count ? mine[first] : "none")}]\n   app    [{(first < app.Count ? app[first] : "none")}]"));
         }
     }
@@ -1529,7 +1529,7 @@ internal static partial class Program
                 "Success — 1 of 3 metrics recorded.", "Success — 1 of 3 metrics recorded." }),
             "file: Trends values are recorded only when they change, on both: " + string.Join(" / ", recorded));
 
-        // ---- The Next Rank dates, saved once an hour (ForecastWriter) ----
+        // ---- The Next rank dates, saved once an hour (ForecastWriter) ----
         var forecastNow = (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds;
         var due = new List<ForecastWriter.Forecast>
         {
@@ -1550,7 +1550,7 @@ internal static partial class Program
             forecastRows.Add($"{Convert.ToInt64(r.GetValue(0))} rows, {Convert.ToInt64(r.GetValue(1))} old, {Convert.ToInt64(r.GetValue(2))} hour(s)");
         });
         Check(forecastSaves.SequenceEqual(new[] { 2, 2, 0, 0 }) && forecastRows.All(f => f == "2 rows, 0 old, 1 hour(s)"),
-            $"file: Next Rank dates are saved once an hour and those over 30 days old go, on both: {string.Join(" / ", forecastSaves)}; {string.Join(" / ", forecastRows)}");
+            $"file: Next rank dates are saved once an hour and those over 30 days old go, on both: {string.Join(" / ", forecastSaves)}; {string.Join(" / ", forecastRows)}");
         var hours = new List<double>();
         await Each(async c =>
         {
@@ -1930,8 +1930,8 @@ internal static partial class Program
             "rest of the tabs: the average item level leaves out items the game doesn't know, as the app does");
         Check(FleetReader.SyncedBy("DESKTOP-1", "A") == "A on DESKTOP-1" && FleetReader.SyncedBy("LAPTOP", "") == "(no label) on LAPTOP" && FleetReader.SyncedBy(null, null) == "—",
             "rest of the tabs: Synced by reads as the app's Roster");
-        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another setup)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
-            "rest of the tabs: a setup's characters read as the app's PCs tab");
+        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another game)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
+            "rest of the tabs: a game's characters read as the app's PCs page");
         Check(FleetReader.CompareVersions("2.0.0.9", "2.0.0.10") < 0 && FleetReader.CompareVersions("2.0.0", "2.0.0.0") == 0 && FleetReader.CompareVersions(null, "0.1") < 0,
             "rest of the tabs: plugin versions compare part by part");
         await Exec(conn, "DROP VIEW fleet_roster_view, fleet_retainers_view, fleet_retainer_gear_view, fleet_pcs_view");
@@ -2339,7 +2339,7 @@ internal static partial class Program
         subRows = await Rows(conn, "SELECT sub_name, slot, level FROM companion_submarine_snapshot ORDER BY slot");
         var toggles = await Rows(conn, "SELECT sub_name, craft_enabled FROM sub_craft_toggle ORDER BY sub_name");
         Check(Show(subRows) == "Orca,1,50 / Submersible-2,2,41" && Show(toggles) == "Orca,True / Submersible-2,True",
-            $"a renamed sub keeps its slot and its Craft? setting: {Show(subRows)} | {Show(toggles)}");
+            $"a renamed sub keeps its slot and its Fight Club builds setting: {Show(subRows)} | {Show(toggles)}");
 
         // Two subs swapping names keep their own settings (neither old name is gone).
         await Exec(conn, $"UPDATE sub_craft_toggle SET craft_enabled = false WHERE cid = {owner} AND sub_name = 'Orca'");

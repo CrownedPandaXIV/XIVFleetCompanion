@@ -13,7 +13,7 @@ namespace XIVFleetCompanion
 {
     /// <summary>
     /// 2.x "ticking things off" stage: the edits the app makes, made from the game the same way (the same rows written,
-    /// the same checks, the same answers): Sub Rules (ipc/parts.js), Craft? (ipc/subs.js), gear targets
+    /// the same checks, the same answers): Sub Rules (ipc/parts.js), Fight Club builds (ipc/subs.js), gear targets
     /// (ipc/retainers.js), the Roster order (ipc/roster.js), Gil &amp; Market's unsold days and removing a PC
     /// (ipc/details.js), the Income window (ipc/income.js) and the Shopping List's ticks (ipc/shopping.js,
     /// subs/shopping-progress.js). Each answers null when done, else why not. The app's tests make the same edits and
@@ -69,7 +69,7 @@ namespace XIVFleetCompanion
             await cmd.ExecuteNonQueryAsync();
         }
 
-        /// <summary>Craft? for one sub: follows Fight Club's builds from rank 85 (on), or its Sub Rules (off).</summary>
+        /// <summary>Fight Club builds for one sub: follows Fight Club's builds from rank 85 (on), or its Sub Rules (off).</summary>
         public static async Task SetCraft(DbConnection conn, string cid, string subName, bool enabled)
         {
             await using var cmd = Command(conn, @"INSERT INTO sub_craft_toggle (cid, sub_name, craft_enabled, updated_at)

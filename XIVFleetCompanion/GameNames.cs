@@ -156,7 +156,7 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>
-        /// A venture's name, as the Retainers tab's Venture Type: a random venture's own name (Quick Exploration, Field
+        /// A venture's name, as the Retainers tab's Venture type: a random venture's own name (Quick Exploration, Field
         /// Exploration...), else the item a normal venture brings back. "" when unknown.
         /// </summary>
         public static string Venture(int ventureId)

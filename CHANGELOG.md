@@ -23,6 +23,11 @@ Simpler for new players: one clear way to do each thing, and nothing they don't 
 - **The speed test from 2.0's testing** is out of the sidebar and the Status page (`/xivfleet speedtest` still works).
 - Plainer labels: "Sync this game's fleet", "Sync every (minutes)", and Address, Login, Save and "Forget the saved
   connection" for the database connection.
+- **Clearer names on the pages**, the same as the app's: the Subs page's **Craft?** is now **Fight Club builds** (ticked:
+  from rank 85 the sub follows Fight Club's best build), **Roster** is **Character Roster**, and "setup" is now "game"
+  (as in "synced by another game"). Column names are written one way throughout (Next build, Target route, Quantity).
+- No more messages about old app versions: the plugin keeps the database up to date itself, and says so. Plainer hover
+  text for the backup tools and the fleet file check.
 - **Moving your fleet no longer refuses a good move at random.** A time just under half a millisecond could compare as
   different after copying (the move was refused and nothing changed).
 

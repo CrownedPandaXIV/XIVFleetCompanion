@@ -21,7 +21,7 @@ namespace XIVFleetCompanion
     }
 
     /// <summary>A sub's voyages over the window: gil at vendor prices, the route taken most often, its newest name, its
-    /// character (a tracked member of its FC with a sub of that name, else any) and Fight Club's Current Gil/Day for it.</summary>
+    /// character (a tracked member of its FC with a sub of that name, else any) and Fight Club's Current gil/day for it.</summary>
     public sealed record LootSub(string FcId, long Register, string? SubName, int Voyages, double Gil, double PerVoyage, double PerDay, string Route, double LastAt,
         long? Cid, string? Character, string? World, string? Account, int? SortIndex, double? ExpectedPerDay)
     {
@@ -111,7 +111,7 @@ namespace XIVFleetCompanion
             }
 
             // Each sub's character: a tracked member of its FC with a sub of that name (the last in the app's order), else
-            // the first member by id; and Fight Club's Current Gil/Day for that sub.
+            // the first member by id; and Fight Club's Current gil/day for that sub.
             var byCid = characters.ToDictionary(c => c.Cid);
             var subFor = new Dictionary<string, (SubRoute Sub, PartsCharacter Character)>();
             foreach (var s in subs.OrderBy(x => byCid.TryGetValue(x.Cid, out var c) && c.SortIndex != null ? 0 : 1)

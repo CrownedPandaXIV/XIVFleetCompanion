@@ -50,7 +50,7 @@ public partial class MainWindow
                     if (connection != null) b.GetTools(connection);
                 }
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Downloads PostgreSQL's backup tools (pg_dump and pg_restore) for the database's version from PostgreSQL's maker, checks the download and keeps only those tools. Nothing is installed.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Downloads the tools that back up the shared database, from PostgreSQL's maker, and checks the download. Nothing is installed.");
         }
 
         // The settings.
@@ -150,7 +150,7 @@ public partial class MainWindow
                     {
                         if (ImGui.SmallButton("Test")) b.Test(backup.File);
                     }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Loads it into a scratch database and compares its tables with the database's (the database is only read).");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Puts the backup into a temporary copy and checks it against your database, to be sure it can be restored. Your database is only read.");
                     Ui.NextColumn();
                     using (ImRaii.Disabled(b.Busy))
                     {

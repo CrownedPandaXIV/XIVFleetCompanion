@@ -12,7 +12,7 @@ namespace XIVFleetCompanion
     public sealed record PartsCharacter(long Cid, string Name, string World, string Account, int? SortIndex, string? FcId, int NumSubSlots, bool HasHouse);
 
     /// <summary>A built sub: its workshop slot (null: unknown), rank, the item numbers of its hull, stern, bow and bridge,
-    /// and whether it's ticked Craft? (follows Fight Club's builds from rank 85).</summary>
+    /// and whether it's ticked Fight Club builds (follows Fight Club's builds from rank 85).</summary>
     public sealed record PartsSub(long Cid, string SubName, int? Slot, int Rank, int? Part1, int? Part2, int? Part3, int? Part4, bool CraftEnabled);
 
     /// <summary>A Sub Rule: the build from a rank, for some slots (SubFilter) and maybe one character (CidOverride, as text).</summary>
@@ -46,7 +46,7 @@ namespace XIVFleetCompanion
     /// <summary>
     /// The Parts page's working out (plugin 2.0 batch 4), the same as the app's (ipc/parts.js computePartsNeeded, with
     /// subs/submarine-builds.js and subs/parts-matching.js): each sub's build against the one it should have at its rank
-    /// (Fight Club's best build after repair kits for a sub ticked Craft? from rank 85, else the highest Sub Rule at or below
+    /// (Fight Club's best build after repair kits for a sub with Fight Club builds ticked, from rank 85, else the highest Sub Rule at or below
     /// its rank for its slot and character), a new workshop's first sub, and every unlocked empty slot; then each part
     /// covered by a spare (the character's own, then its retainers', then its FC chest's, which its tracked members share
     /// and never get twice), else by the part another of its subs gives up when upgraded, else crafted.

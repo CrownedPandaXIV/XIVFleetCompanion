@@ -63,11 +63,11 @@ namespace XIVFleetCompanion
         /// <summary>Not on the route Fight Club says is best at its rank (rank 85 and up): the Route Optimization page.</summary>
         public bool Suboptimal => TargetRoute.Length > 0 && TargetRoute != CurrentRoute;
 
-        /// <summary>Target Gil/Day less Current Gil/Day, when both are known.</summary>
+        /// <summary>Target gil/day less Current gil/day, when both are known.</summary>
         public double? Gain => TargetGilDay is double t && CurrentGilDay is double c ? t - c : null;
     }
 
-    /// <summary>A Next Rank date the app saved (fleet_rankup_forecast_view; times in milliseconds), with the character's
+    /// <summary>A Next rank date the app saved (fleet_rankup_forecast_view; times in milliseconds), with the character's
     /// name and Free Company.</summary>
     public sealed record SavedForecast(long Cid, int Slot, int Rank, double MadeAt, double PredictedAt, string? SubName, string? FcId, string? Character);
 
@@ -81,7 +81,7 @@ namespace XIVFleetCompanion
     /// (milliseconds, early or late), over the last 20 such rank-ups, and the last 20 rank-ups of all, newest first.</summary>
     public sealed record ForecastAccuracy(int Count, double? AverageOff, List<ForecastCheck> Checks);
 
-    /// <summary>How close the Next Rank dates came, as the app's (subs/forecast-accuracy.js, ipc/subs.js loadForecastAccuracy).</summary>
+    /// <summary>How close the Next rank dates came, as the app's (subs/forecast-accuracy.js, ipc/subs.js loadForecastAccuracy).</summary>
     public static class ForecastMath
     {
         private const double Day = 24 * 3600 * 1000;
@@ -226,7 +226,7 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>The first rank from now up to top at which Fight Club's best option needs another build and makes more
-        /// gil a day after repair kits than now (the sub's Current Gil/Day, else its best option now).</summary>
+        /// gil a day after repair kits than now (the sub's Current gil/day, else its best option now).</summary>
         public static FightClubNext? NextFightClubBuild(int rank, int top, string[] currentParts, double? currentNet, List<FightClubRow> rows, ISet<string> letters)
         {
             var options = Options(rows);
@@ -243,7 +243,7 @@ namespace XIVFleetCompanion
             return null;
         }
 
-        /// <summary>Current Gil/Day: the sub's route and parts against Fight Club's rows for that route (the first whose
+        /// <summary>Current gil/day: the sub's route and parts against Fight Club's rows for that route (the first whose
         /// build ranks it clears), after repair kits; null when none matches.</summary>
         public static double? CurrentGilPerDay(int rank, string currentRoute, string[] parts, List<FightClubRow> rows)
         {

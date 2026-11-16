@@ -166,7 +166,7 @@ public partial class MainWindow : Window, IDisposable
     private static readonly Dictionary<Tab, string> PageNames = new()
     {
         [Tab.Summary] = "Summary", [Tab.Trends] = "Trends", [Tab.Subs] = "Subs", [Tab.Routes] = "Route Optimization", [Tab.Parts] = "Parts",
-        [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Roster", [Tab.Retainers] = "Retainers",
+        [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Character Roster", [Tab.Retainers] = "Retainers",
         [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs",
     };
 
@@ -262,7 +262,7 @@ public partial class MainWindow : Window, IDisposable
                     if (subsOn) Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
                     break;
                 case "Characters":
-                    Entry(Tab.Roster, FontAwesomeIcon.Users, "Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
+                    Entry(Tab.Roster, FontAwesomeIcon.Users, "Character Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
                         notSynced > 0 ? $"{notSynced} character{(notSynced == 1 ? "" : "s")} no longer synced" : null);
                     if (retainersOn) Entry(Tab.Retainers, FontAwesomeIcon.UserTie, "Retainers", folded, venturesDone > 0 ? $"{venturesDone} done" : null, p.Good,
                         venturesDone > 0 ? $"{venturesDone} venture{(venturesDone == 1 ? "" : "s")} done" : null);
@@ -282,7 +282,7 @@ public partial class MainWindow : Window, IDisposable
                     break;
                 case "System":
                     Entry(Tab.Pcs, FontAwesomeIcon.Desktop, "PCs", folded, setupsToCheck > 0 ? setupsToCheck.ToString() : null, p.Warn,
-                        setupsToCheck > 0 ? $"{setupsToCheck} setup{(setupsToCheck == 1 ? "" : "s")} without AutoRetainer running" : null);
+                        setupsToCheck > 0 ? $"{setupsToCheck} game{(setupsToCheck == 1 ? "" : "s")} without AutoRetainer running" : null);
                     Entry(Tab.Status, FontAwesomeIcon.Plug, "Status", folded, statusProblem ? "!" : null, p.Warn, statusProblem ? "Something needs a look" : null);
                     Entry(Tab.Settings, FontAwesomeIcon.Cog, "Settings", folded, null, p.Dim, null);
                     break;
@@ -429,7 +429,7 @@ public partial class MainWindow : Window, IDisposable
             // Characters this setup's AutoRetainer knows that last logged in on another setup (another account).
             var elsewhere = plugin.SyncedElsewhere;
             if (elsewhere > 0)
-                Ui.Wrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last logged in on another setup, so that setup syncs {(elsewhere == 1 ? "it" : "them")} instead.");
+                Ui.Wrapped($"{elsewhere} character{(elsewhere == 1 ? "" : "s")} last played in another game, so that game syncs {(elsewhere == 1 ? "it" : "them")} instead.");
 
             // The database's version: this plugin brings it up to date itself (DatabaseUpkeep), as the app does.
             var keeper = plugin.Keeper;
@@ -453,7 +453,7 @@ public partial class MainWindow : Window, IDisposable
             if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel) && reader.Pcs.Data is { Count: > 1 })
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                    Ui.Wrapped("More than one setup syncs this fleet: give this one an Account Label in Settings (for example, the account's name), so they can be told apart.");
+                    Ui.Wrapped("More than one game syncs this fleet: give this one an Account Label in Settings (for example, the account's name), so they can be told apart.");
             }
 
             ImGui.Spacing();
@@ -711,7 +711,7 @@ public partial class MainWindow : Window, IDisposable
         if (reader.Routes.Data != null)
         {
             var switchable = Suboptimal();
-            if (switchable.Count == 0) Colored(Dim, "Every sub from rank 85 is on its Target Route");
+            if (switchable.Count == 0) Colored(Dim, "Every sub from rank 85 is on its Target route");
             else
             {
                 var more = switchable.Sum(x => x.Gain > 0 ? x.Gain!.Value : 0);
@@ -815,8 +815,8 @@ public partial class MainWindow : Window, IDisposable
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => sub.Rank),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
-        // Craft?: follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
-        new("craft", "Craft?", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
+        // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
+        new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
         // Status: back and waiting first, then the soonest back; in port last either way.
         new("status", "Status", sub =>
         {
@@ -826,27 +826,27 @@ public partial class MainWindow : Window, IDisposable
             else Ui.Text(status);
         }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
         // Routes stage: when it ranks up and changes build, its route and gil a day (Fight Club's, after repair kits).
-        new("nextRank", "Next Rank", sub => NextRankCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt ?? double.MaxValue,
+        new("nextRank", "Next rank", sub => NextRankCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt == null),
-        new("nextBuild", "Next Build", sub => NextBuildCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At ?? double.MaxValue,
+        new("nextBuild", "Next build", sub => NextBuildCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At == null),
         new("speed", "Speed", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Speed is double v) RightNumber((long)v); else Colored(Dim, "—"); },
             sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1, Hidden: true),
         new("range", "Range", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Range is double v) RightNumber((long)v); else Colored(Dim, "—"); },
             sub => RouteOf(sub.Cid, sub.SubName)?.Range ?? -1, Hidden: true),
-        new("route", "Current Route", sub => { if (RouteOf(sub.Cid, sub.SubName) is { } r) RouteCell(r.CurrentRoute, r.CurrentMap); else Colored(Dim, "—"); },
+        new("route", "Current route", sub => { if (RouteOf(sub.Cid, sub.SubName) is { } r) RouteCell(r.CurrentRoute, r.CurrentMap); else Colored(Dim, "—"); },
             sub => RouteOf(sub.Cid, sub.SubName)?.CurrentRoute ?? ""),
-        new("gilDay", "Current Gil/Day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay, NoCurrentGil),
+        new("gilDay", "Current gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay, NoCurrentGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay == null),
         // The best route for its rank, in amber when it isn't on it.
-        new("targetRoute", "Target Route", sub =>
+        new("targetRoute", "Target route", sub =>
         {
             var r = RouteOf(sub.Cid, sub.SubName);
             if (r == null || r.TargetRoute.Length == 0) { Colored(Dim, "—"); return; }
             if (r.Suboptimal) { Colored(Amber, r.TargetRoute); Hover("Not on this route now: see Route Optimization."); }
             else Colored(Green, r.TargetRoute);
         }, sub => RouteOf(sub.Cid, sub.SubName)?.TargetRoute ?? ""),
-        new("targetGilDay", "Target Gil/Day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
+        new("targetGilDay", "Target gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
 

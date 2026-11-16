@@ -52,7 +52,7 @@ public partial class MainWindow
         new List<FleetColumn<ItemTotalRow>>
         {
             new("item", "Item", t => Ui.Text(ItemName(t.ItemId, t.Hq)), t => ItemName(t.ItemId, t.Hq), Locked: true),
-            new("total", "Total Quantity", t => RightNumber(t.Total), t => t.Total),
+            new("total", "Total quantity", t => RightNumber(t.Total), t => t.Total),
         });
 
     private void DrawInventory()
