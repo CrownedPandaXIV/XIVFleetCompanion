@@ -53,7 +53,7 @@ Type `/xivfleet`. The first time, it asks **where your fleet data should live**:
 
 | | Just this PC | Shared between PCs |
 | --- | --- | --- |
-| What you install | nothing else | the app and PostgreSQL (the app's Database Helper sets it up) |
+| What you install | nothing else | PostgreSQL on one PC (Settings → **Database tools** → **Set up this PC** installs and sets it up) |
 | Where the fleet is | `%APPDATA%\XIV Fleet Companion\fleet.db`, shared by every game on this PC | a database your PCs and the app all use |
 | Where you see it | in the game, and in the app on this PC (1.10 or later) | in the game and in the app |
 | Backups | a copy a day in `Backups` beside the file, the last 7 kept, plus **Back up now** on the Status page | the app's backups |
@@ -67,12 +67,12 @@ and can damage it. A setup that already had a database connection before 2.2 isn
 
 Then open the settings:
 
-- **Database** (Shared between PCs only): enter the same address, port, database name, username and password as on your other PCs (and in the
+- **Database connection** (Shared between PCs only): enter the same address, port, database name, username and password as on your other PCs (and in the
   app, if you use it), or make a database with **Database tools**. The password is
   kept in Windows Credential Manager and never shown again. Leave the box empty to keep the saved one.
 - **Characters:** sync everyone AutoRetainer knows (the default), or only the characters you tick. "Tick only those
   with subs" is handy for accounts where only a few characters matter.
-- **Account Label:** a name for this setup's account (for example, the account's name). With more than one account,
+- **Account Label** (optional with one account): a name for this setup's account (for example, the account's name). With more than one account,
   give each its own setup of AutoRetainer and this plugin, each with its own label.
 
 **More than one account:** each setup notes when a character logs in on it, and only the setup a character last
@@ -82,7 +82,7 @@ are synced by every setup that has them, as before. There's no time limit, so a 
 
 ### Shared between PCs
 
-The database is set up by the app (or its Database Helper) the first time it connects, so there's nothing to run on it.
+The plugin sets the database up the first time it connects (the app does too, if it gets there first), so there's nothing to run on it.
 After that, the plugin keeps it up to date itself, as the app does.
 
 If you move the database to another PC (the app's Settings → Database → **Move the database to this PC**), the plugin
@@ -104,7 +104,7 @@ same one. The plugin keeps it up to date itself.
   ones aren't pushed out.
 - **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, the repair kit cost, Fight
   Club's data) are in the plugin's Settings, saved in the file.
-- **Without the app**, the plugin does what the app would: it saves each sub's Next Rank date once an hour for Route
+- **Without the app**, the plugin does what the app would: it saves each sub's Next rank date once an hour for Route
   Optimization's forecast line, and the Supplies page's days are changed on that page.
 - **Moving your fleet** between Just this PC and a shared database, either way, is in the plugin's Settings → **Move
   your fleet**. **Try the move first** does everything a move does, checks every row, then undoes it, so you know

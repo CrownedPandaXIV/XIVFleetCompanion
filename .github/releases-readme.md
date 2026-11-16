@@ -16,9 +16,9 @@ you earned.
 | Where you see it | in the game, and in the app on this PC if you want it | in the game on every PC, and in the app |
 | Good for | playing on one PC | playing on more than one PC |
 
-For **Shared between PCs**, the plugin's Settings → **Database tools** or the app's setup screen installs PostgreSQL
-for you. If your PCs aren't on the same home network, they also install **Tailscale** (free) so the PCs can reach the
-database.
+For **Shared between PCs**, the plugin or the app installs PostgreSQL for you, and **Tailscale** (free) too if your PCs
+aren't on the same home network, so they can reach the database. The steps for each are under
+[Set up where your fleet lives](#set-up-where-your-fleet-lives).
 
 ## Install the plugin
 
@@ -32,9 +32,43 @@ database.
 3. Do the same for AutoRetainer's address (in the table below), which the plugin needs.
 4. Type `/xlplugins`, search for **XIV Fleet Companion**, and click **Install**. Install **AutoRetainer** too, and
    whichever of the others you want.
-5. Type `/xivfleet`. The first time, it asks where your fleet should live (see above).
+5. Type `/xivfleet`. The first time, it asks where your fleet should live (see below).
 
 Dalamud keeps the plugins up to date for you.
+
+## Set up where your fleet lives
+
+### Just this PC
+
+There's nothing to set up. When the plugin asks, click **Keep it on this PC**, and it makes the file the first time it
+syncs.
+Every game on the PC uses the same file, and the plugin backs it up once a day (the last 7 are kept). The app, if you
+install it on the same PC, opens the file by itself.
+
+### Shared between PCs
+
+One PC keeps the database and the others connect to it, so that PC needs to be on while the others play.
+
+1. **On the PC that keeps the database**, click **Use a shared database** when the plugin asks. Then in the plugin's
+   Settings → **Database tools** → **Set up this PC**:
+   - Choose **This PC keeps the database for my other PCs**.
+   - Tick **Every PC is on one home network** if they are (then Tailscale isn't needed).
+   - Choose PostgreSQL's master password, and a password for the database's login (**Suggest one** makes one up). Keep
+     both somewhere safe.
+   - Click **Set up this PC**. Windows asks for permission to install. If Tailscale was installed, click **Sign in to
+     Tailscale**.
+2. **Still on that PC**, open **Database tools** → **What another PC needs**. It shows the address and the other details
+   to enter on your other PCs.
+3. **On each other PC**, click **Use a shared database** too. If the PCs aren't on one home network, open **Database
+   tools** → **Set up this PC**, choose **This PC only plays the game** and click **Set up this PC** to install
+   Tailscale, then sign in with the same Tailscale account. Then enter the details from step 2 under **Database
+   connection** in the plugin's Settings, and click **Save**. The password is kept in Windows Credential Manager.
+
+Using the app instead? Its setup screen asks the same questions (what the PC is for, and whether it's on one home
+network) and does the same steps. Playing on one PC, choose **I play on one PC** there: nothing gets installed.
+
+**Changing your mind later:** the plugin's Settings → **Move your fleet** moves it between Just this PC and a shared
+database, either way. It copies and checks everything before switching, and leaves the old side as it was.
 
 ## Install the app (optional)
 

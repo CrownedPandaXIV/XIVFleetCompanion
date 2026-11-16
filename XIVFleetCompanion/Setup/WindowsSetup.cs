@@ -47,7 +47,6 @@ namespace XIVFleetCompanion.Setup
 
         public static readonly Role[] Roles =
         {
-            new("onepc", "Everything on this PC", "This PC plays and keeps the database. No other PC connects.", true, false),
             new("dbhost", "This PC keeps the database for my other PCs", "Your other PCs (playing or just viewing) connect to this one.", true, true),
             new("connect", "This PC uses a database on another PC", "The database PC is already set up. This one runs the app (and maybe the game).", false, true),
             new("plugin", "This PC only plays the game", "Only the plugin runs here, sending to a database on another PC.", false, true),

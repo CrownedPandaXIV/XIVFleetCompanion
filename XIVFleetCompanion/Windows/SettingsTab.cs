@@ -32,6 +32,7 @@ public class SettingsTab : IDisposable
     // Whether the FCTracker file exists, checked when the path changes and every few seconds after.
     private string checkedFcTrackerPath = "";
     private bool fcTrackerFileFound;
+    private bool fcTrackerFileShown;
     private DateTime fcTrackerCheckedAt = DateTime.MinValue;
 
     // Postgres credential form. Filled from the saved credential when the window opens or the
@@ -92,49 +93,30 @@ public class SettingsTab : IDisposable
 
     // Which characters are synced: every one except the unticked, or only the ticked (for an account
     // with many characters of which only a few should reach the app).
-    // The shared database's connection (Shared between PCs): Local or Remote, and its saved login.
+    // The shared database's connection (Shared between PCs) and its saved login: one on screen, the one in use
+    // (configuration.UseRemoteConnection says which of the two once offered, ConnectionSlot).
     public void DrawDatabaseConnection()
     {
-        Ui.Text("Connection Mode");
+        Ui.Text("Database connection");
+        using (ImRaii.PushColor(ImGuiCol.Text, Theme.Status(configuration.Theme, configuration.ColourBlindStatus).Dim))
+            Ui.Wrapped("The same details as on your other PCs: Database tools → What another PC needs shows them on the PC that keeps the database.");
 
-        var useRemote = configuration.UseRemoteConnection;
-        if (ImGui.RadioButton("Local", !useRemote))
-        {
-            configuration.UseRemoteConnection = false;
-            configuration.Save();
-            Plugin.SaveChoiceForPc(configuration);
-            LoadSavedCredential();
-        }
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Remote", useRemote))
-        {
-            configuration.UseRemoteConnection = true;
-            configuration.Save();
-            Plugin.SaveChoiceForPc(configuration);
-            LoadSavedCredential();
-        }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        Ui.Text($"Database Connection ({(configuration.UseRemoteConnection ? "Remote" : "Local")})");
-
-        ImGui.InputText("Host", ref pgHost, 100);
+        ImGui.InputText("Address", ref pgHost, 100);
         ImGui.InputText("Port", ref pgPort, 10);
         ImGui.InputText("Database", ref pgDatabase, 100);
-        ImGui.InputText("Username", ref pgUsername, 100);
+        ImGui.InputText("Login", ref pgUsername, 100);
         ImGui.InputText("Password", ref pgPassword, 100, ImGuiInputTextFlags.Password);
         if (pgHasSavedPassword)
             Ui.Disabled("A password is saved. Leave the box empty to keep it.");
 
-        if (ImGui.Button("Save Database Credentials"))
+        if (ImGui.Button("Save"))
             pgSaveResult = SaveCredential();
 
         ImGui.SameLine();
 
         // Two clicks within a few seconds, so the saved connection is not removed by a stray click.
         var clearArmed = DateTime.UtcNow < clearArmedUntil;
-        if (ImGui.Button(clearArmed ? "Click again to clear" : "Clear Saved Credentials"))
+        if (ImGui.Button(clearArmed ? "Click again to forget it" : "Forget the saved connection"))
         {
             if (clearArmed)
             {
@@ -191,7 +173,7 @@ public class SettingsTab : IDisposable
         Ui.Text($"Syncing {syncing} of {list.Count} characters.");
         Ui.Disabled("Left-out characters are not read or sent." + (configuration.FleetStore == FleetStoreChoice.ThisPc
             ? " What they sent before stays until they're synced again."
-            : " Anything they sent before can be removed with the app's Remove button on the Roster."));
+            : " Anything they sent before can be removed with the app's Remove button on the Character Roster."));
 
         using (var child = ImRaii.Child("##characters", new Vector2(0, Math.Min(list.Count, 10) * ImGui.GetFrameHeightWithSpacing() + 8), true))
         {
@@ -227,7 +209,7 @@ public class SettingsTab : IDisposable
     {
         // Can't ref a property, so use a local copy
         var enabled = configuration.Enabled;
-        if (Ui.Checkbox("Fleet Sync Enabled", ref enabled))
+        if (Ui.Checkbox("Sync this game's fleet", ref enabled))
         {
             configuration.Enabled = enabled;
             configuration.Save();
@@ -241,12 +223,12 @@ public class SettingsTab : IDisposable
         }
         if (string.IsNullOrWhiteSpace(configuration.AccountLabel))
         {
-            using (ImRaii.PushColor(ImGuiCol.Text, Theme.Status(configuration.Theme, configuration.ColourBlindStatus).Warn))
+            using (ImRaii.PushColor(ImGuiCol.Text, Theme.Status(configuration.Theme, configuration.ColourBlindStatus).Dim))
                 Ui.Wrapped(Configuration.NoAccountLabelText);
         }
 
         var syncInterval = configuration.SyncIntervalMinutes;
-        if (Ui.InputInt("Sync Interval (minutes)", ref syncInterval))
+        if (Ui.InputInt("Sync every (minutes)", ref syncInterval))
         {
             if (syncInterval < 1)
                 syncInterval = 1;
@@ -329,11 +311,25 @@ public class SettingsTab : IDisposable
         else
             DrawDatabaseConnection();
 
+        // FC Tracker's file: only when it's needed (FC Tracker running, not answering directly, and its file not found
+        // where it usually is). A recent FC Tracker is asked directly, and its file is found by itself otherwise.
+        if (configuration.FCTrackerConfigPath != checkedFcTrackerPath || DateTime.UtcNow - fcTrackerCheckedAt > TimeSpan.FromSeconds(5))
+        {
+            checkedFcTrackerPath = configuration.FCTrackerConfigPath;
+            fcTrackerFileFound = !string.IsNullOrWhiteSpace(checkedFcTrackerPath) && File.Exists(checkedFcTrackerPath);
+            fcTrackerCheckedAt = DateTime.UtcNow;
+        }
+        if (!fcTrackerFileShown && (plugin.FcTrackerAnsweredDirectly || plugin.FcTrackerLoaded != true || fcTrackerFileFound))
+        {
+            fileDialog.Draw();
+            return;
+        }
+        fcTrackerFileShown = true; // stays shown from then on, so it doesn't vanish as soon as it's found
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        Ui.Text("FC Tracker Config Path");
-        Ui.Wrapped("Points at FC Tracker's config file for this XIVLauncher install, used to read FC/housing data.");
+        Ui.Text("FC Tracker's settings file");
+        Ui.Wrapped("FC Tracker is running but didn't answer directly, so its Free Company and house details are read from its settings file instead.");
 
         var fcTrackerPath = configuration.FCTrackerConfigPath;
         if (ImGui.InputText("##FCTrackerPath", ref fcTrackerPath, 260))
@@ -368,18 +364,12 @@ public class SettingsTab : IDisposable
         if (defaultPath != null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip(defaultPath);
 
-        if (configuration.FCTrackerConfigPath != checkedFcTrackerPath || DateTime.UtcNow - fcTrackerCheckedAt > TimeSpan.FromSeconds(5))
-        {
-            checkedFcTrackerPath = configuration.FCTrackerConfigPath;
-            fcTrackerFileFound = !string.IsNullOrWhiteSpace(checkedFcTrackerPath) && File.Exists(checkedFcTrackerPath);
-            fcTrackerCheckedAt = DateTime.UtcNow;
-        }
         var status = Theme.Status(configuration.Theme, configuration.ColourBlindStatus);
         using (ImRaii.PushColor(ImGuiCol.Text, fcTrackerFileFound ? status.Good : status.Warn))
         {
             Ui.Wrapped(fcTrackerFileFound
                 ? "Found."
-                : "Not found: Free Company and housing details are not synced until this points at FC Tracker's config file.");
+                : "Not found: Free Company and house details aren't synced until this points at FC Tracker's settings file (FCTrackerConfig.json).");
         }
 
         fileDialog.Draw();
@@ -389,7 +379,7 @@ public class SettingsTab : IDisposable
     private string SaveCredential()
     {
         if (string.IsNullOrWhiteSpace(pgHost) || string.IsNullOrWhiteSpace(pgDatabase) || string.IsNullOrWhiteSpace(pgUsername))
-            return "Host, database and username must be filled in. Nothing was saved.";
+            return "Address, database and login must be filled in. Nothing was saved.";
         if (!int.TryParse(pgPort, out var portNum) || portNum < 1 || portNum > 65535)
             return "Port must be a number from 1 to 65535. Nothing was saved.";
 

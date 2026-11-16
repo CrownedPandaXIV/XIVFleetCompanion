@@ -53,8 +53,10 @@ public class Configuration : IPluginConfiguration
     // move them along (see Plugin.KeepOwnCharactersAsync).
     public string? LoginsRecordedAs { get; set; } = null;
     // Shown in the plugin's window and settings while AccountLabel is blank: the app tells accounts apart by it.
+    /// <summary>Only needed with more than one game account or PC: Settings says so quietly, and the Status page warns
+    /// only once the fleet has more than one setup syncing.</summary>
     public const string NoAccountLabelText =
-        "Give this setup an Account Label (for example, the account's name) so your accounts can be told apart and two setups syncing the same character are spotted.";
+        "Optional, for more than one game account: a name for this one (for example, the account's name), so your accounts can be told apart.";
 
     // Which characters are synced (see CharacterChoice): every one except SkippedCharacters, or with
     // SyncOnlyChosen only ChosenCharacters.

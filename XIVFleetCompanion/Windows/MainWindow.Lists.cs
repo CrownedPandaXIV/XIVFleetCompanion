@@ -101,7 +101,7 @@ public partial class MainWindow
             if (c.FcName == null) Colored(Dim, "—"); else Tinted(Palette.Fc, c.FcName);
             if (c.FcPoints.HasValue) Hover($"{c.FcPoints.Value:N0} FC points");
         }, c => c.FcName ?? "", c => c.FcName == null),
-        new("fcPoints", "FC Points", c => RightNumber(c.FcPoints, Palette.FcPoints), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
+        new("fcPoints", "FC points", c => RightNumber(c.FcPoints, Palette.FcPoints), c => c.FcPoints ?? 0, c => c.FcPoints == null, Hidden: true),
         new("house", "House", c => { if (c.House == null) Colored(Dim, "—"); else Tinted(Palette.Address, c.House); }, c => c.House ?? "", c => c.House == null),
         new("gil", "Gil", c => GilCell(c.Gil), c => c.Gil),
         new("ceruleum", "Ceruleum", c =>
@@ -137,8 +137,8 @@ public partial class MainWindow
         {
             Ui.Text(FleetReader.SyncedBy(c.LoginPc, c.LoginLabel));
             Hover(c.LoginPc != null && c.LoggedInAt.HasValue
-                ? $"Last logged in on this setup {c.LoggedInAt.Value:g}. Only this setup syncs the character; others that have it leave it alone."
-                : "No login recorded yet: every setup that has the character syncs it.");
+                ? $"Last played in this game {c.LoggedInAt.Value:g}. Only this game syncs the character; others that have it leave it alone."
+                : "No login recorded yet: every game that has the character syncs it.");
         }, c => FleetReader.SyncedBy(c.LoginPc, c.LoginLabel), Hidden: true),
     }, c => c.Account, "characters", rows =>
     {
@@ -165,7 +165,7 @@ public partial class MainWindow
         var roster = reader.Roster.Data;
         if (roster == null) return;
         if (ImGui.Button("Change order##roster")) rosterOrderDraft = FleetOrder.Roster(roster, c => c.SortIndex, c => c.Character).ToList();
-        Hover("Move characters up or down in the Roster order (used everywhere" + (WithApp ? ", in the game and the app)." : ")."));
+        Hover("Move characters up or down in the Character Roster order (used everywhere" + (WithApp ? ", in the game and the app)." : ")."));
         RosterTable.Draw(roster.Where(c => Matches(rosterFilter, c.Character, c.World, c.Account, c.FcName)).ToList());
     }
 
@@ -297,7 +297,7 @@ public partial class MainWindow
         new("characters", "Characters", p =>
         {
             Ui.Text(FleetReader.PcCharacters(p.Characters, p.LeftOut, p.Elsewhere));
-            if (p.Elsewhere > 0) Hover($"{p.Elsewhere} of this setup's characters last logged in on another setup, so that setup syncs them (the Roster's Synced by column says which).");
+            if (p.Elsewhere > 0) Hover($"{p.Elsewhere} of this game's characters last played in another game, so that game syncs them (the Character Roster's Synced by column says which).");
         }, p => p.Characters ?? 0, p => p.Characters == null),
         new("autoretainer", "AutoRetainer", p =>
         {
@@ -331,14 +331,14 @@ public partial class MainWindow
         ImGui.SameLine();
         PcsTable.DrawControls();
         ImGui.SameLine();
-        Colored(Dim, WithApp ? "Each setup of the plugin (PC and account label), as of its last sync." : "Each game on this PC that syncs (by account label), as of its last sync.");
+        Colored(Dim, WithApp ? "Each game (PC and account label), as of its last sync." : "Each game on this PC that syncs (by account label), as of its last sync.");
         ReadLine(reader.Pcs, FleetReader.ListsEvery);
         EditLine();
         var pcs = reader.Pcs.Data;
         if (pcs == null) return;
         if (pcs.Count == 0)
         {
-            Ui.Wrapped("No PC has reported yet. Each setup reports here at its next sync.");
+            Ui.Wrapped("No PC has reported yet. Each game reports here at its next sync.");
             return;
         }
         var checks = pcs.Where(p => p.CheckText != null).ToList();
@@ -379,7 +379,7 @@ public partial class MainWindow
         }, f => f.Name, Locked: true),
         new("leader", "Leader", f => Ui.Text(f.Leader ?? "—"), f => f.Leader ?? "", f => f.Leader == null),
         new("account", "Account", f => Ui.Text(f.Account.Length > 0 ? f.Account : "—"), f => f.Account, Hidden: true),
-        new("points", "FC Points", f => RightNumber(f.Points, Palette.FcPoints), f => f.Points ?? 0, f => f.Points == null),
+        new("points", "FC points", f => RightNumber(f.Points, Palette.FcPoints), f => f.Points ?? 0, f => f.Points == null),
         new("members", "Members", f => RightNumber(f.Members), f => f.Members ?? 0, f => f.Members == null),
         new("house", "House", f =>
         {

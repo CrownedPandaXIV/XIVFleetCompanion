@@ -3,6 +3,34 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.3 - 2026-11-16
+
+Simpler for new players: one clear way to do each thing, and nothing they don't need.
+
+- **"Everything on this PC" is gone from Set up this PC.** It installed a whole PostgreSQL database for one PC, which
+  **Keep it on this PC** does with one file and nothing to install. Set up this PC now says so. A database already set
+  up that way keeps working.
+- **With Just this PC, Database tools don't offer database setup.** They say there's nothing to set up, and that
+  **Move your fleet** switches to a shared database.
+- **The "Use a shared database" card** now says to set the database up in Settings → Database tools, not with the app.
+- **One database connection in Settings**, instead of a Local / Remote switch between two. The one in use stays (or
+  the other, if only that one was saved).
+- **Account Label is optional with one account.** Settings mentions it quietly; the Status page warns only once more
+  than one setup syncs the fleet.
+- **FC Tracker's settings file** is only shown when it's needed (FC Tracker running but not answering directly, and
+  its file not found).
+- **Fight Club Data has a link to Fight Club's spreadsheet**, and says how to save it for the import.
+- **The speed test from 2.0's testing** is out of the sidebar and the Status page (`/xivfleet speedtest` still works).
+- Plainer labels: "Sync this game's fleet", "Sync every (minutes)", and Address, Login, Save and "Forget the saved
+  connection" for the database connection.
+- **Clearer names on the pages**, the same as the app's: the Subs page's **Craft?** is now **Fight Club builds** (ticked:
+  from rank 85 the sub follows Fight Club's best build), **Roster** is **Character Roster**, and "setup" is now "game"
+  (as in "synced by another game"). Column names are written one way throughout (Next build, Target route, Quantity).
+- No more messages about old app versions: the plugin keeps the database up to date itself, and says so. Plainer hover
+  text for the backup tools and the fleet file check.
+- **Moving your fleet no longer refuses a good move at random.** A time just under half a millisecond could compare as
+  different after copying (the move was refused and nothing changed).
+
 ## 2.4.2 - 2026-11-13
 
 - **Big tables don't slow the game down when sorted.** A table sorted by a column was sorted again every frame: with

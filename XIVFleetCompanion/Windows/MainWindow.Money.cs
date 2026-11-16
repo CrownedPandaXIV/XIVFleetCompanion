@@ -10,7 +10,7 @@ namespace XIVFleetCompanion.Windows;
 
 // 2.x, the Salvage and Income pages, as the app's tabs: the salvage each character holds (fleet_salvage_view), and the
 // real net income from the subs plus the venture rewards over the Income window (fleet_income_view and
-// fleet_venture_income_view). Read every 5 minutes while one of them is shown. Expected: the subs' Current Gil/Day
+// fleet_venture_income_view). Read every 5 minutes while one of them is shown. Expected: the subs' Current gil/day
 // (SubRoutes); Loot per Voyage (LootMath) from fleet_voyage_loot_view; items are valued at what a vendor pays, from the
 // game's files (salvage at its fixed price), and with live prices at the market too.
 public partial class MainWindow
@@ -104,7 +104,7 @@ public partial class MainWindow
             Hover($"{Number(c.KitsUsed)} repair kits used over {c.SpanDays:0.0} days");
         }, c => c.Enough ? c.KitPerDay : 0, c => !c.Enough),
         new("real", "Real net / day", c => { if (c.Enough) TableCells.Right(Gil(c.PerDay), c.PerDay > 0 ? Green : Red); }, c => c.Enough ? c.PerDay : 0, c => !c.Enough),
-        // Routes stage: what Fight Club says its subs' routes should make (their Current Gil/Day added up), and how much of
+        // Routes stage: what Fight Club says its subs' routes should make (their Current gil/day added up), and how much of
         // that came in: amber under 90%, red under 75%, as the app.
         new("expected", "Expected / day", c =>
         {
@@ -179,7 +179,7 @@ public partial class MainWindow
         if (income.KitCost > 0) Runs(T("Repairs: repair kits used at "), GilRun(income.KitCost), T(" each."));
         else Ui.Wrapped("Repairs: set the repair kit cost in Settings" + (WithApp ? " (here or in the app)" : "") + " to count them.");
         Ui.Wrapped((notEnough > 0 ? $"{notEnough} character{(notEnough == 1 ? " has" : "s have")} less than a day of salvage history. " : "") +
-                          "Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current Gil/Day).");
+                          "Expected: what Fight Club says the subs' routes make a day after repair kits (the Subs page's Current gil/day).");
         // As the app's Against expected and Below expected tiles.
         var compared = counted.Where(c => Share(c) != null).ToList();
         if (compared.Count > 0)

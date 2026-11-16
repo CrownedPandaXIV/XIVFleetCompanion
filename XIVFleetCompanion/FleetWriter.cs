@@ -416,7 +416,7 @@ namespace XIVFleetCompanion
         }
 
         // Replaces one character's stored submarines in one transaction. When a slot now holds a sub
-        // with a different name and the old name is gone (the sub was renamed), the app's Craft?
+        // with a different name and the old name is gone (the sub was renamed), the app's Fight Club builds
         // setting (sub_craft_toggle, kept per name) moves to the new name. The slot column comes from
         // database version 6; without it the subs are written as before, without slots.
         public static async Task WriteSubmarinesAsync(DbConnection db, ulong cid, IReadOnlyList<SubmarineRecord> subs)

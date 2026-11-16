@@ -118,7 +118,7 @@ public sealed class FleetTable<T>
         if (sorted)
         {
             if (ImGui.Button($"Reset Sort##{id}")) resetSort = true;
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Back to the table's own order (the Roster's for characters).");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Back to the table's own order (the Character Roster's for characters).");
             ImGui.SameLine();
         }
         else if (account != null)

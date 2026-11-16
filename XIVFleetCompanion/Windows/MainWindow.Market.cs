@@ -42,7 +42,7 @@ public partial class MainWindow
     private List<FleetColumn<ComparedListing>> ListingColumns(bool rivals, bool cheaperBy) => new List<FleetColumn<ComparedListing>>
     {
         new("item", "Item", x => Ui.Text(ItemName(x.Listing.ItemId, x.Listing.Hq)), x => ItemName(x.Listing.ItemId, x.Listing.Hq), Locked: true),
-        new("qty", "Qty", x => RightNumber(x.Listing.Quantity), x => x.Listing.Quantity),
+        new("qty", "Quantity", x => RightNumber(x.Listing.Quantity), x => x.Listing.Quantity),
         new("price", "Price each", x => GilCell(x.Listing.UnitPrice), x => x.Listing.UnitPrice),
         new("vendor", "Vendor price", x =>
         {

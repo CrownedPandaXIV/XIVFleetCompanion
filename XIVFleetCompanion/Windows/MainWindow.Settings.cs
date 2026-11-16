@@ -3,6 +3,7 @@ using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -120,7 +121,7 @@ public partial class MainWindow
             Box("Low ceruleum below", "lowCeruleum", ref ceruleumBox, "", "A character with less ceruleum than this shows as low (0 turns it off).");
             Box("FC house not entered for", "houseDays", ref houseBox, "days", "1 to 44 days: the game demolishes a house not entered for 45.");
             Box("A character counts as not synced when it is", "notSynced", ref notSyncedBox, "minutes behind the rest of its account",
-                "10 to 1440 minutes. Used by the Summary and the Roster's not-synced marks.");
+                "10 to 1440 minutes. Used by the Summary and the Character Roster's not-synced marks.");
             if (ImGui.Button("Save warnings"))
             {
                 var (k, c2, h, n) = (kitsBox, ceruleumBox, houseBox, notSyncedBox);
@@ -154,7 +155,11 @@ public partial class MainWindow
     {
         fightClubDialog.Draw();
         if (!ImGui.CollapsingHeader("Fight Club Data")) return;
-        Colored(Dim, "Fight Club's route spreadsheet: the routes, their gil and the builds they need, for Route Optimization, Parts and Income." + (WithApp ? " Saved in the database, for the app too." : ""));
+        Colored(Dim, "Route Optimization, Parts and Income use Fight Club's route spreadsheet: the routes, what they make and the builds they need. " +
+                     "Open it, save it as an Excel file (File → Download → Microsoft Excel (.xlsx)), then import that file here." + (WithApp ? " Saved in the database, for the app too." : ""));
+        if (ImGui.Button("Open Fight Club's spreadsheet"))
+            Process.Start(new ProcessStartInfo(FightClubImport.SpreadsheetUrl) { UseShellExecute = true });
+        ImGui.SameLine();
         using (ImRaii.Disabled(fightClubReading || reader.Editing))
         {
             if (ImGui.Button("Import Fight Club Data"))

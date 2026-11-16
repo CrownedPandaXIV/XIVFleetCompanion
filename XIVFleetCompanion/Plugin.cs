@@ -57,6 +57,11 @@ public sealed class Plugin : IDalamudPlugin
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
     public FCTrackerIpc? FCTracker { get; private set; }
+
+    /// <summary>At the last sync: FC Tracker loaded in this game (null: not known yet), and whether it answered directly.
+    /// Settings shows FC Tracker's file only when it's needed: loaded, not answering directly, and its file not found.</summary>
+    public bool? FcTrackerLoaded { get; private set; }
+    public bool FcTrackerAnsweredDirectly { get; private set; }
     private readonly SyncSchedule schedule = new();
     private volatile bool syncInProgress = false;
 
@@ -90,6 +95,13 @@ public sealed class Plugin : IDalamudPlugin
             (PostgresCredentialStore.Load(false) != null || PostgresCredentialStore.Load(true) != null || Configuration.LastSyncTimestamp != null))
         {
             Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+            Configuration.Save();
+        }
+        // One connection on screen (ConnectionSlot): the one in use stays, or the other if only it is saved.
+        if (ConnectionSlot.ToUse(Configuration.UseRemoteConnection, PostgresCredentialStore.Load(false) != null, PostgresCredentialStore.Load(true) != null)
+            is var slot && slot != Configuration.UseRemoteConnection)
+        {
+            Configuration.UseRemoteConnection = slot;
             Configuration.Save();
         }
 
@@ -374,14 +386,14 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             var released = await FleetWriter.ReleaseLoginsAsync(conn, pcName, label, leftOutCids);
-            if (released > 0) Log.Information($"Fleet Companion: {released} character(s) unticked here are no longer this setup's to sync.");
+            if (released > 0) Log.Information($"Fleet Companion: {released} character(s) unticked here are no longer this game's to sync.");
 
             var owners = await FleetWriter.ReadLoginOwnersAsync(conn, characters.Select(c => c.Snapshot.Cid).ToList());
             var elsewhere = characters.Where(c => FleetWriter.OwnedElsewhere(owners, c.Snapshot.Cid, pcName, label)).ToList();
             SyncedElsewhere = elsewhere.Count;
             var names = string.Join(", ", elsewhere.Select(c => $"{c.Snapshot.Name}@{c.Snapshot.World}").OrderBy(n => n, StringComparer.Ordinal));
             if (names != lastElsewhereNames && elsewhere.Count > 0)
-                Log.Information($"Fleet Companion: left to another setup, because they last logged in there: {names}.");
+                Log.Information($"Fleet Companion: left to another game, because they last logged in there: {names}.");
             lastElsewhereNames = names;
             return elsewhere.Count == 0 ? characters : characters.Except(elsewhere).ToList();
         }
@@ -532,6 +544,8 @@ public sealed class Plugin : IDalamudPlugin
             return (fcRunning, IsPluginLoaded("SubmarineTracker"), live);
         });
 
+        FcTrackerLoaded = fcTrackerRunning;
+        FcTrackerAnsweredDirectly = liveHousing != null;
         var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
         Log.Debug(liveHousing != null
             ? $"Fleet Companion: FC Tracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."
@@ -827,7 +841,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var leftOutText = leftOutCount > 0 ? $" ({leftOutCount} left out in settings)" : "";
-        if (SyncedElsewhere > 0) leftOutText += $" ({SyncedElsewhere} synced by another setup)";
+        if (SyncedElsewhere > 0) leftOutText += $" ({SyncedElsewhere} synced by another game)";
         Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount - SyncedElsewhere} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
     }
 

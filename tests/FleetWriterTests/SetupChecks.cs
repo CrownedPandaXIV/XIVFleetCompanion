@@ -75,6 +75,17 @@ internal static partial class Program
         Check(WindowsSetup.PostgresOptions("pw", 5433) == "mode=unattended\r\nunattendedmodeui=none\r\nsuperpassword=pw\r\nserverport=5433\r\ndisable-components=pgAdmin,stackbuilder\r\n"
               && WindowsSetup.SuggestPassword().Length == 16 && WindowsSetup.SetupPlan("dbhost", false, true, false) is { InstallPostgres: false, AlreadyPostgres: true, InstallTailscale: true, OpenConnections: true },
             "setup: PostgreSQL's quiet-install answers, a password suggestion, and what a database PC needs, as the app's");
+        Check(string.Join(",", WindowsSetup.Roles.Select(r => r.Key)) == "dbhost,connect,plugin" && WindowsSetup.SetupPlan("onepc", false, false, false) == null,
+            "setup: no database for one PC (that's the fleet file), the same kinds of PC as the app's setup");
+        Check(!ConnectionSlot.ToUse(false, true, true) && ConnectionSlot.ToUse(true, true, true)
+              && ConnectionSlot.ToUse(false, false, true) && !ConnectionSlot.ToUse(true, true, false)
+              && !ConnectionSlot.ToUse(false, false, false) && ConnectionSlot.ToUse(true, false, false),
+            "one connection on screen: the one in use stays, and if only the other one is saved, that one is used");
+        // A time copied into PostgreSQL is kept to the microsecond: one just under half a millisecond there becomes exactly
+        // half, which the move's check must still see as the same millisecond (it once refused such a move at random).
+        Check(FleetMove.Same(1791386101.7094949) == FleetMove.Same(1791386101.709495) && FleetMove.Same(1791386101.7084949) == FleetMove.Same(1791386101.708495)
+              && FleetMove.Same(1791386101.708) == "1791386101.708" && FleetMove.Same(12.5) == "12.5" && FleetMove.Same(3L) == "3",
+            "moves: a time rounded to the microsecond by PostgreSQL compares the same as before it was copied");
         var parsed = WindowsSetup.ParseServices("postgresql-x64-16|\"C:\\Program Files\\PostgreSQL\\16\\bin\\pg_ctl.exe\" runservice -N \"postgresql-x64-16\" -D \"C:\\Program Files\\PostgreSQL\\16\\data\" -w\r\nbad");
         Check(parsed.Count == 1 && parsed[0] == new WindowsSetup.PostgresService("postgresql-x64-16", "C:\\Program Files\\PostgreSQL\\16\\data", "C:\\Program Files\\PostgreSQL\\16"),
             "setup: PostgreSQL's Windows service found from its command (its data and install folders)");

@@ -27,6 +27,9 @@ namespace XIVFleetCompanion
     /// </summary>
     public static class FightClubImport
     {
+        /// <summary>Fight Club's route spreadsheet (Settings → Fight Club Data links it; the app's setup/help.js has the same).</summary>
+        public const string SpreadsheetUrl = "https://docs.google.com/spreadsheets/d/1aOhMH-XrWBIV93Veo3Wo0zz38z-tqk6QWO_4xzu5ZMg/edit";
+
         public sealed record Column(string Header, string DbColumn, bool Numeric, bool Required = false);
 
         /// <summary>Each column the spreadsheet may have and where it's stored (only Route is required).</summary>

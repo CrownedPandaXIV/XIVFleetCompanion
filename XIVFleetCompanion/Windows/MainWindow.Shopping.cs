@@ -359,7 +359,7 @@ public partial class MainWindow
         }
         if (list.Empty)
         {
-            Ui.Wrapped("Nothing needs crafting: every need is either met, covered by a spare, or covered by a reused old part"
+            Ui.Wrapped("Nothing needs crafting: every part needed is covered by a spare or another sub's old part"
                 + (partsAheadDays > 0 ? ", with no new build due in that time." : "."));
             return;
         }
