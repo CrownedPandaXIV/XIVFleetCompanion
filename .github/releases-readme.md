@@ -40,7 +40,8 @@ Dalamud keeps the plugins up to date for you.
 
 ### Just this PC
 
-There's nothing to set up. Choose **Just this PC** when the plugin asks, and it makes the file the first time it syncs.
+There's nothing to set up. When the plugin asks, click **Keep it on this PC**, and it makes the file the first time it
+syncs.
 Every game on the PC uses the same file, and the plugin backs it up once a day (the last 7 are kept). The app, if you
 install it on the same PC, opens the file by itself.
 
@@ -48,7 +49,7 @@ install it on the same PC, opens the file by itself.
 
 One PC keeps the database and the others connect to it, so that PC needs to be on while the others play.
 
-1. **On the PC that keeps the database**, choose **Shared between PCs** when the plugin asks. Then in the plugin's
+1. **On the PC that keeps the database**, click **Use a shared database** when the plugin asks. Then in the plugin's
    Settings → **Database tools** → **Set up this PC**:
    - Choose **This PC keeps the database for my other PCs**.
    - Tick **Every PC is on one home network** if they are (then Tailscale isn't needed).
@@ -58,14 +59,13 @@ One PC keeps the database and the others connect to it, so that PC needs to be o
      Tailscale**.
 2. **Still on that PC**, open **Database tools** → **What another PC needs**. It shows the address and the other details
    to enter on your other PCs.
-3. **On each other PC**, choose **Shared between PCs** too. If the PCs aren't on one home network, open **Database
+3. **On each other PC**, click **Use a shared database** too. If the PCs aren't on one home network, open **Database
    tools** → **Set up this PC**, choose **This PC only plays the game** and click **Set up this PC** to install
    Tailscale, then sign in with the same Tailscale account. Then enter the details from step 2 under **Database
-   Connection** in the plugin's Settings, and click **Save Database Credentials**. The password is kept in Windows
-   Credential Manager.
+   connection** in the plugin's Settings, and click **Save**. The password is kept in Windows Credential Manager.
 
 Using the app instead? Its setup screen asks the same questions (what the PC is for, and whether it's on one home
-network) and does the same steps.
+network) and does the same steps. Playing on one PC, choose **I play on one PC** there: nothing gets installed.
 
 **Changing your mind later:** the plugin's Settings → **Move your fleet** moves it between Just this PC and a shared
 database, either way. It copies and checks everything before switching, and leaves the old side as it was.

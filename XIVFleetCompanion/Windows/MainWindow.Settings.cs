@@ -3,6 +3,7 @@ using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -154,7 +155,11 @@ public partial class MainWindow
     {
         fightClubDialog.Draw();
         if (!ImGui.CollapsingHeader("Fight Club Data")) return;
-        Colored(Dim, "Fight Club's route spreadsheet: the routes, their gil and the builds they need, for Route Optimization, Parts and Income." + (WithApp ? " Saved in the database, for the app too." : ""));
+        Colored(Dim, "Route Optimization, Parts and Income use Fight Club's route spreadsheet: the routes, what they make and the builds they need. " +
+                     "Open it, save it as an Excel file (File → Download → Microsoft Excel (.xlsx)), then import that file here." + (WithApp ? " Saved in the database, for the app too." : ""));
+        if (ImGui.Button("Open Fight Club's spreadsheet"))
+            Process.Start(new ProcessStartInfo(FightClubImport.SpreadsheetUrl) { UseShellExecute = true });
+        ImGui.SameLine();
         using (ImRaii.Disabled(fightClubReading || reader.Editing))
         {
             if (ImGui.Button("Import Fight Club Data"))

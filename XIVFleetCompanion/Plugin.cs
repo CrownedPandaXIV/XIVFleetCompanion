@@ -57,6 +57,11 @@ public sealed class Plugin : IDalamudPlugin
     public AutoRetainerApi? AutoRetainer { get; private set; }
     public AllaganToolsConnector? AllaganTools { get; private set; }
     public FCTrackerIpc? FCTracker { get; private set; }
+
+    /// <summary>At the last sync: FC Tracker loaded in this game (null: not known yet), and whether it answered directly.
+    /// Settings shows FC Tracker's file only when it's needed: loaded, not answering directly, and its file not found.</summary>
+    public bool? FcTrackerLoaded { get; private set; }
+    public bool FcTrackerAnsweredDirectly { get; private set; }
     private readonly SyncSchedule schedule = new();
     private volatile bool syncInProgress = false;
 
@@ -90,6 +95,13 @@ public sealed class Plugin : IDalamudPlugin
             (PostgresCredentialStore.Load(false) != null || PostgresCredentialStore.Load(true) != null || Configuration.LastSyncTimestamp != null))
         {
             Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
+            Configuration.Save();
+        }
+        // One connection on screen (ConnectionSlot): the one in use stays, or the other if only it is saved.
+        if (ConnectionSlot.ToUse(Configuration.UseRemoteConnection, PostgresCredentialStore.Load(false) != null, PostgresCredentialStore.Load(true) != null)
+            is var slot && slot != Configuration.UseRemoteConnection)
+        {
+            Configuration.UseRemoteConnection = slot;
             Configuration.Save();
         }
 
@@ -532,6 +544,8 @@ public sealed class Plugin : IDalamudPlugin
             return (fcRunning, IsPluginLoaded("SubmarineTracker"), live);
         });
 
+        FcTrackerLoaded = fcTrackerRunning;
+        FcTrackerAnsweredDirectly = liveHousing != null;
         var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
         Log.Debug(liveHousing != null
             ? $"Fleet Companion: FC Tracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."

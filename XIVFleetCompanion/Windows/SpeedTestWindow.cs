@@ -58,7 +58,7 @@ public class SpeedTestWindow : Window, IDisposable
             status = error ?? "The database isn't set up yet (open the settings).";
             return;
         }
-        var where = $"v{Plugin.VersionText}, {(remote ? "Remote" : "Local")} database";
+        var where = $"v{Plugin.VersionText}, shared database";
         // The longest frame seen recently, before the test starts (null when the window has only just opened).
         longestBefore = recentFrames.Count > 0 ? recentFrames.Max(f => f.Seconds) * 1000f : null;
         longestWhileRunning = 0;

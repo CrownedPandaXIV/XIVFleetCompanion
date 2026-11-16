@@ -69,8 +69,8 @@ public partial class MainWindow
                 Ui.Wrapped("Your fleet lives in a database that several PCs and the XIV Fleet Companion app can all use.");
                 ImGui.Spacing();
                 using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
-                    Ui.Wrapped("Set the database up with the app (its Database Helper is enough on the PC that keeps it), " +
-                                      "then enter the same details in this plugin's Settings.");
+                    Ui.Wrapped("For playing on more than one PC. One PC keeps the database: Settings → Database tools → Set up " +
+                                      "this PC installs and sets it up. The other PCs enter its details in Settings.");
                 ImGui.Spacing();
                 if (ImGui.Button("Use a shared database"))
                 {

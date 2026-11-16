@@ -278,7 +278,7 @@ public partial class MainWindow : Window, IDisposable
                     break;
                 case "Tools":
                     Entry(Tab.Check, FontAwesomeIcon.Search, "Check what I can see", folded, null, p.Dim, null);
-                    Entry(Tab.SpeedTest, FontAwesomeIcon.Stopwatch, "Speed test", folded, null, p.Dim, null);
+                    // (The speed test from 2.0's testing is only /xivfleet speedtest now.)
                     break;
                 case "System":
                     Entry(Tab.Pcs, FontAwesomeIcon.Desktop, "PCs", folded, setupsToCheck > 0 ? setupsToCheck.ToString() : null, p.Warn,
@@ -405,16 +405,6 @@ public partial class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Goes through every character and shows what AutoRetainer, Allagan Tools and FC Tracker have for it, without writing anything (also /xivfleet check).");
-        if (!plugin.OnThisPc)
-        {
-            ImGui.SameLine();
-            if (ImGui.Button("Speed test (2.0)"))
-            {
-                plugin.OpenSpeedTest();
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Times reading from the database what the 2.0 in-game windows will need, without changing anything (also /xivfleet speedtest).");
-        }
 
         ImGui.Spacing();
 
@@ -459,10 +449,11 @@ public partial class MainWindow : Window, IDisposable
                     Ui.Wrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
             }
 
-            if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel))
+            // Only once more than one setup syncs this fleet (the PCs page's list): then it's needed to tell them apart.
+            if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel) && reader.Pcs.Data is { Count: > 1 })
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
-                    Ui.Wrapped(Configuration.NoAccountLabelText);
+                    Ui.Wrapped("More than one setup syncs this fleet: give this one an Account Label in Settings (for example, the account's name), so they can be told apart.");
             }
 
             ImGui.Spacing();
@@ -474,8 +465,7 @@ public partial class MainWindow : Window, IDisposable
                 Ui.Bullet("Fleet data: not chosen yet (open the Summary to choose)");
             else
             {
-                var mode = statusRemote ? "Remote" : "Local";
-                Ui.Bullet(postgresConfigured ? $"Database ({mode}): set up" : $"Database ({mode}): not set up yet (open the settings)");
+                Ui.Bullet(postgresConfigured ? "Database: set up" : "Database: not set up yet (open the settings)");
             }
             Ui.Bullet(autoRetainerReady ? "AutoRetainer: running" : "AutoRetainer: not running");
             Ui.Bullet(allaganToolsReady ? "Allagan Tools: running" : "Allagan Tools: not running");

@@ -398,7 +398,10 @@ public static class FleetMove
     }
 
     // A value as the comparison sees it: numbers by their value to three decimals (a time's milliseconds), bytes as base64.
-    private static string Same(object? v)
+    // A time is first taken to the microsecond, as PostgreSQL keeps it: copying it there rounds it to the microsecond, and
+    // without this a time just under half a millisecond came back as exactly half and rounded the other way, so a good
+    // move was refused at random. (Convert.ToDecimal keeps only 15 digits, too few for that: "R" keeps them all.)
+    internal static string Same(object? v)
     {
         switch (v)
         {
@@ -406,7 +409,10 @@ public static class FleetMove
                 return "(none)";
             case byte[] bytes:
                 return Convert.ToBase64String(bytes);
-            case double or float or decimal or long or int or short:
+            case double or float:
+                var full = decimal.Parse(Convert.ToDouble(v, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);
+                return Math.Round(Math.Round(full, 6, MidpointRounding.AwayFromZero), 3, MidpointRounding.AwayFromZero).ToString("0.###", CultureInfo.InvariantCulture);
+            case decimal or long or int or short:
                 var d = Convert.ToDecimal(v, CultureInfo.InvariantCulture);
                 return Math.Round(d, 3).ToString("0.###", CultureInfo.InvariantCulture);
             case string s when decimal.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) && !s.StartsWith("0") || s == "0":

@@ -116,6 +116,12 @@ public partial class MainWindow
         if (!OperatingSystem.IsWindows()) return;
         if (!ImGui.CollapsingHeader("Database tools")) return;
         toolDialog.Draw();
+        // Just this PC: nothing here is needed (the tools are for a shared database), so only a pointer, and what's
+        // left to tidy up if this PC once had PostgreSQL (Leftovers, Remove everything) or a problem to report.
+        var fileOnly = plugin.Configuration.FleetStore == FleetStoreChoice.ThisPc;
+        if (fileOnly)
+            Ui.Wrapped("Your fleet is in one file on this PC (Just this PC), so there's nothing to set up here. These tools " +
+                       "are for a database shared between PCs: to switch to one, use Move your fleet (above).");
         var scale = ImGuiHelpers.GlobalScale;
         if (detected == null && !detecting)
         {
@@ -132,13 +138,17 @@ public partial class MainWindow
             });
         }
         var (pgHere, tsHere) = detected ?? (false, false);
+        if (!fileOnly || pgHere)
         using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
             Ui.Wrapped($"This PC: PostgreSQL {(pgHere ? "installed" : "not installed")}, Tailscale {(tsHere ? tailscale is { SignedIn: true } t ? $"signed in ({t.Address})" : "installed, not signed in" : "not installed")}.");
         using var disabled = ImRaii.Disabled(toolBusy);
 
         // ---- Set up this PC ----
-        if (ImGui.TreeNode("Set up this PC"))
+        if (!fileOnly && ImGui.TreeNode("Set up this PC"))
         {
+            // One PC needs no database (the fleet file): said here instead of offering a database for one PC.
+            using (ImRaii.PushColor(ImGuiCol.Text, Palette.Dim))
+                Ui.Wrapped("Playing on one PC? You don't need a database: Move your fleet (above) moves it into one file on this PC.");
             foreach (var r in WindowsSetup.Roles)
             {
                 if (ImGui.RadioButton($"{r.Label}##role{r.Key}", setupRole == r.Key)) setupRole = r.Key;
@@ -173,7 +183,7 @@ public partial class MainWindow
                 if (ImGui.Button("Sign in to Tailscale"))
                     StartTool("setup", async () =>
                     {
-                        var r = await WindowsSetup.TailscaleSignIn(setupRole is "dbhost" or "onepc", url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }));
+                        var r = await WindowsSetup.TailscaleSignIn(setupRole == "dbhost", url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }));
                         return (r.Ok, r.Ok ? "Finish signing in in your browser." : r.Error);
                     });
             }
@@ -182,7 +192,7 @@ public partial class MainWindow
         }
 
         // ---- A new database ----
-        if (pgHere && ImGui.TreeNode("New database on this PC"))
+        if (!fileOnly && pgHere && ImGui.TreeNode("New database on this PC"))
         {
             Ui.Wrapped("Makes a database and its own login in this PC's PostgreSQL, using its administrator login (the master password is only used for this and never saved), then uses it.");
             Password("PostgreSQL's master password##newMaster", ref adminPassword, 220 * scale);
@@ -263,7 +273,7 @@ public partial class MainWindow
         }
 
         // ---- Let other PCs connect ----
-        if (pgHere && ImGui.TreeNode("Let other PCs connect"))
+        if (!fileOnly && pgHere && ImGui.TreeNode("Let other PCs connect"))
         {
             var ranges = WindowsSetup.RangesToAllow(WindowsSetup.Addresses());
             Ui.Wrapped($"Sets this PC's PostgreSQL to let in your Tailscale PCs and this PC's home network ({string.Join(", ", ranges)}), with the password, and opens Windows Firewall for its port to those only. Copies of PostgreSQL's settings are kept first.");
@@ -339,7 +349,7 @@ public partial class MainWindow
         }
 
         // ---- What another PC needs ----
-        if (saved != null && ImGui.TreeNode("What another PC needs"))
+        if (!fileOnly && saved != null && ImGui.TreeNode("What another PC needs"))
         {
             var addresses = WindowsSetup.Addresses();
             var (ts, home) = WindowsSetup.PcAddresses(addresses);
