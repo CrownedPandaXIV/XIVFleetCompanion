@@ -101,10 +101,10 @@ internal static class Ui
         else ImGui.TableHeadersRow();
     }
 
-    public static void NextRow()
+    public static void NextRow(float minHeight = 0)
     {
         if (Capture is { } c) c.NextRow();
-        else ImGui.TableNextRow();
+        else ImGui.TableNextRow(ImGuiTableRowFlags.None, minHeight);
     }
 
     public static bool NextColumn()

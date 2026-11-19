@@ -299,6 +299,9 @@ public sealed class FleetTable<T>
         }
         lastLines = lines;
 
+        // Every row (account bands too) at least as tall as a tickbox, so all rows are the same height: the clipper
+        // measures the first row and spaces the rest by it, so a short band on top hid the last rows of a long list.
+        var rowHeight = ImGui.GetFrameHeight();
         var clipper = ImGui.ImGuiListClipper();
         clipper.Begin(lines.Count, -1f);
         while (clipper.Step())
@@ -306,7 +309,7 @@ public sealed class FleetTable<T>
             for (var i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
             {
                 var line = lines[i];
-                Ui.NextRow();
+                Ui.NextRow(rowHeight);
                 if (line.Heading != null)
                 {
                     // A band in the look's accent across the whole row.
