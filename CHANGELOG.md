@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.4 - 2026-11-19
+
+- **The Subs page's Rank shows how far each sub is to its next rank**, as the app does: 68.81 is rank 68, 81% of the
+  way to 69. Sorting by Rank goes by it too, so subs of the same rank are in order (before, they stayed in no
+  particular order).
+- **A sub almost at its next rank shows 99%, not 100%**, in the plugin and the app (the app showed "68.100").
+
 ## 2.4.3 - 2026-11-16
 
 Simpler for new players: one clear way to do each thing, and nothing they don't need.

@@ -513,7 +513,7 @@ namespace XIVFleetCompanion
                 var currentGil = CurrentGilPerDay(rank, currentRoute, parts, fightClub);
                 var next = sub.NextLevelExp ?? 0;
                 var cur = sub.CurrentExp ?? 0;
-                int? progress = next > 0 ? (int)Round((double)cur / next * 100) : null;
+                int? progress = FleetOrder.RankPercent(cur, next);
                 var fcNext = NextFightClubBuild(rank, topRank, parts, currentGil, fightClub, letters);
                 var speed = Stat(rank, parts, true, ranks, partStats);
                 var range = Stat(rank, parts, false, ranks, partStats);
