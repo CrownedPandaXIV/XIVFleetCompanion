@@ -5,8 +5,10 @@ All notable changes to the plugin are recorded here. Versions follow
 
 ## 2.4.4 - 2026-11-19
 
-- **Sorting the Subs page by Rank now goes by how far each sub is to its next rank too**, as the app does: a rank-68
-  sub 81% of the way to 69 comes after one at 10%. Before, subs of the same rank stayed in no particular order.
+- **The Subs page's Rank shows how far each sub is to its next rank**, as the app does: 68.81 is rank 68, 81% of the
+  way to 69. Sorting by Rank goes by it too, so subs of the same rank are in order (before, they stayed in no
+  particular order).
+- **A sub almost at its next rank shows 99%, not 100%**, in the plugin and the app (the app showed "68.100").
 
 ## 2.4.3 - 2026-11-16
 

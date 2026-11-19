@@ -24,7 +24,18 @@ namespace XIVFleetCompanion
         /// <summary>The Subs page's Rank sort, as the app's: the rank plus its whole percent to the next one (68 at 81% is
         /// 68.81), rounded the way JavaScript's Math.round does (halves up).</summary>
         public static double RankSortKey(int rank, long currentExp, long nextLevelExp) =>
-            rank + (nextLevelExp > 0 ? Math.Floor(100.0 * currentExp / nextLevelExp + 0.5) : 0) / 100;
+            rank + (RankPercent(currentExp, nextLevelExp) ?? 0) / 100.0;
+
+        /// <summary>The whole percent to the next rank, rounded halves up as the app does, at most 99 (99.6% isn't the next
+        /// rank yet); none when unknown or at the top.</summary>
+        public static int? RankPercent(long currentExp, long nextLevelExp) =>
+            nextLevelExp > 0 ? (int)Math.Min(99, Math.Floor(100.0 * currentExp / nextLevelExp + 0.5)) : null;
+
+        /// <summary>The Subs page's Rank as the app shows it: rank.percent ("68.81", "68.05"), or just the rank when unknown.</summary>
+        public static string RankText(int rank, long currentExp, long nextLevelExp) =>
+            RankPercent(currentExp, nextLevelExp) is { } pct
+                ? $"{rank.ToString(CultureInfo.InvariantCulture)}.{pct.ToString(CultureInfo.InvariantCulture).PadLeft(2, '0')}"
+                : rank.ToString(CultureInfo.InvariantCulture);
 
         /// <summary>The Roster's order (renderer sortRows): saved place first (none last), then name.</summary>
         public static List<RosterRow> Roster(IEnumerable<RosterRow> rows) =>

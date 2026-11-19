@@ -800,7 +800,7 @@ public partial class MainWindow : Window, IDisposable
         }, sub => sub.Character),
         new("account", "Account", sub => Ui.Text(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
         new("sub", "Sub", sub => Ui.Text(sub.SubName), sub => sub.SubName, Locked: true),
-        // A thin bar for how far to the next rank, the rank right after it (both on the left, so stretching the column
+        // A thin bar for how far to the next rank, then the rank with its percent as the app shows it ("68.81"), right after it (both on the left, so stretching the column
         // doesn't pull them apart; the bar's fixed width lines the numbers up).
         new("rank", "Rank", sub =>
         {
@@ -811,7 +811,7 @@ public partial class MainWindow : Window, IDisposable
             }
             else ImGui.Dummy(new Vector2(36 * ImGuiHelpers.GlobalScale, ImGui.GetTextLineHeight()));
             ImGui.SameLine();
-            Ui.Text(sub.Rank.ToString(System.Globalization.CultureInfo.CurrentCulture));
+            Ui.Text(FleetOrder.RankText(sub.Rank, sub.CurrentExp, sub.NextLevelExp));
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => FleetOrder.RankSortKey(sub.Rank, sub.CurrentExp, sub.NextLevelExp)),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
