@@ -3,6 +3,13 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.5 - 2026-11-19
+
+- **Long tables show every row again.** With Group by account on, the rows near the bottom of a long list (the last
+  account's subs, for example) could be cut off and couldn't be scrolled to; they showed only when filtered or sorted.
+  Every row in the plugin's tables is now the same height, which is what the scrolling relies on, so rows without a
+  tickbox are a few pixels taller than before.
+
 ## 2.4.4 - 2026-11-19
 
 - **The Subs page's Rank shows how far each sub is to its next rank**, as the app does: 68.81 is rank 68, 81% of the
