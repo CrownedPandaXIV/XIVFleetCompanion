@@ -299,9 +299,10 @@ public sealed class FleetTable<T>
         }
         lastLines = lines;
 
-        // Every row (account bands too) at least as tall as a tickbox, so all rows are the same height: the clipper
-        // measures the first row and spaces the rest by it, so a short band on top hid the last rows of a long list.
-        var rowHeight = ImGui.GetFrameHeight();
+        // Every row (account bands too) at least as tall as a row with a tickbox, so all rows are the same height: the
+        // clipper measures the first row and spaces the rest by it, so a shorter band on top hid the last rows of a long
+        // list. ImGui 1.88's minimum row height includes the cell padding above and below (pushed above for this table).
+        var rowHeight = ImGui.GetFrameHeight() + 2 * ImGui.GetStyle().CellPadding.Y;
         var clipper = ImGui.ImGuiListClipper();
         clipper.Begin(lines.Count, -1f);
         while (clipper.Step())
