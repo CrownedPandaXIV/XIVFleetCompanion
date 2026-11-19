@@ -21,6 +21,11 @@ namespace XIVFleetCompanion
     {
         private static readonly StringComparer Text = StringComparer.Create(CultureInfo.CurrentCulture, ignoreCase: false);
 
+        /// <summary>The Subs page's Rank sort, as the app's: the rank plus its whole percent to the next one (68 at 81% is
+        /// 68.81), rounded the way JavaScript's Math.round does (halves up).</summary>
+        public static double RankSortKey(int rank, long currentExp, long nextLevelExp) =>
+            rank + (nextLevelExp > 0 ? Math.Floor(100.0 * currentExp / nextLevelExp + 0.5) : 0) / 100;
+
         /// <summary>The Roster's order (renderer sortRows): saved place first (none last), then name.</summary>
         public static List<RosterRow> Roster(IEnumerable<RosterRow> rows) =>
             rows.OrderBy(r => r.SortIndex).ThenBy(r => r.Character, Text).ToList();

@@ -3,6 +3,11 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.4 - 2026-11-19
+
+- **Sorting the Subs page by Rank now goes by how far each sub is to its next rank too**, as the app does: a rank-68
+  sub 81% of the way to 69 comes after one at 10%. Before, subs of the same rank stayed in no particular order.
+
 ## 2.4.3 - 2026-11-16
 
 Simpler for new players: one clear way to do each thing, and nothing they don't need.

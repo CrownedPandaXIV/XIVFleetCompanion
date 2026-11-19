@@ -813,7 +813,7 @@ public partial class MainWindow : Window, IDisposable
             ImGui.SameLine();
             Ui.Text(sub.Rank.ToString(System.Globalization.CultureInfo.CurrentCulture));
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
-        }, sub => sub.Rank),
+        }, sub => FleetOrder.RankSortKey(sub.Rank, sub.CurrentExp, sub.NextLevelExp)),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
         // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
         new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),

@@ -1945,6 +1945,11 @@ internal static partial class Program
         var retainerOrder = FleetOrder.Retainers(new[] { T("Aki", 3, 1, "B"), T("Bex", 1, int.MaxValue, "Z"), T("Aki", 3, 0, "Y"), T("Bex", 1, 2, "A"), T("Cal", int.MaxValue, 0, "C"), T("Aki", 3, int.MaxValue, "A") });
         Check(string.Join(",", retainerOrder.Select(r => $"{r.Owner}:{r.Name}")) == "Bex:A,Bex:Z,Aki:Y,Aki:B,Aki:A,Cal:C",
             "orders: retainers by their owner's place in the Roster, then hiring order (none last), as the app: " + string.Join(",", retainerOrder.Select(r => $"{r.Owner}:{r.Name}")));
+        // The Subs page's Rank sort, as the app's: rank plus whole percent to the next (68 at 81% is 68.81, halves up).
+        var rankKeys = new[] { FleetOrder.RankSortKey(68, 81, 100), FleetOrder.RankSortKey(68, 1, 200), FleetOrder.RankSortKey(68, 0, 0), FleetOrder.RankSortKey(67, 99, 100), FleetOrder.RankSortKey(68, 10, 100) };
+        var rankOrder = new[] { "A", "B", "C", "D", "E" }.Zip(rankKeys).OrderBy(x => x.Second).Select(x => x.First);
+        Check(Math.Abs(rankKeys[0] - 68.81) < 1e-9 && Math.Abs(rankKeys[1] - 68.01) < 1e-9 && rankKeys[2] == 68 && string.Join(",", rankOrder) == "D,C,B,E,A",
+            "orders: Subs by rank then percent to the next rank, as the app: " + string.Join(",", rankKeys) + " -> " + string.Join(",", rankOrder));
         var groups = FleetOrder.ByAccount(new[] { R("Aki", 1, "B"), R("Bex", 2, ""), R("Cal", 3, "A"), R("Dee", 4, "B") }, r => r.Account);
         Check(string.Join(" | ", groups.Select(g => $"{g.Label}: {string.Join(",", g.Rows.Select(r => r.Character))}")) == "A: Cal | B: Aki,Dee | Ungrouped: Bex",
             "orders: Group by account, A to Z, Ungrouped last, rows kept in order: " + string.Join(" | ", groups.Select(g => $"{g.Label}: {string.Join(",", g.Rows.Select(r => r.Character))}")));
