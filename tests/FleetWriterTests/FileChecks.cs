@@ -23,6 +23,8 @@ internal static partial class Program
             await KeeperOnFileChecks(folder);
             await TwoGamesAtOnceChecks(folder);
             await HealthAndRestoreChecks(folder);
+            await RemoveCharacterChecks(folder);
+            await RoundedIdChecks(folder);
         }
         finally
         {
@@ -51,6 +53,137 @@ internal static partial class Program
         if (OperatingSystem.IsWindows())
             Check(FileDatabase.WhyNotHere(@"\\nas\share\fleet.db", none)?.Contains("network") == true, "file: a network folder is refused");
         Check(FileDatabase.DefaultPath.EndsWith(Path.Combine("XIV Fleet Companion", "fleet.db")), $"file: the shared place is ...\\XIV Fleet Companion\\fleet.db ({FileDatabase.DefaultPath})");
+    }
+
+    // Removing a character on the fleet file (the shared database's is checked against the app's in the edits): Cy and
+    // what's stored for her go, her own Free Company's chest and points go, Ann's Free Company (named in Cy's old house
+    // row too) stays, and Trends history and venture rewards are kept. Gil & Market leaves out listings of characters
+    // not on the roster (left from before Remove deleted them).
+    private static async Task RemoveCharacterChecks(string folder)
+    {
+        var path = Path.Combine(folder, "remove", "fleet.db");
+        await using var conn = await FileDatabase.OpenAsync(path, Array.Empty<string>());
+        await FileDatabase.EnsureAsync(conn, FileDatabase.Files.Embedded(), "test");
+        const string ann = "18014498578000001", cy = "18014498578000003", leftover = "18014498578000009";
+        await Db.Exec(conn, $@"
+            INSERT INTO companion_character_current (cid, name, world, fc_id, last_synced_at) VALUES ({ann}, 'Ann', 'Maduin', '9000000000000001', 1), ({cy}, 'Cy', 'Siren', '9000000000000003', 1);
+            INSERT INTO companion_retainer_lookup (retainer_id, owner_cid, name) VALUES (33777097243660301, {ann}, 'Amy'), (33777097243660304, {cy}, 'Dot');
+            INSERT INTO retainer_gear_targets (retainer_id, target_mode, target_value, only_crafted) VALUES (33777097243660304, 'ilvl', 560, 1);
+            INSERT INTO companion_inventory_snapshot (owner_cid, retainer_id, sorted_container, sorted_slot_index, item_id, quantity)
+              VALUES ({cy}, 33777097243660304, 10000, 0, 5111, 3), ({ann}, 33777097243660301, 10000, 0, 5111, 2);
+            INSERT INTO companion_market_listing (retainer_id, owner_cid, slot, item_id, quantity, hq, unit_price, first_seen_at)
+              VALUES (33777097243660304, {cy}, 0, 5111, 3, 0, 900, 1), (33777097243660301, {ann}, 0, 5111, 2, 0, 950, 1), (33777097243660309, {leftover}, 0, 5111, 1, 0, 990, 1);
+            INSERT INTO companion_submarine_snapshot (cid, sub_name, level) VALUES ({cy}, 'Cy-1', 40);
+            INSERT INTO sub_craft_toggle (cid, sub_name, craft_enabled) VALUES ({cy}, 'Cy-1', 1);
+            INSERT INTO sub_build_rules (rank, cid_override, sub_filter, hull, stern, bow, bridge) VALUES (90, {cy}, '', 'S', 'S', 'S', 'S'), (1, NULL, '', 'S', 'S', 'S', 'S');
+            INSERT INTO character_sort_order (cid, sort_index) VALUES ({ann}, 0), ({cy}, 1);
+            INSERT INTO companion_character_housing (cid, fc_id) VALUES ({ann}, '9000000000000001'), ({cy}, '9000000000000001');
+            INSERT INTO companion_fc_inventory_snapshot (fc_id, sorted_container, sorted_slot_index, item_id, quantity) VALUES ('9000000000000001', 20000, 0, 22500, 4), ('9000000000000003', 20000, 0, 22501, 6);
+            INSERT INTO companion_metric_latest (subject_type, subject_id, metric, value, recorded_at)
+              VALUES ('character', {cy}, 'gil', 500, 1), ('character', {ann}, 'gil', 700, 1), ('fc', '9000000000000003', 'fc_points', 10, 1), ('fc', '9000000000000001', 'fc_points', 20, 1);
+            INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value)
+              VALUES (1, 'character', {cy}, 'gil', 400), (2, 'character', {cy}, 'gil', 500), (2, 'fc', '9000000000000003', 'fc_points', 10);
+            INSERT INTO companion_venture_result (owner_cid, retainer_name, received_at, item_id, hq, quantity) VALUES ({cy}, 'Dot', 1, 5111, 0, 3), ({ann}, 'Amy', 1, 5111, 0, 2);
+            INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at) VALUES ({cy}, 0, 41, 1, 2);
+            INSERT INTO companion_character_login (cid, pc_name, account_label, logged_in_at) VALUES ({cy}, 'LAPTOP', 'B', 1);");
+
+        Check(await Count(conn, "SELECT count(*) FROM fleet_market_listings_view") == 2,
+            "remove (file): Gil & Market leaves out the listings of a character not on the roster");
+        Check(await FleetEdits.RemoveCharacter(conn, "x") == "Invalid request.", "remove (file): a bad id is refused");
+        Check(await FleetEdits.RemoveCharacter(conn, cy) == null, "remove (file): Cy is removed");
+        var gone = new[]
+        {
+            $"SELECT count(*) FROM companion_character_current WHERE cid = {cy}",
+            $"SELECT count(*) FROM companion_retainer_lookup WHERE owner_cid = {cy}",
+            "SELECT count(*) FROM retainer_gear_targets",
+            $"SELECT count(*) FROM companion_inventory_snapshot WHERE owner_cid = {cy}",
+            $"SELECT count(*) FROM companion_market_listing WHERE owner_cid = {cy}",
+            $"SELECT count(*) FROM companion_submarine_snapshot WHERE cid = {cy}",
+            $"SELECT count(*) FROM sub_craft_toggle WHERE cid = {cy}",
+            $"SELECT count(*) FROM sub_build_rules WHERE cid_override = {cy}",
+            $"SELECT count(*) FROM character_sort_order WHERE cid = {cy}",
+            $"SELECT count(*) FROM companion_character_housing WHERE cid = {cy}",
+            "SELECT count(*) FROM companion_fc_inventory_snapshot WHERE fc_id = '9000000000000003'",
+            $"SELECT count(*) FROM companion_metric_latest WHERE subject_id = {cy} OR subject_id = '9000000000000003'",
+            $"SELECT count(*) FROM companion_rankup_forecast WHERE cid = {cy}",
+            $"SELECT count(*) FROM companion_character_login WHERE cid = {cy}",
+        };
+        var left = new List<string>();
+        foreach (var sql in gone) if (await Count(conn, sql) != 0) left.Add(sql);
+        Check(left.Count == 0, "remove (file): everything stored for Cy goes, with her own Free Company's chest and points" + (left.Count == 0 ? "" : $" (still there: {string.Join("; ", left)})"));
+        var kept = new[]
+        {
+            ($"SELECT count(*) FROM companion_character_current WHERE cid = {ann}", 1L),
+            ($"SELECT count(*) FROM companion_market_listing WHERE owner_cid = {ann}", 1L),
+            ("SELECT count(*) FROM companion_fc_inventory_snapshot WHERE fc_id = '9000000000000001'", 1L),
+            ("SELECT count(*) FROM companion_metric_latest WHERE subject_id = '9000000000000001'", 1L),
+            ("SELECT count(*) FROM sub_build_rules", 1L),
+            ("SELECT count(*) FROM companion_metric_history", 3L),
+            ("SELECT count(*) FROM companion_venture_result", 2L),
+        };
+        var wrong = new List<string>();
+        foreach (var (sql, want) in kept) if (await Count(conn, sql) != want) wrong.Add(sql);
+        Check(wrong.Count == 0, "remove (file): Ann and her Free Company stay, and the Trends history and venture rewards are kept" + (wrong.Count == 0 ? "" : $" (wrong: {string.Join("; ", wrong)})"));
+        Check(await Count(conn, "SELECT count(*) FROM fleet_market_listings_view") == 1, "remove (file): Gil & Market then shows only Ann's listing");
+    }
+
+    // Before 2.4.7 the plugin's edits on the file saved ids rounded to a double (18014498578000003 as ...004). Its edits now
+    // save them exactly, and the file's upkeep puts back, once, ids that round from exactly one character or retainer.
+    private static async Task RoundedIdChecks(string folder)
+    {
+        var path = Path.Combine(folder, "rounded", "fleet.db");
+        var files = FileDatabase.Files.Embedded();
+        await using var conn = await FileDatabase.OpenAsync(path, Array.Empty<string>());
+        await FileDatabase.EnsureAsync(conn, files, "test");
+        // Ann ...001 rounds to ...000 alone; Cy ...003 and Di ...005 both round to ...004 (spacing 4 past 2^54).
+        await Db.Exec(conn, @"INSERT INTO companion_character_current (cid, name, last_synced_at) VALUES (18014498578000001, 'Ann', 1), (18014498578000003, 'Cy', 1), (18014498578000005, 'Di', 1);
+            INSERT INTO companion_retainer_lookup (retainer_id, owner_cid, name) VALUES (33777097243660301, 18014498578000001, 'Amy');");
+
+        await FleetEdits.SaveOrder(conn, new[] { "18014498578000003", "18014498578000001" });
+        await FleetEdits.SetCraft(conn, "18014498578000003", "Cy-1", true);
+        await FleetEdits.SaveTarget(conn, "33777097243660301", "ilvl", 560, false);
+        await FleetEdits.AddRule(conn, new FleetEdits.Rule(null, 90, "18014498578000003", "", "S", "S", "S", "S"));
+        var exact = string.Join(" ", new[]
+        {
+            await Count(conn, "SELECT cid FROM character_sort_order WHERE sort_index = 0"), await Count(conn, "SELECT cid FROM sub_craft_toggle"),
+            await Count(conn, "SELECT retainer_id FROM retainer_gear_targets"), await Count(conn, "SELECT cid_override FROM sub_build_rules"),
+        });
+        Check(exact == "18014498578000003 18014498578000003 33777097243660301 18014498578000003",
+            $"rounded ids: the plugin's edits on the file save character and retainer ids exactly ({exact})");
+
+        // Rows as an older plugin saved them, rounded: Ann's order (rounds from her alone), her retainer's gear target, and
+        // a tick for Cy or Di (both round to it: left alone). Ann also has a right order row from the app: the rounded one goes.
+        await Db.Exec(conn, @"DELETE FROM character_sort_order; DELETE FROM sub_craft_toggle; DELETE FROM retainer_gear_targets; DELETE FROM sub_build_rules;
+            INSERT INTO character_sort_order (cid, sort_index) VALUES (18014498578000000, 3), (18014498578000001, 0);
+            INSERT INTO sub_craft_toggle (cid, sub_name, craft_enabled) VALUES (18014498578000000, 'Ann-1', 1), (18014498578000004, 'Cy-1', 1);
+            INSERT INTO retainer_gear_targets (retainer_id, target_mode, target_value, only_crafted) VALUES (33777097243660300, 'ilvl', 560, 0);
+            INSERT INTO sub_build_rules (rank, cid_override, sub_filter, hull, stern, bow, bridge) VALUES (90, 18014498578000000, '', 'S', 'S', 'S', 'S');
+            DELETE FROM companion_file_info WHERE key = 'ids_repaired';");
+        var rounded = (long)(double)33777097243660301L;
+        Check(rounded == 33777097243660300, $"rounded ids: the test's rounded retainer id is the double's ({rounded})");
+        var result = await FileDatabase.EnsureAsync(conn, files, "test");
+        var after = string.Join(" | ", new[]
+        {
+            string.Join(",", await Rows(conn, "SELECT cid || ':' || sort_index FROM character_sort_order ORDER BY cid")),
+            string.Join(",", await Rows(conn, "SELECT cid || ':' || sub_name FROM sub_craft_toggle ORDER BY cid")),
+            string.Join(",", await Rows(conn, "SELECT retainer_id FROM retainer_gear_targets")),
+            string.Join(",", await Rows(conn, "SELECT cid_override FROM sub_build_rules")),
+        });
+        Check(after == "18014498578000001:0 | 18014498578000001:Ann-1,18014498578000004:Cy-1 | 33777097243660301 | 18014498578000001",
+            $"rounded ids: put back to the one character or retainer they round from; a repeat of a right row goes; one that could be either is left ({after})");
+        Check(result.Applied.Any(a => a.Contains("pointed at the wrong character or retainer")), $"rounded ids: the update says so ({string.Join(", ", result.Applied)})");
+        await Db.Exec(conn, "INSERT INTO sub_craft_toggle (cid, sub_name, craft_enabled) VALUES (18014498578000000, 'Later', 1)");
+        await FileDatabase.EnsureAsync(conn, files, "test");
+        Check(await Count(conn, "SELECT count(*) FROM sub_craft_toggle WHERE cid = 18014498578000000") == 1, "rounded ids: the repair runs once, not at every start");
+    }
+
+    private static async Task<List<string>> Rows(System.Data.Common.DbConnection conn, string sql)
+    {
+        var list = new List<string>();
+        await using var cmd = Db.Command(conn, sql);
+        await using var r = await cmd.ExecuteReaderAsync();
+        while (await r.ReadAsync()) list.Add(Convert.ToString(r.GetValue(0), System.Globalization.CultureInfo.InvariantCulture)!);
+        return list;
     }
 
     private static async Task<long> Count(System.Data.Common.DbConnection conn, string sql)

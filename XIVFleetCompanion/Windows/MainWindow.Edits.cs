@@ -18,6 +18,10 @@ public partial class MainWindow
     private static string Inv(long n) => n.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>"Saving..." while an edit is saved, then for a few seconds whether it was (green) or why not (amber).</summary>
+    // Whether EditLine shows anything now: put it on the same line as something only then, or what comes after it lands
+    // there instead (Supplies' table beside its controls).
+    private bool EditLineShown => reader.Editing || reader.LastEdit is { } last && DateTime.Now - last.At <= TimeSpan.FromSeconds(8);
+
     private void EditLine()
     {
         if (reader.Editing)
@@ -354,6 +358,7 @@ public partial class MainWindow
                         reader.Edit("the Income window", c => FleetEdits.SaveIncomeWindow(c, d));
         }
         Hover("How many days the Income page (and its loot per voyage) counts" + (WithApp ? ", for the app too." : "."));
+        if (!EditLineShown) return;
         ImGui.SameLine();
         EditLine();
     }
@@ -403,7 +408,7 @@ public partial class MainWindow
                 }
             }
         }
-        if (reader.Editing || reader.LastEdit != null)
+        if (EditLineShown)
         {
             ImGui.SameLine();
             EditLine();
@@ -434,6 +439,32 @@ public partial class MainWindow
         }
         ImGui.SameLine();
         if (ImGui.SmallButton($"Keep##pcKeep{key}")) pcToRemove = null;
+    }
+
+    private long? characterToRemove;
+
+    // The Character Roster's Remove, as the app's: asks first, naming the character and what goes.
+    private void RemoveCharacterCell(RosterRow c)
+    {
+        if (characterToRemove != c.Cid)
+        {
+            if (ImGui.SmallButton($"Remove##char{c.Cid}")) characterToRemove = c.Cid;
+            Hover("Removes the character and what is stored for it: subs, retainers (and their market listings), inventory and Free Company details. " +
+                  "Its Trends history and venture rewards are kept but don't show. If a game still syncs it, it comes back at the next sync, so untick it in Settings → Characters there first.");
+            return;
+        }
+        using (ImRaii.PushColor(ImGuiCol.Button, Red with { W = 0.6f }))
+        {
+            if (ImGui.SmallButton($"Remove {c.Character}##charSure{c.Cid}"))
+            {
+                var (cid, name) = (c.Cid.ToString(CultureInfo.InvariantCulture), c.Character);
+                reader.Edit($"removing {name}", async conn => await FleetEdits.RemoveCharacter(conn, cid));
+                characterToRemove = null;
+            }
+        }
+        Hover("Can't be undone. If a game still syncs this character, it comes back at the next sync.");
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"Keep##charKeep{c.Cid}")) characterToRemove = null;
     }
 
     // ---- Ticking parts off (Shopping List) ----

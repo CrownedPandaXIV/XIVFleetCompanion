@@ -778,6 +778,7 @@ LEFT JOIN (SELECT label, count(*) AS retainers, sum(gil) AS retainer_gil FROM re
 -- Every listing the retainers have up for sale: its retainer and character, value (price each × quantity), how many
 -- days since the plugin first saw it (a repriced listing keeps its time) and whether that's at least the setting's
 -- days (unsold for a while), as characters/market.js listingAges.
+-- Only characters on the roster: a removed character's listings (left from before Remove deleted them) don't show.
 CREATE OR REPLACE VIEW fleet_market_listings_view AS
 SELECT l.retainer_id, l.owner_cid, l.slot, l.item_id, l.quantity, l.hq, l.unit_price, l.first_seen_at,
        r.name AS retainer_name, c.name AS owner_name, c.world, c.account_label, so.sort_index,
@@ -786,7 +787,7 @@ SELECT l.retainer_id, l.owner_cid, l.slot, l.item_id, l.quantity, l.hq, l.unit_p
        (CASE WHEN l.first_seen_at > now() THEN 0 ELSE extract(epoch FROM now() - l.first_seen_at) / 86400 END) >= st.stale_days AS stale
 FROM companion_market_listing l
 LEFT JOIN companion_retainer_lookup r ON r.retainer_id = l.retainer_id
-LEFT JOIN companion_character_current c ON c.cid = l.owner_cid
+JOIN companion_character_current c ON c.cid = l.owner_cid
 LEFT JOIN character_sort_order so ON so.cid = l.owner_cid
 CROSS JOIN fleet_market_settings_view st;
 

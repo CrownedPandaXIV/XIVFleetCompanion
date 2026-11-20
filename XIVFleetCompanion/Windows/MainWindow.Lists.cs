@@ -140,6 +140,7 @@ public partial class MainWindow
                 ? $"Last played in this game {c.LoggedInAt.Value:g}. Only this game syncs the character; others that have it leave it alone."
                 : "No login recorded yet: every game that has the character syncs it.");
         }, c => FleetReader.SyncedBy(c.LoginPc, c.LoginLabel), Hidden: true),
+        new("remove", "Remove", RemoveCharacterCell, New: true),
     }, c => c.Account, "characters", rows =>
     {
         // "Synced by" is usually the same for a whole account: said once, in its band (the column is still there).

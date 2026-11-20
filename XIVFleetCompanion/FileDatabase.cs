@@ -143,6 +143,44 @@ public static class FileDatabase
             : "The fleet file is up to date.";
     }
 
+    /// <summary>
+    /// Before 2.4.7 the plugin's own edits on the file (the Fight Club builds tick, Sub Rules for one character, gear
+    /// targets, the Roster order) saved character and retainer ids rounded to the nearest double, so most matched no one.
+    /// Each such id that rounds from exactly one known character (or retainer) is put back to it; a row that would then
+    /// repeat one already saved for it is dropped (the right one is kept). Ids that match no one or several stay as they
+    /// are. How many rows were changed.
+    /// </summary>
+    internal static async Task<int> RepairRoundedIds(DbConnection conn, DbTransaction? tx)
+    {
+        async Task<List<long>> Ids(string sql)
+        {
+            var list = new List<long>();
+            await using var cmd = Db.Command(conn, sql, tx);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) if (!r.IsDBNull(0) && r.GetValue(0) is long or int) list.Add(Convert.ToInt64(r.GetValue(0)));
+            return list;
+        }
+        var characters = await Ids("SELECT cid FROM companion_character_current");
+        var retainers = await Ids("SELECT retainer_id FROM companion_retainer_lookup");
+        var changed = 0;
+        foreach (var (table, column, known) in new[]
+        {
+            ("sub_craft_toggle", "cid", characters), ("sub_build_rules", "cid_override", characters),
+            ("character_sort_order", "cid", characters), ("retainer_gear_targets", "retainer_id", retainers),
+        })
+        {
+            var real = known.ToHashSet();
+            var fromRounded = known.GroupBy(id => (long)(double)id).Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.Single());
+            foreach (var stored in await Ids($"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL"))
+            {
+                if (real.Contains(stored) || !fromRounded.TryGetValue(stored, out var id)) continue;
+                changed += await Db.Exec(conn, $"UPDATE OR IGNORE {table} SET {column} = @id WHERE {column} = @stored", tx, ("id", id), ("stored", stored));
+                changed += await Db.Exec(conn, $"DELETE FROM {table} WHERE {column} = @stored", tx, ("stored", stored));
+            }
+        }
+        return changed;
+    }
+
     private const string InfoTable = "CREATE TABLE IF NOT EXISTS companion_file_info (key TEXT PRIMARY KEY, value TEXT)";
 
     /// <summary>
@@ -180,6 +218,15 @@ public static class FileDatabase
                 await Db.Exec(conn, files.Views, tx);
                 if (!created) applied.Add("the fleet views");
             }
+            // Once: ids the plugin's edits saved rounded before 2.4.7 (see RepairRoundedIds).
+            if (!created && !info.ContainsKey("ids_repaired"))
+            {
+                var repaired = await RepairRoundedIds(conn, tx);
+                if (repaired > 0) applied.Add($"fixed {repaired} saved setting{(repaired == 1 ? "" : "s")} (Fight Club builds, Sub Rules, gear targets or the Roster order) that pointed at the wrong character or retainer");
+            }
+            if (!info.ContainsKey("ids_repaired"))
+                await Db.Exec(conn, "INSERT INTO companion_file_info (key, value) VALUES ('ids_repaired', @v) ON CONFLICT (key) DO UPDATE SET value = excluded.value", tx,
+                    ("v", DateTime.UtcNow.ToString("o")));
             if (created || applied.Count > 0 || saved != files.AppVersion)
                 foreach (var (key, value) in new[] { ("app_version", files.AppVersion), ("views_checksum", checksum), ("updated_by", recordedBy),
                              ("updated_at", DateTime.UtcNow.ToString("o")) })

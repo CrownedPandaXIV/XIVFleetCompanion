@@ -3,6 +3,29 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.8 - 2026-11-20
+
+- **Supplies: the table stays below its controls.** After any change was saved in the plugin, the table moved up
+  beside the "Buy enough for … days" controls until the plugin was reloaded.
+- **Income: the explanation sits below the "Income over … days" choice** instead of beside it.
+
+## 2.4.7 - 2026-11-20
+
+- **Just this PC: changes made in the plugin now stick to the right character or retainer.** Since 2.2.0, ticking
+  Fight Club builds, making a Sub Rule for one character, setting a retainer's gear target and **Change order** on
+  the Character Roster saved most character and retainer ids slightly wrong in the fleet file, so the change matched
+  no one. The plugin now saves them exactly, and puts back, once, the ones saved wrong where it can tell whose they
+  were. The shared database and the app weren't affected.
+
+## 2.4.6 - 2026-11-20
+
+- **Remove on the Character Roster**, as in the app: removes a character and what is stored for it (subs, retainers
+  and their market listings, inventory, Free Company details, its place in the order). It asks first. Its Trends
+  history and venture rewards are kept but don't show. A game that still syncs the character adds it back at its next
+  sync, so untick it in Settings → Characters there first. Works on both the shared database and the fleet file.
+- **Gil & Market shows only the listings of characters on the roster**, so listings left from a character removed
+  earlier (removing didn't delete them before) don't show.
+
 ## 2.4.5 - 2026-11-19
 
 - **Long tables show every row again.** With Group by account on, the rows near the bottom of a long list (the last
