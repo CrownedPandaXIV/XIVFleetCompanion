@@ -97,8 +97,9 @@ public static class Db
             ulong u => unchecked((long)u),
             uint u => (long)u,
             bool b when IsFileCommand(cmd) => b ? 1L : 0L,
-            // The file keeps whole numbers as INTEGER (System.Data.SQLite would store a decimal as text).
-            decimal d when IsFileCommand(cmd) => d == decimal.Truncate(d) && d >= long.MinValue && d <= long.MaxValue ? (long)d : (double)d,
+            // The file keeps whole numbers as INTEGER (System.Data.SQLite would store a decimal as text). Both branches are
+            // object: as `? (long)d : (double)d` the whole number became a double, rounding ids past 2^53 (2.4.7).
+            decimal d when IsFileCommand(cmd) => d == decimal.Truncate(d) && d >= long.MinValue && d <= long.MaxValue ? (object)(long)d : (double)d,
             DateTime t when IsFileCommand(cmd) => Unix(t),
             _ => value,
         };

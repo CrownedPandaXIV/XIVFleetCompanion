@@ -3,6 +3,14 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.7 - 2026-11-20
+
+- **Just this PC: changes made in the plugin now stick to the right character or retainer.** Since 2.2.0, ticking
+  Fight Club builds, making a Sub Rule for one character, setting a retainer's gear target and **Change order** on
+  the Character Roster saved most character and retainer ids slightly wrong in the fleet file, so the change matched
+  no one. The plugin now saves them exactly, and puts back, once, the ones saved wrong where it can tell whose they
+  were. The shared database and the app weren't affected.
+
 ## 2.4.6 - 2026-11-20
 
 - **Remove on the Character Roster**, as in the app: removes a character and what is stored for it (subs, retainers
