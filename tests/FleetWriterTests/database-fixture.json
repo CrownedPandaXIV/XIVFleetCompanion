@@ -1,6 +1,6 @@
 {
  "about": "Written by XIVFleetCompanion-App tests/db/plugin-database-fixture.js: the database after the app updates it each way.",
- "appVersion": "1.9.0",
+ "appVersion": "1.10.6",
  "signature": {
   "columns": "SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS v\n            FROM information_schema.columns WHERE table_schema = 'public'\n              AND table_name NOT IN (SELECT table_name FROM information_schema.views WHERE table_schema = 'public') ORDER BY 1",
   "indexes": "SELECT indexdef AS v FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1",
@@ -305,7 +305,7 @@
        "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
-       "fleet_market_listings_view 0a51063be81b94b8139f878d64e0965e",
+       "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
        "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
@@ -339,7 +339,7 @@
        "16 new database"
       ],
       "viewsChecksum": [
-       "5a415aa82c0745898d7bb5531bd3578ab9eaa9c6759e0aec2d61663b10139a03"
+       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
       ]
      }
     },
@@ -637,7 +637,7 @@
        "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
-       "fleet_market_listings_view 0a51063be81b94b8139f878d64e0965e",
+       "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
        "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
@@ -671,7 +671,7 @@
        "16 new database"
       ],
       "viewsChecksum": [
-       "5a415aa82c0745898d7bb5531bd3578ab9eaa9c6759e0aec2d61663b10139a03"
+       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
       ]
      }
     }
@@ -973,7 +973,7 @@
        "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
-       "fleet_market_listings_view 0a51063be81b94b8139f878d64e0965e",
+       "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
        "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
@@ -1014,7 +1014,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "5a415aa82c0745898d7bb5531bd3578ab9eaa9c6759e0aec2d61663b10139a03"
+       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
       ]
      }
     },
@@ -1312,7 +1312,7 @@
        "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
-       "fleet_market_listings_view 0a51063be81b94b8139f878d64e0965e",
+       "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
        "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
@@ -1353,7 +1353,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "5a415aa82c0745898d7bb5531bd3578ab9eaa9c6759e0aec2d61663b10139a03"
+       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
       ]
      }
     }
@@ -1947,7 +1947,7 @@
        "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
-       "fleet_market_listings_view 0a51063be81b94b8139f878d64e0965e",
+       "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
        "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
@@ -1988,7 +1988,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "5a415aa82c0745898d7bb5531bd3578ab9eaa9c6759e0aec2d61663b10139a03"
+       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
       ]
      }
     },
@@ -2286,7 +2286,7 @@
        "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
-       "fleet_market_listings_view 0a51063be81b94b8139f878d64e0965e",
+       "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
        "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
@@ -2327,7 +2327,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "5a415aa82c0745898d7bb5531bd3578ab9eaa9c6759e0aec2d61663b10139a03"
+       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
       ]
      }
     }

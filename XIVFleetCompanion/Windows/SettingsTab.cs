@@ -171,9 +171,7 @@ public class SettingsTab : IDisposable
 
         var syncing = list.Count(c => configuration.ShouldSync(c.Cid));
         Ui.Text($"Syncing {syncing} of {list.Count} characters.");
-        Ui.Disabled("Left-out characters are not read or sent." + (configuration.FleetStore == FleetStoreChoice.ThisPc
-            ? " What they sent before stays until they're synced again."
-            : " Anything they sent before can be removed with the app's Remove button on the Character Roster."));
+        Ui.Disabled("Left-out characters are not read or sent. Anything they sent before can be removed with Remove on the Character Roster.");
 
         using (var child = ImRaii.Child("##characters", new Vector2(0, Math.Min(list.Count, 10) * ImGui.GetFrameHeightWithSpacing() + 8), true))
         {

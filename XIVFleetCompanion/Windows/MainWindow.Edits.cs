@@ -436,6 +436,32 @@ public partial class MainWindow
         if (ImGui.SmallButton($"Keep##pcKeep{key}")) pcToRemove = null;
     }
 
+    private long? characterToRemove;
+
+    // The Character Roster's Remove, as the app's: asks first, naming the character and what goes.
+    private void RemoveCharacterCell(RosterRow c)
+    {
+        if (characterToRemove != c.Cid)
+        {
+            if (ImGui.SmallButton($"Remove##char{c.Cid}")) characterToRemove = c.Cid;
+            Hover("Removes the character and what is stored for it: subs, retainers (and their market listings), inventory and Free Company details. " +
+                  "Its Trends history and venture rewards are kept but don't show. If a game still syncs it, it comes back at the next sync, so untick it in Settings → Characters there first.");
+            return;
+        }
+        using (ImRaii.PushColor(ImGuiCol.Button, Red with { W = 0.6f }))
+        {
+            if (ImGui.SmallButton($"Remove {c.Character}##charSure{c.Cid}"))
+            {
+                var (cid, name) = (c.Cid.ToString(CultureInfo.InvariantCulture), c.Character);
+                reader.Edit($"removing {name}", async conn => await FleetEdits.RemoveCharacter(conn, cid));
+                characterToRemove = null;
+            }
+        }
+        Hover("Can't be undone. If a game still syncs this character, it comes back at the next sync.");
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"Keep##charKeep{c.Cid}")) characterToRemove = null;
+    }
+
     // ---- Ticking parts off (Shopping List) ----
 
     private readonly Dictionary<int, (long Made, DateTime At)> madePending = new();

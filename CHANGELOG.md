@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.6 - 2026-11-20
+
+- **Remove on the Character Roster**, as in the app: removes a character and what is stored for it (subs, retainers
+  and their market listings, inventory, Free Company details, its place in the order). It asks first. Its Trends
+  history and venture rewards are kept but don't show. A game that still syncs the character adds it back at its next
+  sync, so untick it in Settings → Characters there first. Works on both the shared database and the fleet file.
+- **Gil & Market shows only the listings of characters on the roster**, so listings left from a character removed
+  earlier (removing didn't delete them before) don't show.
+
 ## 2.4.5 - 2026-11-19
 
 - **Long tables show every row again.** With Group by account on, the rows near the bottom of a long list (the last

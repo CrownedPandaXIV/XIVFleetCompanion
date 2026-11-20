@@ -732,7 +732,7 @@ SELECT l.retainer_id, l.owner_cid, l.slot, l.item_id, l.quantity, l.hq, l.unit_p
        l.unit_price * l.quantity AS value, l.age_days, l.age_days >= st.stale_days AS stale
 FROM ages l
 LEFT JOIN companion_retainer_lookup r ON r.retainer_id = l.retainer_id
-LEFT JOIN companion_character_current c ON c.cid = l.owner_cid
+JOIN companion_character_current c ON c.cid = l.owner_cid
 LEFT JOIN character_sort_order so ON so.cid = l.owner_cid
 CROSS JOIN fleet_market_settings_view st;
 

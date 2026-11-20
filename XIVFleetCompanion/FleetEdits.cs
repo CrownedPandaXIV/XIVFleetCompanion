@@ -228,6 +228,75 @@ namespace XIVFleetCompanion
             return (await cmd.ExecuteNonQueryAsync(), null);
         }
 
+        /// <summary>Removes one character and what is stored for it, as the app's Remove on the Character Roster
+        /// (ipc/roster.js remove-character): its current row, subs and their Fight Club builds settings, bags and retainers
+        /// (with their gear targets and market listings), Free Company and house details, its place in the Roster order,
+        /// build rules made only for it, its rank-up forecasts and logins. Its Free Company's chest goes too when no other
+        /// character is in that Free Company. Trends history and venture rewards are kept but no longer show: its latest
+        /// values (which Trends finds characters by) are removed, and the pages count only characters on the roster. All
+        /// or nothing. A game that still syncs the character adds it back at its next sync.</summary>
+        public static async Task<string?> RemoveCharacter(DbConnection conn, string cid)
+        {
+            if (cid == null || !Id.IsMatch(cid) || !long.TryParse(cid, NumberStyles.None, CultureInfo.InvariantCulture, out var whole)) return "Invalid request.";
+            var file = Db.IsFile(conn);
+            // A whole number in the file, as it keeps ids (a decimal would go in as a rounded double there).
+            object who = file ? (object)whole : decimal.Parse(cid, CultureInfo.InvariantCulture);
+            // A Free Company's id: a number in PostgreSQL, text in the file (see Database/sqlite/tables.sql).
+            object Fc(string id) => file ? id : decimal.Parse(id, CultureInfo.InvariantCulture);
+
+            var fcIds = new List<string>();
+            await using (var cmd = Command(conn, @"SELECT fc_id FROM companion_character_current WHERE cid = $1 AND fc_id IS NOT NULL
+                UNION SELECT fc_id FROM companion_character_housing WHERE cid = $1 AND fc_id IS NOT NULL", who))
+            await using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync())
+                    if (Convert.ToString(r.GetValue(0), CultureInfo.InvariantCulture) is { Length: > 0 } id && !fcIds.Contains(id)) fcIds.Add(id);
+            var oldHistory = false;
+            if (!file)
+                await using (var cmd = Command(conn, "SELECT to_regclass('companion_character_snapshot') IS NOT NULL"))
+                    oldHistory = await cmd.ExecuteScalarAsync() is true;
+
+            await using var tx = await conn.BeginTransactionAsync();
+            async Task Run(string sql, params object?[] values)
+            {
+                await using var cmd = Command(conn, sql, values);
+                cmd.Transaction = tx;
+                await cmd.ExecuteNonQueryAsync();
+            }
+            async Task<bool> Any(string sql, params object?[] values)
+            {
+                await using var cmd = Command(conn, sql, values);
+                cmd.Transaction = tx;
+                return await cmd.ExecuteScalarAsync() is not (null or DBNull);
+            }
+            await Run("DELETE FROM retainer_gear_targets WHERE retainer_id IN (SELECT retainer_id FROM companion_retainer_lookup WHERE owner_cid = $1)", who);
+            foreach (var sql in new[]
+            {
+                "DELETE FROM companion_retainer_lookup WHERE owner_cid = $1",
+                "DELETE FROM companion_inventory_snapshot WHERE owner_cid = $1",
+                "DELETE FROM companion_market_listing WHERE owner_cid = $1",
+                "DELETE FROM companion_submarine_snapshot WHERE cid = $1",
+                "DELETE FROM sub_craft_toggle WHERE cid = $1",
+                "DELETE FROM sub_build_rules WHERE cid_override = $1",
+                "DELETE FROM companion_character_housing WHERE cid = $1",
+                "DELETE FROM character_sort_order WHERE cid = $1",
+                "DELETE FROM companion_character_current WHERE cid = $1",
+                "DELETE FROM companion_metric_latest WHERE subject_type = 'character' AND subject_id = $1",
+                "DELETE FROM companion_rankup_forecast WHERE cid = $1",
+                "DELETE FROM companion_character_login WHERE cid = $1",
+            })
+                await Run(sql, who);
+            if (oldHistory) await Run("DELETE FROM companion_character_snapshot WHERE cid = $1", who);
+            // Free Companies no other character is in (the character's own rows are already gone).
+            foreach (var fc in fcIds)
+            {
+                if (await Any("SELECT 1 FROM companion_character_current WHERE fc_id = $1 LIMIT 1", Fc(fc))) continue;
+                await Run("DELETE FROM companion_fc_inventory_snapshot WHERE fc_id = $1", Fc(fc));
+                await Run("DELETE FROM companion_metric_latest WHERE subject_type = 'fc' AND subject_id = $1", Fc(fc));
+            }
+            await tx.CommitAsync();
+            return null;
+        }
+
         /// <summary>The saved ticks after ticking `made` of `crafts` for one part (setProgress): whole parts, at most crafts;
         /// none takes its tick off. Remembers the Look ahead it was ticked with (shopping-progress.js).</summary>
         public static string SetProgress(string? stored, int itemId, double made, double crafts, int ahead)

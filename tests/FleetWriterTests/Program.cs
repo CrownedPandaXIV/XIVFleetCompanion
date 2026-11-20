@@ -698,6 +698,7 @@ internal static partial class Program
                     case "settings:save-repair-kit-cost": error = await FleetEdits.SaveRepairKitCost(db, D(a)); break;
                     case "save-universalis-setting": await FleetEdits.SaveLivePrices(db, a.GetBoolean()); break;
                     case "save-play-style": error = await FleetEdits.SavePlayStyle(db, a.GetString()!); break;
+                    case "remove-character": error = await FleetEdits.RemoveCharacter(db, a.GetString()!); break;
                     default: Check(false, $"edits: the plugin makes the app's {call}"); continue;
                 }
                 if (error != null) answer = new JsonObject { ["success"] = false, ["error"] = error };

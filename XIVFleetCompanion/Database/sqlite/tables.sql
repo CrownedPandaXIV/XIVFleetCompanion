@@ -1,6 +1,7 @@
 -- The tables of the plugin-only one-file version (SQLite, plugin 2.2 "Just this PC"): everything the plugin writes and
 -- reads, with the fleet views checked on SQLite as well as PostgreSQL (tests/db/verify-sqlite-views.js). The app's own
--- tables (game data, backups, the database move) aren't here: the app doesn't open the file.
+-- tables (backups, the database move) aren't here: the app opens the file as it is (db/sqlite-client.js), with the game
+-- data in a file of its own (db/game-data-file.js).
 --
 -- How PostgreSQL's types are kept here:
 --   character and retainer ids              INTEGER (they fit in a signed 64-bit number)
