@@ -3,6 +3,12 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.4.8 - 2026-11-20
+
+- **Supplies: the table stays below its controls.** After any change was saved in the plugin, the table moved up
+  beside the "Buy enough for … days" controls until the plugin was reloaded.
+- **Income: the explanation sits below the "Income over … days" choice** instead of beside it.
+
 ## 2.4.7 - 2026-11-20
 
 - **Just this PC: changes made in the plugin now stick to the right character or retainer.** Since 2.2.0, ticking

@@ -18,6 +18,10 @@ public partial class MainWindow
     private static string Inv(long n) => n.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>"Saving..." while an edit is saved, then for a few seconds whether it was (green) or why not (amber).</summary>
+    // Whether EditLine shows anything now: put it on the same line as something only then, or what comes after it lands
+    // there instead (Supplies' table beside its controls).
+    private bool EditLineShown => reader.Editing || reader.LastEdit is { } last && DateTime.Now - last.At <= TimeSpan.FromSeconds(8);
+
     private void EditLine()
     {
         if (reader.Editing)
@@ -354,6 +358,7 @@ public partial class MainWindow
                         reader.Edit("the Income window", c => FleetEdits.SaveIncomeWindow(c, d));
         }
         Hover("How many days the Income page (and its loot per voyage) counts" + (WithApp ? ", for the app too." : "."));
+        if (!EditLineShown) return;
         ImGui.SameLine();
         EditLine();
     }
@@ -403,7 +408,7 @@ public partial class MainWindow
                 }
             }
         }
-        if (reader.Editing || reader.LastEdit != null)
+        if (EditLineShown)
         {
             ImGui.SameLine();
             EditLine();
