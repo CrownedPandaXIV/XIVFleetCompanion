@@ -7,6 +7,7 @@ All notable changes to the plugin are recorded here. Versions follow
 
 The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
 
+- **The repair kit price is set on the Supplies page**, beside what to buy, instead of in Settings (as in the app).
 - **Sub Calculator data.** The plugin now ships the loot each sector can give, by tier, and the surveillance,
   retrieval and favor breakpoints, from XIVStats, with Pepper's FFXIV Ship Guide's breakpoints beside them. Each
   release reads them again, so new findings arrive with updates. Nothing shows it yet: the Sub Calculator pages

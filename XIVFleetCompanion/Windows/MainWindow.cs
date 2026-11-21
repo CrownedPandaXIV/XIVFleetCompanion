@@ -930,6 +930,7 @@ public partial class MainWindow : Window, IDisposable
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery); // on its own line, as on every other page
         var supplies = reader.Supplies.Data;
         if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
+        if (reader.Credits.Data is { } priced) RepairKitPriceEditor(priced.RepairKitCost);
         if (supplies == null) return;
         SuppliesSummary(supplies);
         SuppliesTable.Draw(supplies, fitRows: true);
@@ -965,6 +966,34 @@ public partial class MainWindow : Window, IDisposable
     private FleetTable<FcCredits.Total>? creditAccountsTable;
     private FleetTable<FcCredits.FcLine>? creditFcsTable;
     private int tankCostDraft = -1, tankCostShown = -1;
+    private int kitPriceDraft = -1, kitPriceShown = -1;
+
+    // The price of a repair kit (Magitek repair material), as the app's Supplies page: for the gil of what to buy, Fight
+    // Club's gil a day after repairs and the Planner's repairs. Follows a change made elsewhere until it's changed here.
+    private void RepairKitPriceEditor(double saved)
+    {
+        var price = (int)Math.Round(saved);
+        if (kitPriceShown != price) { kitPriceShown = price; kitPriceDraft = price; }
+        ImGui.AlignTextToFramePadding();
+        Ui.Text("Repair kit price");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        Ui.InputInt("##repairKitPrice", ref kitPriceDraft, 0);
+        Hover("What one Magitek repair material (repair kit) costs you: for the cost of what to buy here, Fight Club's gil a day after repairs and the Planner's repairs.");
+        kitPriceDraft = Math.Max(0, kitPriceDraft);
+        ImGui.SameLine();
+        Tinted(Palette.Gil, "gil");
+        if (kitPriceDraft != price)
+        {
+            ImGui.SameLine();
+            using (ImRaii.Disabled(reader.Editing))
+                if (ImGui.Button("Save##repairKitPrice"))
+                {
+                    var gil = kitPriceDraft;
+                    reader.Edit("the repair kit price", c => FleetEdits.SaveRepairKitCost(c, gil));
+                }
+        }
+    }
     private readonly Memo<FcCredits.Plan> creditPlan = new();
 
     private FleetTable<FcCredits.Total> CreditAccountsTable => creditAccountsTable ??= new FleetTable<FcCredits.Total>("fcCreditAccounts", plugin.Configuration, new List<FleetColumn<FcCredits.Total>>

@@ -102,8 +102,8 @@ same one. The plugin keeps it up to date itself.
 - **A damage check** runs once a week (and on **Check now** on the Status page): SQLite's own check that the file is
   whole. If it ever finds damage, the Status page says which backup to go back to, and daily backups pause so the good
   ones aren't pushed out.
-- **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, the repair kit cost, Fight
-  Club's data) are in the plugin's Settings, saved in the file.
+- **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, Fight Club's data) are in the
+  plugin's Settings, saved in the file; the repair kit price is on the Supplies page.
 - **Without the app**, the plugin does what the app would: it saves each sub's Next rank date once an hour for Route
   Optimization's forecast line, and the Supplies page's days are changed on that page.
 - **Moving your fleet** between Just this PC and a shared database, either way, is in the plugin's Settings → **Move
