@@ -74,6 +74,27 @@ namespace XIVFleetCompanion
             await tx.CommitAsync();
         }
 
+        private static async Task FileWritePartCondition(DbConnection conn, IReadOnlyList<PartCondition.Row> rows)
+        {
+            await using var tx = await conn.BeginTransactionAsync();
+            foreach (var row in rows)
+            {
+                var r = row.Reading;
+                await Db.Exec(conn, @"
+                    INSERT INTO companion_sub_part_condition (fc_id, sub_register, part_slot, read_at, item_id, condition, sub_name, cid, return_at)
+                    SELECT @fc, @reg, @slot, @at, @item, @cond, @name, @cid, @ret
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM (SELECT item_id, condition FROM companion_sub_part_condition
+                                       WHERE fc_id = @fc AND sub_register = @reg AND part_slot = @slot AND read_at <= @at
+                                       ORDER BY read_at DESC LIMIT 1) latest
+                        WHERE latest.item_id = @item AND latest.condition = @cond)
+                    ON CONFLICT (fc_id, sub_register, part_slot, read_at) DO NOTHING", tx,
+                    ("fc", Db.FcText(row.FcId)), ("reg", (long)r.Register), ("slot", (long)r.PartSlot), ("at", r.At), ("item", (long)r.ItemId),
+                    ("cond", (long)r.Condition), ("name", r.SubName), ("cid", (long)r.Cid), ("ret", r.ReturnAt > 0 ? (double?)r.ReturnAt : null));
+            }
+            await tx.CommitAsync();
+        }
+
         private static async Task<Dictionary<(ulong Owner, string Retainer), long>> FileReadNewestVentures(DbConnection conn, IReadOnlyCollection<ulong> cids)
         {
             var newest = new Dictionary<(ulong, string), long>();

@@ -279,6 +279,47 @@ namespace XIVFleetCompanion
             });
         }
 
+        // ---- Sub part condition (database update 17) ----
+
+        // Readings of sub parts' condition (PartCondition), oldest first. One is stored only when the part's item or
+        // condition differs from its latest stored reading, so a sync after another PC's, or after a restart, adds no
+        // repeats. False (nothing changed) until the database has update 17.
+        public static async Task<bool> WritePartConditionAsync(DbConnection db, IReadOnlyList<PartCondition.Row> rows)
+        {
+            rows = rows.OrderBy(r => r.Reading.At).ToList();
+            if (Db.IsFile(db)) { if (rows.Count > 0) await FileWritePartCondition(db, rows); return true; }
+            var conn = (NpgsqlConnection)db;
+            if (rows.Count == 0) return true;
+            return await IfTableExists(async () =>
+            {
+                await using var tx = await conn.BeginTransactionAsync();
+                foreach (var row in rows)
+                {
+                    var r = row.Reading;
+                    await using var cmd = new NpgsqlCommand(@"
+                        INSERT INTO companion_sub_part_condition (fc_id, sub_register, part_slot, read_at, item_id, condition, sub_name, cid, return_at)
+                        SELECT @fc::numeric, @reg::bigint, @slot::int, @at::timestamptz, @item::int, @cond::int, @name::text, @cid::numeric, @ret::timestamptz
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM (SELECT item_id, condition FROM companion_sub_part_condition
+                                           WHERE fc_id = @fc AND sub_register = @reg AND part_slot = @slot AND read_at <= @at
+                                           ORDER BY read_at DESC LIMIT 1) latest
+                            WHERE latest.item_id = @item AND latest.condition = @cond)
+                        ON CONFLICT (fc_id, sub_register, part_slot, read_at) DO NOTHING", conn, tx);
+                    cmd.Parameters.AddWithValue("fc", (decimal)row.FcId);
+                    cmd.Parameters.AddWithValue("reg", (long)r.Register);
+                    cmd.Parameters.AddWithValue("slot", r.PartSlot);
+                    cmd.Parameters.AddWithValue("at", DateTimeOffset.FromUnixTimeMilliseconds((long)(r.At * 1000)).UtcDateTime);
+                    cmd.Parameters.AddWithValue("item", (int)r.ItemId);
+                    cmd.Parameters.AddWithValue("cond", r.Condition);
+                    cmd.Parameters.AddWithValue("name", r.SubName);
+                    cmd.Parameters.AddWithValue("cid", (decimal)r.Cid);
+                    cmd.Parameters.AddWithValue("ret", r.ReturnAt > 0 ? DateTimeOffset.FromUnixTimeSeconds(r.ReturnAt).UtcDateTime : DBNull.Value);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                await tx.CommitAsync();
+            });
+        }
+
         // ---- Venture rewards (AutoRetainer's statistics) ----
 
         public sealed class VentureRow

@@ -71,6 +71,9 @@ namespace XIVFleetCompanion
         };
         private static readonly string[] SpareSlotOrder = { "Bow", "Bridge", "Hull", "Stern" };
 
+        /// <summary>Whether an item is a submarine part (any class, plain or modified).</summary>
+        public static bool IsSubPart(uint item) => Bases.Any(b => item >= b.Base && item <= b.Base + 3);
+
         /// <summary>A fitted part's letter ("S", "U+"), or its number as text for anything else ("null" for none), as the app.</summary>
         public static string PartLetter(int? item)
         {

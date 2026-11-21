@@ -68,6 +68,9 @@ public sealed class Plugin : IDalamudPlugin
     // What was last written per character / FC, so unchanged data is not written again every
     // sync. Forgotten once an hour, so everything is rewritten at least hourly.
     private readonly ChangeTracker changes = new(TimeSpan.FromHours(1), DateTime.UtcNow);
+    // Sub part condition, read in the FC workshop and written at the next sync (PartCondition).
+    private readonly PartCondition.Log partConditions = new();
+    private DateTime partConditionsReadAt = DateTime.MinValue;
     private bool warnedNoCurrentTable = false;
 
     // Characters seen logging in on this setup (cid -> when, UTC), not yet recorded in the database; and the
@@ -322,6 +325,7 @@ public sealed class Plugin : IDalamudPlugin
         NoteLogin();
         UpdateInfoBar();
         Backups.Tick(DateTime.Now);
+        ReadPartConditions();
         // No new sync starts while the fleet is being moved or restored (WaitForSyncAsync).
         if (!Configuration.Enabled || moving) return;
 
@@ -348,6 +352,26 @@ public sealed class Plugin : IDalamudPlugin
                     syncInProgress = false;
                 }
             });
+        }
+    }
+
+    // Every couple of seconds while in the FC workshop (the only place the game has it): each sub part's condition. Only
+    // changes are kept, until the next sync writes them.
+    private void ReadPartConditions()
+    {
+        var now = DateTime.UtcNow;
+        if (!Configuration.Enabled || now - partConditionsReadAt < TimeSpan.FromSeconds(2)) return;
+        partConditionsReadAt = now;
+        try
+        {
+            var readings = PartConditionReader.Read(ClientState.IsLoggedIn ? PlayerState.ContentId : 0, Db.Unix(now));
+            if (readings != null && partConditions.Offer(readings) > 0)
+                Log.Debug($"Fleet Companion: {partConditions.Count} sub part condition reading(s) waiting for the next sync.");
+            lock (warned) warned.Remove("part-condition");
+        }
+        catch (Exception ex)
+        {
+            WarnOnce("part-condition", $"Fleet Companion: could not read sub part condition in the workshop — {ex.Message}");
         }
     }
 
@@ -1433,6 +1457,20 @@ public sealed class Plugin : IDalamudPlugin
                 if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
             }
         }
+        // Sub part condition read in the workshop since the last sync, for the characters synced here.
+        var partReadings = partConditions.Take();
+        if (partReadings.Count > 0)
+        {
+            var fcOf = characters.GroupBy(c => c.Snapshot.Cid).ToDictionary(g => g.Key, g => g.First().Snapshot.FcId);
+            var partRows = PartCondition.ToWrite(partReadings, fcOf);
+            bool partsWritten;
+            try { partsWritten = await DetailsWriter.WritePartConditionAsync(conn, partRows); }
+            catch { partConditions.PutBack(partReadings); throw; }
+            // A database without update 17 yet keeps them waiting; the app adds it when it next connects.
+            if (!partsWritten) partConditions.PutBack(partReadings);
+            else if (partRows.Count > 0) Log.Information($"Fleet Companion: stored {partRows.Count} sub part condition reading(s).");
+        }
+
         // Voyages already in its file are still read while it is not running; new ones are not recorded.
         if (!stRunning && characters.Any(c => c.Snapshot.SubmarineCount > 0))
             problems.Add(stFound

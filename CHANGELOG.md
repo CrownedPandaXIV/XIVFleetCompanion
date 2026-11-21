@@ -13,6 +13,10 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   come next.
 - **All five sub stats.** Surveillance, retrieval and favor are now read from the game's files alongside speed and
   range, for the Sub Calculator.
+- **Sub part condition is recorded.** While a character is in the Free Company's workshop, the plugin reads each
+  sub part's condition every couple of seconds and saves it at the next sync, keeping only changes: a voyage shows as
+  a drop, a repair as a rise. After a few weeks this tells the Sub Calculator how much each voyage wears your parts,
+  for its repair costs. Nothing shows it yet.
 
 ## 2.5.0 - 2026-11-21
 

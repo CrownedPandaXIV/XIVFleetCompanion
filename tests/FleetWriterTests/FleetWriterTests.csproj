@@ -33,6 +33,7 @@
     <Compile Include="..\..\XIVFleetCompanion\Market.cs" Link="Market.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubRoutes.cs" Link="SubRoutes.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubCalculatorData.cs" Link="SubCalculatorData.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\PartCondition.cs" Link="PartCondition.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Loot.cs" Link="Loot.cs" />
     <Compile Include="..\..\XIVFleetCompanion\ShoppingList.cs" Link="ShoppingList.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Trends.cs" Link="Trends.cs" />

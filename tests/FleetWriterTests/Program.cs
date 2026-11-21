@@ -1045,6 +1045,30 @@ internal static partial class Program
         }
     }
 
+    // Sub part condition read in the workshop: only changes wait for the sync, and only for characters synced here.
+    private static void PartConditionChecks()
+    {
+        var log = new PartCondition.Log();
+        PartCondition.Reading R(ulong cid, int slot, uint item, int condition, double at) => new(cid, 7, "Kestrel", 1, slot, item, condition, 0, at);
+        var kept = log.Offer(new[] { R(1, 0, 24356, 30000, 1), R(1, 1, 24361, 30000, 1) })
+                   + log.Offer(new[] { R(1, 0, 24356, 30000, 3), R(1, 1, 24361, 30000, 3) })
+                   + log.Offer(new[] { R(1, 0, 24356, 29100, 5), R(1, 1, 24361, 30000, 5), R(1, 2, 0, 30000, 5) })
+                   + log.Offer(new[] { R(1, 0, 24357, 30000, 7) });
+        var taken = log.Take();
+        Check(kept == 4 && taken.Select(r => $"{r.PartSlot}:{r.ItemId}:{r.Condition}@{r.At}").SequenceEqual(new[] { "0:24356:30000@1", "1:24361:30000@1", "0:24356:29100@5", "0:24357:30000@7" })
+              && log.Count == 0,
+            "part condition: a part's first reading, then only when its item or condition changes");
+        log.Offer(new[] { R(1, 0, 24357, 29000, 9) });
+        log.PutBack(taken);
+        Check(log.Take().Select(r => r.At).SequenceEqual(new[] { 1.0, 1, 5, 7, 9 }), "part condition: readings a sync couldn't write go back in front, oldest first");
+        for (var i = 0; i < PartCondition.Log.MaxPending + 10; i++) log.Offer(new[] { R(1, 3, 24360, i, i) });
+        Check(log.Count == PartCondition.Log.MaxPending && log.Take()[0].At == 10, "part condition: at most 5,000 wait, the oldest going first");
+        var rows = PartCondition.ToWrite(new[] { R(1, 0, 24356, 1, 1), R(2, 0, 24356, 1, 1), R(3, 0, 24356, 1, 1) },
+            new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 });
+        Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 1,
+            "part condition: written only for characters synced here that are in a Free Company");
+    }
+
     // The Sub Calculator: its data file (the app's, copied by its fixture script) and a build's five stats, with the app's
     // own cases (tests/sub-calculator-data.test.js).
     private static void SubCalculatorChecks()
@@ -1338,7 +1362,7 @@ internal static partial class Program
         using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
         var root = doc.RootElement;
         var files = DatabaseUpkeep.Files.Embedded();
-        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 16 && files.Updates.Count == 7 && files.Views != null,
+        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 17 && files.Updates.Count == 8 && files.Views != null,
             $"database: the plugin carries the app's files (app {files.AppVersion}, updates to {files.Latest})");
         var signature = root.GetProperty("signature").EnumerateObject().Select(p => (p.Name, Sql: p.Value.GetString()!)).ToList();
         var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
@@ -1427,7 +1451,7 @@ internal static partial class Program
                 await Exec(other, $"SELECT pg_advisory_unlock({DatabaseUpkeep.LockKey})");
             }
             var made = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
-            Check(made.Created && made.Version == 16 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
+            Check(made.Created && made.Version == 17 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
             var recorded = await Rows(c, "SELECT app_version FROM companion_views");
             Check((string)recorded[0][0]! == files.AppVersion, "database: the views are recorded with the app version the plugin's files came from");
 
@@ -1448,9 +1472,9 @@ internal static partial class Program
             {
                 await reader.OpenAsync();
                 var fine = await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
-                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 16, "database: a login that may only read is fine while nothing needs changing");
-                // As if made by a copy that had only up to update 15: update 16 is still to do.
-                await Exec(c, "UPDATE companion_schema_version SET version = 15");
+                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 17, "database: a login that may only read is fine while nothing needs changing");
+                // As if made by a copy that had only up to update 16: update 17 is still to do.
+                await Exec(c, "UPDATE companion_schema_version SET version = 16");
                 string? message = null;
                 try
                 {
@@ -1463,8 +1487,8 @@ internal static partial class Program
                 Check(message != null && message.Contains("\"pdb_reader\" is not allowed to change the tables"), "database: and says plainly when it can't apply an update: " + message);
             }
             var back = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
-            Check(back.Applied.SequenceEqual(new[] { "update 16: pc_last_read" }) && back.Version == 16, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
-            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 16");
+            Check(back.Applied.SequenceEqual(new[] { "update 17: sub_part_condition" }) && back.Version == 17, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
+            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 17");
             Check((string)by[0][0]! == "plugin test", "database: each version records who applied it");
 
             // A newer app or plugin updated it further: left alone, and said.
@@ -1483,11 +1507,11 @@ internal static partial class Program
             var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
             Check(keeper.StatusText == "Not looked at yet.", "database: nothing said before the first look");
             await keeper.RunIfDueAsync(c);
-            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 16)"),
+            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 17)"),
                 "database: the first read or sync brings it up to date and says so: " + keeper.StatusText);
             var recordedBy = await Rows(c, "SELECT app_version FROM companion_schema_version");
             Check((string)recordedBy[0][0]! == $"{files.AppVersion} (plugin 2.1.0)", "database: recorded as the plugin, with the app version of its files");
-            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 16");
+            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 17");
             await keeper.RunIfDueAsync(c);
             Check(said.Count == 1 && (await Rows(c, "SELECT count(*) FROM companion_schema_version"))[0][0] is 0L, "database: not looked at again until it's due");
         }
@@ -1693,6 +1717,37 @@ internal static partial class Program
             hours.Add(Math.Abs((Db.Time(r, 1) - DateTime.UnixEpoch).TotalMilliseconds - due[0].PredictedAtMs));
         });
         Check(hours.All(h => h < 1), $"file: saved under the hour (on the hour), with the date as given, on both ({string.Join(", ", hours)})");
+
+        // ---- Sub part condition, read in the workshop ----
+        PartCondition.Reading Part(int slot, uint item, int condition, double at) =>
+            new(18014498578000001, 1717000000, "Kestrel", 1, slot, item, condition, nowUnix + 3600, at);
+        var partRows = new List<PartCondition.Row>
+        {
+            new(bigFc, Part(0, 24356, 30000, nowUnix - 600.25)),
+            new(bigFc, Part(1, 24361, 30000, nowUnix - 600.25)),
+            new(bigFc, Part(0, 24356, 30000, nowUnix - 500)),   // the same again (another PC's reading): not kept
+            new(bigFc, Part(0, 24356, 28650, nowUnix - 400)),   // after a voyage
+            new(bigFc, Part(0, 24356, 30000, nowUnix - 300)),   // repaired
+        };
+        var partsSaved = new List<bool>();
+        await Each(async c => partsSaved.Add(await DetailsWriter.WritePartConditionAsync(c, partRows)));
+        await Each(async c => partsSaved.Add(await DetailsWriter.WritePartConditionAsync(c, partRows.Skip(3).ToList())));
+        var partsStored = new List<string>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, @"SELECT fc_id, sub_register, part_slot, item_id, condition, sub_name, read_at, return_at FROM companion_sub_part_condition
+                                                  ORDER BY read_at, part_slot");
+            await using var r = await cmd.ExecuteReaderAsync();
+            var lines = new List<string>();
+            while (await r.ReadAsync())
+                lines.Add($"{Db.Id(r, 0)} {Convert.ToInt64(r.GetValue(1))} {Convert.ToInt64(r.GetValue(2))} {Convert.ToInt64(r.GetValue(3))} {Convert.ToInt64(r.GetValue(4))} {r.GetString(5)} "
+                          + $"{(Db.Time(r, 6) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0.##} {(Db.Time(r, 7) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0}");
+            partsStored.Add(string.Join(" | ", lines));
+        });
+        var partsWanted = $"{bigFc} 1717000000 0 24356 30000 Kestrel -600.25 3600 | {bigFc} 1717000000 1 24361 30000 Kestrel -600.25 3600 | "
+                          + $"{bigFc} 1717000000 0 24356 28650 Kestrel -400 3600 | {bigFc} 1717000000 0 24356 30000 Kestrel -300 3600";
+        Check(partsSaved.All(s => s) && partsStored.All(s => s == partsWanted),
+            $"file: sub part condition keeps only changes (a voyage's drop, a repair's rise), and writing again adds nothing, on both: {string.Join(" / ", partsStored)}");
 
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();
@@ -2289,6 +2344,7 @@ internal static partial class Program
         MemoChecks();
         FcCreditChecks();
         SubCalculatorChecks();
+        PartConditionChecks();
         Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
             "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");
         RoutesAgainstTheApp();
