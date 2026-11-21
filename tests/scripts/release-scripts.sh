@@ -36,4 +36,46 @@ if echo '[]' > "$tmp/empty.json" && bash $scripts/testing-entry.sh "$tmp/empty.j
 else
   echo "PASS an empty repo.json is refused"
 fi
+
+# ---- Tagging and publishing, with a stand-in gh (tests/scripts/fake-gh.sh) keeping the releases and the Releases
+# repo's files in a folder ----
+work="$tmp/work"; export FAKE_GH="$tmp/gh"
+mkdir -p "$work/.github" "$work/XIVFleetCompanion/bin/x64/Release/XIVFleetCompanion" "$FAKE_GH/files" "$tmp/bin"
+cp -r $scripts "$work/.github/scripts"
+ln -s "$PWD/tests/scripts/fake-gh.sh" "$tmp/bin/gh"
+export PATH="$tmp/bin:$PATH" GH_TOKEN=x RELEASES_TOKEN=y GITHUB_REPOSITORY=CrownedPandaXIV/XIVFleetCompanion
+out="$work/XIVFleetCompanion/bin/x64/Release/XIVFleetCompanion"
+build() { printf '\xEF\xBB\xBF{"InternalName":"XIVFleetCompanion","AssemblyVersion":"%s","DalamudApiLevel":15}' "$1" > "$out/XIVFleetCompanion.json"; echo "zip $1" > "$out/latest.zip"; }
+printf '# Changelog\n\n## 1.0.2 - 2026-11-21\n\n- **New** things.\n\n## 1.0.1 - 2026-11-01\n\n- Old.\n' > "$work/CHANGELOG.md"
+cp "$tmp/repo.json" "$FAKE_GH/files/repo.json"
+in_work() { (cd "$work" && "$@"); }
+
+in_work bash .github/scripts/tag-release.sh 1.0.2 abc123 > /dev/null
+check "tag-release: a new version gets its release, with its changelog section as the notes" "$(cat "$FAKE_GH/releases/v1.0.2/notes")" "- **New** things."
+check "tag-release: run again, it changes nothing" "$(in_work bash .github/scripts/tag-release.sh 1.0.2 abc123)" "v1.0.2 is already released; nothing to do."
+: > "$FAKE_GH/releases/v1.0.2/notes"
+in_work bash .github/scripts/tag-release.sh 1.0.2 abc123 > /dev/null
+check "tag-release: an empty description is filled in" "$(cat "$FAKE_GH/releases/v1.0.2/notes")" "- **New** things."
+in_work bash .github/scripts/tag-release.sh 1.0.9 abc123 > /dev/null
+check "tag-release: a version with no changelog section says only its number" "$(cat "$FAKE_GH/releases/v1.0.9/notes")" "Version 1.0.9"
+
+for n in 3 4 5 6 7 8 9; do build "1.0.3.$n"; in_work bash .github/scripts/publish-testing.sh "1.0.3.$n" > /dev/null; done
+check "publish-testing: the test build is offered to testers, the normal version left as it was" \
+  "$(jq -r '.[0] | "\(.TestingAssemblyVersion) \(.DownloadLinkTesting) \(.AssemblyVersion)"' "$FAKE_GH/files/repo.json")" \
+  "1.0.3.9 https://github.com/CrownedPandaXIV/XIVFleetCompanion/releases/download/testing/XIVFleetCompanion-1.0.3.9.zip 1.0.1.0"
+check "publish-testing: only the newest 5 test builds are kept on the testing release" "$(ls "$FAKE_GH/releases/testing/assets" | tr '\n' ' ')" \
+  "XIVFleetCompanion-1.0.3.5.zip XIVFleetCompanion-1.0.3.6.zip XIVFleetCompanion-1.0.3.7.zip XIVFleetCompanion-1.0.3.8.zip XIVFleetCompanion-1.0.3.9.zip "
+build 1.0.3.1
+if in_work bash .github/scripts/publish-testing.sh 1.0.3.2 > /dev/null 2>&1; then echo "FAIL publish-testing: a build of another number is refused"; fail=1
+else echo "PASS publish-testing: a build of another number is refused"; fi
+
+build 1.0.2.0
+in_work bash .github/scripts/publish-plugin.sh 1.0.2 > /dev/null
+check "publish-plugin: the download is attached to the version's release" "$(cat "$FAKE_GH/releases/v1.0.2/assets/XIVFleetCompanion-1.0.2.zip")" "zip 1.0.2.0"
+check "publish-plugin: repo.json lists the version, its download and changelog, and no test build" \
+  "$(jq -r '.[0] | "\(.AssemblyVersion) \(.DownloadLinkInstall) \(.Changelog) \(.TestingAssemblyVersion // "none")"' "$FAKE_GH/files/repo.json")" \
+  "1.0.2.0 https://github.com/CrownedPandaXIV/XIVFleetCompanion/releases/download/v1.0.2/XIVFleetCompanion-1.0.2.zip - New things. none"
+rm "$FAKE_GH/files/repo.json"
+in_work bash .github/scripts/publish-plugin.sh 1.0.2 > /dev/null
+check "publish-plugin: a Releases repo with no repo.json yet gets one" "$(jq -r '.[0].AssemblyVersion' "$FAKE_GH/files/repo.json")" "1.0.2.0"
 exit $fail

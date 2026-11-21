@@ -13,6 +13,11 @@ on:
 permissions:
   contents: write
 
+# One publishing run at a time (this and release.yml both write repo.json): a second waits, never cancels.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   plugin:
     runs-on: windows-2022
@@ -22,6 +27,7 @@ jobs:
       uses: actions/checkout@v5
       with:
         submodules: recursive
+        persist-credentials: false
 
     - name: Install .NET
       uses: actions/setup-dotnet@v5
@@ -33,15 +39,22 @@ jobs:
         Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
         Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
 
-    - name: Build and publish the test build
+    # No token here: the build runs other people's code (NuGet packages, Dalamud), which must not reach the publishing one.
+    - name: Build the test build
+      id: build
+      shell: bash
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        build="${version}.${GITHUB_RUN_NUMBER}"
+        echo "Test build: ${build}"
+        echo "build=${build}" >> "$GITHUB_OUTPUT"
+        dotnet build --configuration Release -p:Version="${build}"
+
+    - name: Publish the test build
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
       run: |
         if [ -z "$RELEASES_TOKEN" ]; then echo "No RELEASES_TOKEN secret: the test build is not published."; exit 0; fi
-        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
-        build="${version}.${GITHUB_RUN_NUMBER}"
-        echo "Test build: ${build}"
-        dotnet build --configuration Release -p:Version="${build}"
-        bash .github/scripts/publish-testing.sh "${build}"
+        bash .github/scripts/publish-testing.sh "${{ steps.build.outputs.build }}"

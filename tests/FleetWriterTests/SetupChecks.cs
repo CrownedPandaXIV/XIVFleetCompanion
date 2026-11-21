@@ -103,7 +103,7 @@ internal static partial class Program
 
         // The administrator script's edits of PostgreSQL's files, the same as the app's for the same files (run with
         // PowerShell where there is one: GitHub's test machines have it).
-        var pwsh = new[] { Environment.GetEnvironmentVariable("FLEET_PWSH"), "/usr/bin/pwsh" }.FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p));
+        var pwsh = new[] { Environment.GetEnvironmentVariable("FLEET_PWSH"), "/usr/bin/pwsh", "/usr/local/bin/pwsh", "/opt/microsoft/powershell/7/pwsh" }.FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p));
         if (pwsh != null)
         {
             var script = Path.Combine(Path.GetTempPath(), $"elevated-{Guid.NewGuid():N}.ps1");
