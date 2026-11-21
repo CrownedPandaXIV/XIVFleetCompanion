@@ -81,6 +81,26 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
   read at first.
 - Route Optimization: with no sub off its Target route, it says why (no sub at rank 85 yet, or no Fight Club Data
   imported) instead of always "all on target", as the app now does.
+- **A chart that can't be read says why**, instead of showing Loading for good and being read again and again (the
+  fleet file busy, a dropped connection, no history yet).
+- **"Remove everything from this PC" keeps its result on screen** (what was removed, or why it stopped), and the check
+  of this PC no longer wipes other tools' results or restarts on its own.
+- **A Made number typed on the Shopping List is always saved**, also when the list is worked out again under it.
+  Unticking "all made" puts back the count from before, not 0.
+- **Saving a change says what went wrong**: "Could not reach the database" only when it couldn't be reached.
+- Test Database Connection connects the way syncing does (following a database that moved) and says a problem in
+  plain words.
+- Fight Club Data: a spreadsheet that can't be read says so, and merged cells are read right when the sheet doesn't
+  start at A1 (in the app too).
+- The Subs page's forecast line says when it couldn't be read. A passing database error no longer stops this PC's
+  check-ins for the PCs page until the game restarts.
+- Gil & Market: a fleet file without the loot view still shows the page (without loot prices).
+- After the clocks go back, Inventory, Where Is It?, the Shopping List and Trends still refresh as usual.
+- The unsold-days box follows a change made in the app or on another PC. Change order no longer flickers a row
+  twice. Route Optimization shows a renamed character's new name. The "Choose characters" list is the right height at
+  any UI scale. "Copied" on the Check page shows on the button, keeping the check's result. Supplies' "Updated" line
+  sits on its own line. Database tools gives the last sync in local time with its offset, not marked UTC. Exported
+  files are dated the same way as the app's on any calendar.
 
 ## 2.4.8 - 2026-11-20
 

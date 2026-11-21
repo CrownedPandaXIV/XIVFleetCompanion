@@ -217,8 +217,10 @@ namespace XIVFleetCompanion
                 var (pc, account, version) = checkIn();
                 checkInRefused = !await DetailsWriter.WritePcReadAsync(conn, pc, account, version);
             }
-            catch (PostgresException)
+            catch (PostgresException ex) when (ex.SqlState is "42501" or "42P01" or "42703")
             {
+                // A login that may only read, or a database without the table: not again. Anything else (a timeout, a
+                // lock, a deadlock) is tried again at the next check-in.
                 checkInRefused = true;
             }
             catch (Exception)
@@ -305,6 +307,7 @@ namespace XIVFleetCompanion
                 Routes = Routes with { Error = notSetUp };
                 Market = Market with { Error = notSetUp };
                 Settings = Settings with { Error = notSetUp };
+                Forecasts = Forecasts with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -369,7 +372,7 @@ namespace XIVFleetCompanion
                     if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; Loot = Loot with { Error = text }; }
-                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; }
+                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; Forecasts = Forecasts with { Error = text }; }
                     if (market) Market = Market with { Error = text };
                 }
                 finally
@@ -683,6 +686,8 @@ namespace XIVFleetCompanion
                 while (await r.ReadAsync()) loot.Add((TextOrNull(r, "world"), Int(r, "item")));
             }
             catch (PostgresException ex) when (ex.SqlState == "42P01") { }
+            // A fleet file whose views are older than this plugin: no loot prices, but the rest of the page still shows.
+            catch (System.Data.SQLite.SQLiteException ex) when (ex.Message.Contains("no such table") || ex.Message.Contains("no such view")) { }
             return (read, new MarketAsk(exclude, listings.Select(l => (l.World, l.ItemId)).Concat(ventures.Select(v => ((string?)v.World, v.ItemId))).Concat(loot).ToList()));
         }
 
@@ -920,19 +925,29 @@ namespace XIVFleetCompanion
         /// minute old.</summary>
         public void ReadHoldingsIfDue(string key, string where, string idColumn, IEnumerable<object> ids, bool force = false)
         {
-            if (!force && HoldingsKey == key && Holdings.At.HasValue && DateTime.Now - Holdings.At.Value < ListsEvery) return;
+            if (!force && HoldingsKey == key && Fresh(Holdings.At, ListsEvery)) return;
             RunInventoryRead(async conn =>
             {
                 var before = HoldingsKey == key ? Holdings : new FleetRead<List<HoldingRow>>(null, null, null);
-                HoldingsKey = key;
+                // The rows first, then the key they're for: the window never sees the new key with the old rows.
                 Holdings = before;
+                HoldingsKey = key;
                 Holdings = await Read(conn, c => ReadHoldings(c, where, idColumn, ids), before);
             }, text => Holdings = Holdings with { Error = text });
         }
 
+        // Read within `every`. The times are the PC's own clock: when it goes back (the end of summer time) a read looks
+        // newer than now, and is counted as due rather than fresh for an hour.
+        private static bool Fresh(DateTime? at, TimeSpan every)
+        {
+            if (at is not DateTime when) return false;
+            var age = DateTime.Now - when;
+            return age >= TimeSpan.Zero && age < every;
+        }
+
         public void ReadItemTotalsIfDue(bool force = false)
         {
-            if (!force && ItemTotals.At.HasValue && DateTime.Now - ItemTotals.At.Value < ListsEvery) return;
+            if (!force && Fresh(ItemTotals.At, ListsEvery)) return;
             RunInventoryRead(async conn => ItemTotals = await Read(conn, ReadItemTotals, ItemTotals), text => ItemTotals = ItemTotals with { Error = text });
         }
 
@@ -940,7 +955,7 @@ namespace XIVFleetCompanion
         public void ReadShoppingIfDue(bool force = false)
         {
             var at = Shopping.At;
-            if (!force && at.HasValue && DateTime.Now - at.Value < PartsEvery && !(Parts.At is DateTime partsAt && partsAt > at.Value)) return;
+            if (!force && Fresh(at, PartsEvery) && !(Parts.At is DateTime partsAt && partsAt > at.Value)) return;
             RunInventoryRead(async conn => Shopping = await Read(conn, ReadShopping, Shopping), text => Shopping = Shopping with { Error = text });
         }
 
@@ -981,10 +996,11 @@ namespace XIVFleetCompanion
         private volatile bool editing;
         /// <summary>True while an edit is being saved.</summary>
         public bool Editing => editing;
-        /// <summary>The last edit: what it was, why it failed (null: saved) and when.</summary>
-        public (string What, string? Error, DateTime At)? LastEdit { get; private set; }
+        /// <summary>The last edit: what it was, why it failed (null: saved) and when. One object, set in one go from the
+        /// background, so the window never reads half of one edit and half of another.</summary>
+        public EditNote? LastEdit { get; private set; }
+        public sealed record EditNote(string What, string? Error, DateTime At);
 
-        /// <summary>Saves an edit (FleetEdits): edit answers null when done, else why not. done is told the same, on a background thread.</summary>
         /// <summary>A small write of the page's own (no message, nothing read again), such as the Shopping List's checked
         /// ticks; a failure is left for next time.</summary>
         public void SaveQuietly(Func<DbConnection, Task> save)
@@ -1005,42 +1021,59 @@ namespace XIVFleetCompanion
             });
         }
 
+        /// <summary>Saves an edit (FleetEdits): edit answers null when done, else why not. done is told the same, on a background thread.</summary>
         public void Edit(string what, Func<DbConnection, Task<string?>> edit, Action<string?>? done = null)
         {
             if (editing)
             {
-                LastEdit = (what, "Another change is still being saved. Try again in a moment.", DateTime.Now);
+                LastEdit = new EditNote(what, "Another change is still being saved. Try again in a moment.", DateTime.Now);
                 return;
             }
             var cs = connectionString();
             if (cs == null)
             {
-                LastEdit = (what, "The database isn't set up yet (Settings tab).", DateTime.Now);
+                LastEdit = new EditNote(what, "The database isn't set up yet (Settings tab).", DateTime.Now);
                 return;
             }
             editing = true;
             LastEdit = null;
             Task.Run(async () =>
             {
-                string? error;
+                string? error = null;
+                DbConnection? conn = null;
                 try
                 {
-                    await using var conn = await OpenAsync(cs);
-                    error = await edit(conn);
-                }
-                catch (PostgresException ex)
-                {
-                    error = ex.MessageText;
-                }
-                catch (Exception ex)
-                {
-                    error = ReachFailure(ex);
+                    // "Could not reach" only when the database (or file) couldn't be opened; once open, the reason itself.
+                    try
+                    {
+                        conn = await OpenAsync(cs);
+                    }
+                    catch (Exception ex)
+                    {
+                        error = ReachFailure(ex);
+                    }
+                    if (conn != null)
+                    {
+                        try
+                        {
+                            error = await edit(conn);
+                        }
+                        catch (PostgresException ex)
+                        {
+                            error = ex.MessageText;
+                        }
+                        catch (Exception ex)
+                        {
+                            error = ex.Message;
+                        }
+                    }
                 }
                 finally
                 {
+                    if (conn != null) await conn.DisposeAsync();
                     editing = false;
                 }
-                LastEdit = (what, error, DateTime.Now);
+                LastEdit = new EditNote(what, error, DateTime.Now);
                 if (error == null) ReadAgainSoon();
                 done?.Invoke(error);
             });
@@ -1068,7 +1101,7 @@ namespace XIVFleetCompanion
 
         public void ReadTrendsIfDue(bool force = false)
         {
-            if (!force && Trends.At.HasValue && DateTime.Now - Trends.At.Value < TrendsEvery) return;
+            if (!force && Fresh(Trends.At, TrendsEvery)) return;
             RunInventoryRead(async conn => Trends = await Read(conn, ReadTrendsMeta, Trends), text => Trends = Trends with { Error = text });
         }
 
@@ -1138,7 +1171,25 @@ namespace XIVFleetCompanion
                         {
                             error = ex.MessageText;
                         }
-                        lock (trendLock) Finished(job.Key, result, error);
+                        catch (System.Data.SQLite.SQLiteException ex) when (ex.Message.Contains("no such table") || ex.Message.Contains("no such view"))
+                        {
+                            error = "The fleet file has no recorded history yet.";
+                        }
+                        catch (Exception ex)
+                        {
+                            // Anything else (the file busy, the connection dropped): this chart says why, rather than
+                            // showing Loading for good and being read again and again.
+                            error = conn.State == System.Data.ConnectionState.Open ? ex.Message : ReachFailure(ex);
+                        }
+                        lock (trendLock)
+                        {
+                            Finished(job.Key, result, error);
+                            if (conn.State == System.Data.ConnectionState.Open) continue;
+                            // The connection is gone: the charts still waiting say so too (asked again they start afresh).
+                            foreach (var (key, _) in trendQueue) Finished(key, null, error);
+                            trendQueue.Clear();
+                        }
+                        break;
                     }
                 }
                 catch (Exception ex)
@@ -1241,7 +1292,7 @@ namespace XIVFleetCompanion
 
         public void ReadHeldItemsIfDue(bool force = false)
         {
-            if (!force && HeldItems.At.HasValue && DateTime.Now - HeldItems.At.Value < ListsEvery) return;
+            if (!force && Fresh(HeldItems.At, ListsEvery)) return;
             RunInventoryRead(async conn => HeldItems = await Read(conn, ReadHeldItems, HeldItems), text => HeldItems = HeldItems with { Error = text });
         }
 

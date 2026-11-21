@@ -52,6 +52,10 @@ public partial class MainWindow
     private bool removeTailscale = true;
     private string removeConfirm = "";
     private DatabaseAdmin.RemovalPlan? removalPlan;
+    // The plan is worked out on its own (not as a tool job, which would wipe another job's steps and result), once per
+    // opening or "Check again"; why it couldn't be, if it couldn't.
+    private bool removalPlanning;
+    private string? removalPlanError;
     private readonly FileDialogManager toolDialog = new();
 
     private DatabaseAdmin.Connection? SavedConnection() =>
@@ -375,7 +379,8 @@ public partial class MainWindow
                 $"Fleet data: {plugin.Configuration.FleetStore}",
                 $"Database: {(saved == null ? "none saved" : $"{saved.Host}:{saved.Port}/{saved.Database} as {saved.User}")}",
                 $"PostgreSQL here: {pgHere}, Tailscale here: {tsHere}",
-                $"Last sync: {plugin.Configuration.LastSyncTimestamp?.ToString("u") ?? "never"}",
+                // The time is this PC's own (local), so it's given with its offset from UTC, not labelled UTC.
+                $"Last sync: {(plugin.Configuration.LastSyncTimestamp is DateTime last ? LocalWithOffset(last) : "never")}",
                 $"Sync problem: {plugin.SyncProblem ?? "none"}", $"Sync warning: {plugin.SyncWarning ?? "none"}",
                 $"Database version: {plugin.Keeper.StatusText}",
             });
@@ -390,20 +395,39 @@ public partial class MainWindow
         // ---- Remove everything ----
         if (ImGui.TreeNode("Remove everything from this PC"))
         {
-            if (removalPlan == null && !toolBusy)
+            if (removalPlan == null && !removalPlanning && removalPlanError == null)
             {
                 var c = saved;
-                StartTool("remove-plan", async () =>
+                removalPlanning = true;
+                Task.Run(async () =>
                 {
-                    var addresses = WindowsSetup.Addresses();
-                    var installed = WindowsSetup.ReadInstalled(SharedBackups.Folder);
-                    var dbHere = c != null && WindowsSetup.IsThisPc(c.Host, addresses);
-                    var (pg, tsh) = await WindowsSetup.Detect();
-                    removalPlan = DatabaseAdmin.Plan(new DatabaseAdmin.RemovalFacts(installed, c, dbHere, pg, tsh, new List<string>(), null));
-                    return (true, null);
+                    try
+                    {
+                        var addresses = WindowsSetup.Addresses();
+                        var installed = WindowsSetup.ReadInstalled(SharedBackups.Folder);
+                        var dbHere = c != null && WindowsSetup.IsThisPc(c.Host, addresses);
+                        var (pg, tsh) = await WindowsSetup.Detect();
+                        removalPlan = DatabaseAdmin.Plan(new DatabaseAdmin.RemovalFacts(installed, c, dbHere, pg, tsh, new List<string>(), null));
+                    }
+                    catch (Exception e)
+                    {
+                        removalPlanError = e.Message;
+                    }
+                    finally
+                    {
+                        removalPlanning = false;
+                    }
                 });
             }
-            if (removalPlan is { } plan)
+            if (removalPlanning) Colored(Dim, "Checking this PC...");
+            if (removalPlanError != null)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber)) Ui.Wrapped($"Couldn't check this PC: {removalPlanError}");
+                if (ImGui.SmallButton("Check again##removePlanAgain")) removalPlanError = null;
+            }
+            // Once everything is removed, only the result shows (the list of what it removes no longer applies).
+            var removedAll = toolJob == "remove" && !toolBusy && toolOk && toolResult != null;
+            if (removalPlan is { } plan && !removedAll)
             {
                 Ui.Text("Removes:");
                 foreach (var r in plan.Removes) Ui.Bullet(r);
@@ -453,14 +477,28 @@ public partial class MainWindow
                                     var s = b.Load().Settings;
                                     b.Save(s with { Enabled = false });
                                 });
-                            removalPlan = null;
                             return (r.Ok, r.Ok ? "Everything is removed. Remove the plugin in the game's plugin list if you're done with it." : r.Error);
                         });
                     }
                 }
             }
             ToolProgress("remove");
+            // After a run that didn't finish, what's left on this PC can be looked at again.
+            if (toolJob == "remove" && !toolBusy && !toolOk && toolResult != null && ImGui.SmallButton("Check this PC again##removeRecheck"))
+            {
+                removalPlan = null;
+                toolResult = null;
+            }
             ImGui.TreePop();
         }
+    }
+
+    // "2026-11-21 14:05:00 UTC+01:00": a local time as it is, with how far it is from UTC.
+    private static string LocalWithOffset(DateTime local)
+    {
+        var offset = TimeZoneInfo.Local.GetUtcOffset(local);
+        var sign = offset < TimeSpan.Zero ? "-" : "+";
+        return local.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)
+            + $" UTC{sign}{Math.Abs(offset.Hours):00}:{Math.Abs(offset.Minutes):00}";
     }
 }

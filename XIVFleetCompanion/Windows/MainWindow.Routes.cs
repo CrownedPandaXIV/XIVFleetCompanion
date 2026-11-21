@@ -202,6 +202,8 @@ public partial class MainWindow
     // A character's name and world, for the Route Optimization page (from the Parts read's characters).
     private (string Name, string World) CharacterOf(long cid)
     {
+        // Worked out again after each Subs read, so a rename or world transfer shows here as on the other pages.
+        if (!ReferenceEquals(characterNamesFor, reader.Subs.Data)) { characterNames.Clear(); characterNamesFor = reader.Subs.Data; }
         if (characterNames.TryGetValue(cid, out var known)) return known;
         var c = reader.Subs.Data?.FirstOrDefault(x => x.Cid == cid);
         var found = c != null ? (c.Character, c.World) : (cid.ToString(CultureInfo.InvariantCulture), "");
@@ -209,6 +211,7 @@ public partial class MainWindow
         return found;
     }
     private readonly Dictionary<long, (string, string)> characterNames = new();
+    private object? characterNamesFor;
 
     private void DrawRoutes()
     {

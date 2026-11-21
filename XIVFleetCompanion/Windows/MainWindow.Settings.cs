@@ -182,6 +182,11 @@ public partial class MainWindow
                             fightClubLabel = "";
                             fightClubRead = read;
                         }
+                        catch (Exception ex)
+                        {
+                            Plugin.Log.Warning($"Fight Club import: {ex}");
+                            fightClubRead = FightClubImport.CouldNotRead(ex.Message);
+                        }
                         finally
                         {
                             fightClubReading = false;

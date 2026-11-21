@@ -87,7 +87,8 @@ public partial class MainWindow
         if (ImGui.Button("All")) foreach (var o in options) chosen.Add(key(o));
         ImGui.SameLine();
         if (ImGui.Button("None")) chosen.Clear();
-        using var list = ImRaii.Child($"##chooseList{id}", new System.Numerics.Vector2(320 * ImGuiHelpers.GlobalScale, Math.Min(400, options.Count * ImGui.GetFrameHeightWithSpacing() + 8) * ImGuiHelpers.GlobalScale), false);
+        // At most 400 (scaled) tall; the rows' own height is already scaled.
+        using var list = ImRaii.Child($"##chooseList{id}", new System.Numerics.Vector2(320 * ImGuiHelpers.GlobalScale, Math.Min(400 * ImGuiHelpers.GlobalScale, options.Count * ImGui.GetFrameHeightWithSpacing() + 8)), false);
         if (!list) return;
         foreach (var o in options)
         {

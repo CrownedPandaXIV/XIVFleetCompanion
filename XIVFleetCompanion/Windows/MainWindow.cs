@@ -925,8 +925,7 @@ public partial class MainWindow : Window, IDisposable
         RefreshButton();
         ImGui.SameLine();
         SuppliesTable.DrawControls();
-        ImGui.SameLine();
-        ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
+        ReadLine(reader.Supplies, FleetReader.SuppliesEvery); // on its own line, as on every other page
         var supplies = reader.Supplies.Data;
         if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
         if (supplies == null) return;

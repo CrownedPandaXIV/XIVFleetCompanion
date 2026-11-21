@@ -72,7 +72,15 @@ namespace XIVFleetCompanion
             {
                 return Failed("read", ex.Message);
             }
+            catch (Exception ex)
+            {
+                // Anything else a damaged or unusual file can cause: said, rather than the import quietly doing nothing.
+                return Failed("read", $"This spreadsheet couldn't be read ({ex.Message}). Download it from Fight Club again, or import it in the app.");
+            }
         }
+
+        /// <summary>A read that failed outright, for whoever shows it (Settings).</summary>
+        public static ReadResult CouldNotRead(string why) => Failed("read", $"This spreadsheet couldn't be read: {why}");
 
         private static ReadResult Failed(string stage, string error, List<string>? headers = null) =>
             new(false, stage, error, headers ?? new List<string>(), new List<string>(), new List<Row>());
@@ -90,11 +98,11 @@ namespace XIVFleetCompanion
                 return Failed("read", $"This isn't a spreadsheet the plugin can read (.xlsx): {ex.Message}");
             }
 
-            // A merged cell's value is only in its top-left cell: copied over every cell it covers (the app does this
-            // with the merge's place on the sheet, also where the sheet doesn't start at A1).
+            // A merged cell's value is only in its top-left cell: copied over every cell it covers (as the app; both place
+            // merges within the grid, which starts at the sheet's first used cell).
             foreach (var (r1, c1, r2, c2) in merges)
             {
-                var value = r1 < grid.Count && c1 < grid[r1].Count ? grid[r1][c1] : null;
+                var value = r1 >= 0 && c1 >= 0 && r1 < grid.Count && c1 < grid[r1].Count ? grid[r1][c1] : null;
                 if (value == null) continue;
                 for (var r = r1; r <= r2; r++)
                 {
@@ -254,7 +262,11 @@ namespace XIVFleetCompanion
                 foreach (var (r, c, value) in cells)
                     if (r >= s.R1 && r <= s.R2 && c >= s.C1 && c <= s.C2) grid[r - s.R1][c - s.C1] = value;
             }
-            var merges = Named(sheet, "mergeCell").Select(m => (string?)m.Attribute("ref")).Where(r => !string.IsNullOrEmpty(r)).Select(r => Range(r!)).ToList();
+            // Merges are given where they are on the sheet; the grid starts at the sheet's first used cell, so they're moved
+            // by as much (a sheet starting at B2 would otherwise copy each merged value one row and one column off).
+            var (top, left) = size is { } used ? (used.R1, used.C1) : (0, 0);
+            var merges = Named(sheet, "mergeCell").Select(m => (string?)m.Attribute("ref")).Where(r => !string.IsNullOrEmpty(r)).Select(r => Range(r!))
+                .Select(m => (m.R1 - top, m.C1 - left, m.R2 - top, m.C2 - left)).ToList();
             return (grid, merges);
         }
 
