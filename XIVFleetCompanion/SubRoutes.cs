@@ -243,20 +243,27 @@ namespace XIVFleetCompanion
             return null;
         }
 
-        /// <summary>Current gil/day: the sub's route and parts against Fight Club's rows for that route (the first whose
-        /// build ranks it clears), after repair kits; null when none matches.</summary>
+        /// <summary>Current gil/day: the sub's route and parts against Fight Club's rows for that route, after repair kits;
+        /// null when none matches. Among the rows whose rank it clears, the one whose build is the sub's own parts; failing
+        /// that, the one needing the highest rank it clears (as the app's computeCurrentGilPerDay).</summary>
         public static double? CurrentGilPerDay(int rank, string currentRoute, string[] parts, List<FightClubRow> rows)
         {
             if (currentRoute.Length == 0) return null;
             var name = currentRoute.Replace("-", "");
-            foreach (var row in rows.Where(r => r.Route == name))
+            var qualifying = rows.Where(r => r.Route == name)
+                .Select(r => (Row: r, Builds: new[] { PartsPlanner.ParseRankBuild(r.UnmodMinRank), PartsPlanner.ParseRankBuild(r.MinRankBuild) }
+                    .Where(b => b != null && rank >= b.Value.Rank).Select(b => b!.Value).ToList()))
+                .Where(q => q.Builds.Count > 0).ToList();
+            if (qualifying.Count == 0) return null;
+            bool Own((int Rank, string[] Parts) b) => b.Parts.Length == parts.Length && b.Parts.Zip(parts).All(p => p.First == p.Second);
+            int Highest((FightClubRow Row, List<(int Rank, string[] Parts)> Builds) q) => q.Builds.Max(b => b.Rank);
+            var pick = qualifying.FirstOrDefault(q => q.Builds.Any(Own));
+            if (pick.Row == null)
             {
-                var unmod = PartsPlanner.ParseRankBuild(row.UnmodMinRank);
-                var modded = PartsPlanner.ParseRankBuild(row.MinRankBuild);
-                if ((unmod != null && rank >= unmod.Value.Rank) || (modded != null && rank >= modded.Value.Rank))
-                    return Round(PartsPlanner.NetGilPerDay(row.AsParts, parts));
+                pick = qualifying[0];
+                foreach (var q in qualifying.Skip(1)) if (Highest(q) > Highest(pick)) pick = q;
             }
-            return null;
+            return Round(PartsPlanner.NetGilPerDay(pick.Row.AsParts, parts));
         }
 
         /// <summary>A sub's speed or range: its rank's plus each part's; null when the rank or a part isn't known.</summary>

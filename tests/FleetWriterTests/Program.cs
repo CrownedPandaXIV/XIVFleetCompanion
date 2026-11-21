@@ -2796,6 +2796,16 @@ internal static partial class Program
         await DetailsChecks(conn);
         ReaderChecks();
         {
+            // The Shopping List's ticks checked against the list and saved back, as the app does (reconcileByAhead).
+            var four = ShoppingMath.ParseProgress("{\"21794\":{\"made\":4,\"outOf\":4}}");
+            var oneLeft = ShoppingMath.Reconciled(four, new() { (0, new() { (21794, 1L) }) });
+            var same = ShoppingMath.Reconciled(ShoppingMath.ParseProgress("{\"21794\":{\"made\":1,\"outOf\":1}}"), new() { (0, new() { (21794, 1L) }) });
+            var offList = ShoppingMath.Reconciled(four, new() { (0, new() { (21795, 2L) }) });
+            var ahead = ShoppingMath.Reconciled(ShoppingMath.ParseProgress("{\"21794\":{\"made\":2,\"outOf\":3,\"ahead\":7}}"), new() { (0, new()), (7, new() { (21794, 3L) }) });
+            Check(oneLeft == "{\"21794\":{\"made\":1,\"outOf\":1}}" && same == null && offList == "{}" && ahead == null,
+                $"shopping list: ticks are checked against the list and saved back as the app saves them ({oneLeft}, {same ?? "null"}, {offList}, {ahead ?? "null"})");
+        }
+        {
             var gamesFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"games-{Guid.NewGuid():N}.json");
             var t0 = new DateTime(2026, 11, 21, 12, 0, 0, DateTimeKind.Utc);
             var alone = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "", t0);

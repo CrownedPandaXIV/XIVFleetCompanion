@@ -985,6 +985,26 @@ namespace XIVFleetCompanion
         public (string What, string? Error, DateTime At)? LastEdit { get; private set; }
 
         /// <summary>Saves an edit (FleetEdits): edit answers null when done, else why not. done is told the same, on a background thread.</summary>
+        /// <summary>A small write of the page's own (no message, nothing read again), such as the Shopping List's checked
+        /// ticks; a failure is left for next time.</summary>
+        public void SaveQuietly(Func<DbConnection, Task> save)
+        {
+            var cs = connectionString();
+            if (cs == null) return;
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await using var conn = await OpenAsync(cs);
+                    await save(conn);
+                }
+                catch (Exception)
+                {
+                    // Tried again the next time the list is worked out.
+                }
+            });
+        }
+
         public void Edit(string what, Func<DbConnection, Task<string?>> edit, Action<string?>? done = null)
         {
             if (editing)

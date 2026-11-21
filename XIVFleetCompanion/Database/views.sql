@@ -164,13 +164,20 @@ WITH setting AS (
                    WHERE setting_key = 'not_synced_after_minutes' AND setting_value = round(setting_value)
                      AND setting_value BETWEEN 10 AND 1440), 30) AS minutes
 ),
+-- A character with no account label counts with the others of the PC it last logged in on, where that's known
+-- (characters/not-synced.js).
+characters AS (
+  SELECT c.cid, c.name, c.world, c.account_label, c.last_synced_at,
+         coalesce(nullif(c.account_label, ''), 'pc:' || l.pc_name, 'Ungrouped') AS account
+  FROM companion_character_current c LEFT JOIN companion_character_login l ON l.cid = c.cid
+),
 accounts AS (
-  SELECT coalesce(nullif(account_label, ''), 'Ungrouped') AS account, max(last_synced_at) AS newest
-  FROM companion_character_current GROUP BY 1
+  SELECT account, max(last_synced_at) AS newest
+  FROM characters GROUP BY 1
 )
 SELECT c.cid, c.name, c.world, c.account_label, a.newest - c.last_synced_at AS behind
-FROM companion_character_current c
-JOIN accounts a ON a.account = coalesce(nullif(c.account_label, ''), 'Ungrouped')
+FROM characters c
+JOIN accounts a ON a.account = c.account
 CROSS JOIN setting st
 WHERE a.newest - c.last_synced_at >= make_interval(mins => st.minutes);
 
@@ -309,8 +316,8 @@ SELECT c.cid, c.name, c.world, c.account_label, so.sort_index,
        l.pc_name AS login_pc, l.account_label AS login_label, l.logged_in_at,
        CAST(coalesce(b.subs_built, 0) AS int) AS subs_built,
        CAST(floor(extract(epoch FROM ns.behind) / 60) AS int) AS behind_minutes,
-       (coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND coalesce(c.ceruleum, 0) < t.ceruleum) AS low_ceruleum,
-       (coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND coalesce(c.repair_kits, 0) < t.repair_kits) AS low_repair_kits,
+       coalesce(coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND c.ceruleum < t.ceruleum, false) AS low_ceruleum,  -- not known yet: not low
+       coalesce(coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND c.repair_kits < t.repair_kits, false) AS low_repair_kits,
        c.num_sub_slots, t.ceruleum AS ceruleum_warning, t.repair_kits AS repair_kit_warning
 FROM companion_character_current c
 CROSS JOIN thresholds t
@@ -402,6 +409,10 @@ SELECT a.fc_id, a.fc_name, a.fc_master, a.fc_points, a.fc_rank, a.total_members,
        CASE WHEN NOT coalesce(a.has_house, false) AND a.reference IS NOT NULL THEN a.reference + interval '720 hours' END AS eligible_at,
        CASE WHEN coalesce(a.has_house, false) OR a.reference IS NULL THEN NULL
             WHEN a.rank_number >= 6 AND a.days_since_founding >= 30 THEN 'Eligible'
+            -- Both still to come: say both, so nobody plans to bid on a day the rank still won't allow.
+            WHEN a.days_since_founding < 30 AND NOT coalesce(a.rank_number >= 6, false)
+              THEN 'Rank ' || coalesce(CAST(a.rank_number AS text), '?') || '/6, and ' || CAST(ceil(30 - a.days_since_founding) AS int) || ' more day'
+                 || CASE WHEN ceil(30 - a.days_since_founding) = 1 THEN '' ELSE 's' END
             WHEN a.days_since_founding < 30 THEN 'Eligible in ' || CAST(ceil(30 - a.days_since_founding) AS int) || ' day'
                  || CASE WHEN ceil(30 - a.days_since_founding) = 1 THEN '' ELSE 's' END
             ELSE 'Rank too low (' || coalesce(CAST(a.rank_number AS text), '?') || '/6)' END AS eligibility,

@@ -69,6 +69,16 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
 - Windows of a number of days are exactly that many 24-hour days on both, so they don't shift by an hour after a
   daylight-saving change. The fleet file gets two more indexes (Trends for the whole fleet, the rank-up forecasts).
 - A house warning now says "the game can demolish it in 3 more days" instead of "demolished after 3 more".
+- **Current gil/day picks the Fight Club row for the sub's own build** (or, failing that, the fastest one its rank
+  clears), not whichever row comes first in the spreadsheet, as the app now does.
+- **The Shopping List saves its checked ticks back**, as the app does, so ticks for parts already crafted and held
+  don't count again later when a new part is needed. A tick saved on two PCs at the same moment isn't lost.
+- **Not synced, with no account labels:** characters are grouped by the PC they last logged in on, so closing one
+  game no longer marks another game's characters as not synced. A character whose supplies aren't known yet isn't
+  counted as low on them.
+- Free Companies: an FC short on both rank and days says both ("Rank 2/6, and 25 more days").
+- Market prices: the Shadow data centre is known, and Universalis's own list is asked again later if it couldn't be
+  read at first.
 
 ## 2.4.8 - 2026-11-20
 
