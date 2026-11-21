@@ -144,7 +144,9 @@ namespace XIVFleetCompanion.Setup
 
         private static readonly Regex Kept = new(@"_before_move_\d{8}_\d{4}$");
 
-        public sealed record Leftover(string Name, string Kind, long Bytes, string? MovedTo);
+        /// <param name="Pcs">For a copy left when the database moved away: the PCs that used it (its PCs list), which find
+        /// the new address through it until they've synced once.</param>
+        public sealed record Leftover(string Name, string Kind, long Bytes, string? MovedTo, List<string>? Pcs = null);
 
         /// <summary>The copies a move left in this PC's PostgreSQL (kept under another name, or left behind when the
         /// database moved away), and everything else. The database in use is never one.</summary>
@@ -161,16 +163,27 @@ namespace XIVFleetCompanion.Setup
                 if (name == current) { others.Add(name); continue; }
                 if (Kept.IsMatch(name)) { leftovers.Add(new Leftover(name, "kept", bytes, null)); continue; }
                 DatabaseMove.Note? note = null;
+                var pcs = new List<string>();
                 try
                 {
                     await using var c = await connectTo(name);
                     note = await DatabaseMove.ReadAsync(c);
+                    if (note is { State: "moved" })
+                    {
+                        try
+                        {
+                            await using var cmd = new NpgsqlCommand("SELECT pc_name || coalesce(' (' || nullif(account_label, '') || ')', '') FROM companion_pc_status ORDER BY 1", c);
+                            await using var r = await cmd.ExecuteReaderAsync();
+                            while (await r.ReadAsync()) pcs.Add(r.GetString(0));
+                        }
+                        catch (PostgresException) { /* no PCs list in it */ }
+                    }
                 }
                 catch
                 {
                     note = null;
                 }
-                if (note is { State: "moved" }) leftovers.Add(new Leftover(name, "moved-away", bytes, $"{note.Host}:{note.Port}"));
+                if (note is { State: "moved" }) leftovers.Add(new Leftover(name, "moved-away", bytes, $"{note.Host}:{note.Port}", pcs));
                 else others.Add(name);
             }
             return (leftovers, others);
@@ -269,7 +282,7 @@ namespace XIVFleetCompanion.Setup
             public Action<int> RecordInstalled = _ => { };
             public Func<DateTime> Now = () => DateTime.Now;
             public Func<int, Task> Wait = ms => Task.Delay(ms);
-            public string TempDir = Path.GetTempPath();
+            public string TempDir = PgBackups.ToolTempDir();
             public int DrainTries = 60;
             public int DrainEveryMs = 3000;
         }

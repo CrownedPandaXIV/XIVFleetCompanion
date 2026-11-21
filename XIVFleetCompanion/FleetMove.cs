@@ -190,7 +190,15 @@ public static class FleetMove
                 progress?.Invoke("Checking every table arrived...");
                 await Compare(file, null, pg, tx, moved);
                 if (trial) await tx.RollbackAsync();
-                else await tx.CommitAsync();
+                else
+                {
+                    // The file's note goes in first (its transaction, already holding the file), then the shared database
+                    // commits, then the file: a failure before the last step leaves both as they were, and the file's own
+                    // commit, with its lock already held, has nothing left to wait for.
+                    await Db.Exec(file, "INSERT INTO companion_file_info (key, value) VALUES ('moved_to', @v) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                        null, ("v", movedTo));
+                    await tx.CommitAsync();
+                }
             }
             catch
             {
@@ -202,8 +210,6 @@ public static class FleetMove
                 await Db.Exec(file, "ROLLBACK");
                 return new Result(moved, true, clock.Elapsed.TotalSeconds);
             }
-            await Db.Exec(file, "INSERT INTO companion_file_info (key, value) VALUES ('moved_to', @v) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                null, ("v", movedTo));
             await Db.Exec(file, "COMMIT");
         }
         catch
@@ -219,10 +225,25 @@ public static class FleetMove
     /// moved away earlier (its note): then a backup of it is made first and it's emptied.
     /// </summary>
     /// <param name="trial">Copy and check everything, then undo it (the file keeps only its tables, made ready).</param>
+    /// <param name="pgFiles">The shared database's update files: it's brought up to date first where this login may, so
+    /// every table the file has is there to copy.</param>
     public static async Task<Result> SharedToFileAsync(NpgsqlConnection pg, DbConnection file, string filePath, FileDatabase.Files files, string recordedBy,
-        Action<string>? progress = null, bool trial = false)
+        Action<string>? progress = null, bool trial = false, DatabaseUpkeep.Files? pgFiles = null)
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();
+        if (pgFiles != null)
+        {
+            progress?.Invoke("Getting the shared database ready...");
+            try
+            {
+                if ((await DatabaseUpkeep.EnsureAsync(pg, pgFiles, recordedBy, wait: true)).Newer)
+                    throw new RefusedException("The shared database was updated by a newer app or plugin. Update this plugin first, then move.");
+            }
+            catch (InvalidOperationException)
+            {
+                // A login that may only read: copied as it is (a table it doesn't have yet comes over empty).
+            }
+        }
         progress?.Invoke("Getting the fleet file ready...");
         var ready = await FileDatabase.EnsureAsync(file, files, recordedBy);
         if (ready.Newer)
@@ -369,6 +390,7 @@ public static class FleetMove
             var pgColumns = await PgColumns(pg, pgTx, table);
             var fileColumns = (await FileColumns(file, fileTx, table)).Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var columns = pgColumns.Where(c => fileColumns.Contains(c.Name)).ToList();
+            if (columns.Count == 0) continue;   // not in the shared database (one behind): nothing was copied to compare
             var inFile = await Rows(Db.Command(file, $"SELECT {string.Join(", ", columns.Select(c => $"\"{c.Name}\""))} FROM \"{table}\"", fileTx));
             var inPg = await Rows(new NpgsqlCommand($"SELECT {string.Join(", ", columns.Select(PgRead))} FROM \"{table}\"", pg, pgTx));
             if (inFile.Count != rows || inPg.Count != rows)

@@ -46,6 +46,22 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
   database every sync. A saved database login that can't be read is logged once and Settings says to enter it again.
 - Updating or unloading the plugin mid-sync stops the sync and waits a moment for it, and settings are always saved
   on the game's thread.
+- **Restoring a shared-database backup pauses the plugins on your other PCs first**, as moving the database does, so
+  their syncs can't block it or write over it straight after.
+- **Backups use tools new enough for the database:** an older PostgreSQL installed on the PC for something else is
+  passed over for the downloaded tools, and when none are new enough it says so plainly.
+- **A failed daily backup tries again after 30 minutes, then longer**, instead of every minute (each try started a
+  process and wrote to the log). It's also made by the plugin when the app's daily task hasn't made one for two days.
+- "Let other PCs connect" fixes a firewall rule left on another port (after setting PostgreSQL up again).
+- Database updates have no time limit, but give way after 10 seconds when another PC is using a table, so they can't
+  hold every other PC up.
+- Moving the fleet from the shared database to this PC brings the shared database up to date first (an older one
+  failed with a raw SQL error), and a move the other way can't end half-recorded.
+- Moving or backing up works when the Windows user name or the database password has letters outside English: the
+  copy goes to a folder the tools can open, and a refused password with such letters is said so.
+- Removing a copy a move left behind names the PCs that may still need it to find the new address.
+- The move window says to close the app on your other PCs first (a change made there during the move isn't copied).
+  A damaged fleet file's advice also says to delete fleet.db-wal and fleet.db-shm.
 
 ## 2.4.8 - 2026-11-20
 

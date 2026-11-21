@@ -156,8 +156,13 @@ function Open-Connections($Step) {
     Edit-Conf $instance 'postgresql.conf' { param($t) Set-ListenAddresses $t } 'PostgreSQL now listens for other PCs' $changed
     Edit-Conf $instance 'postgresql.auto.conf' { param($t) if ($t -match '(?m)^\s*listen_addresses\s*=') { Set-ListenAddresses $t } else { $t } } 'PostgreSQL now listens for other PCs (ALTER SYSTEM setting)' $changed
     Edit-Conf $instance 'pg_hba.conf' { param($t) Add-AccessLines $t $ranges } "Let in: $([string]::Join(', ', $ranges))" $changed
-    & netsh.exe advfirewall firewall show rule "name=$FirewallRule" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    # The rule from an earlier setup may open another port (PostgreSQL set up again, or moved): then it's made again.
+    # (As the app's setup/remote-access.js: netsh's LocalPort line; a rule whose port can't be told is kept.)
+    $shown = & netsh.exe advfirewall firewall show rule "name=$FirewallRule" 2>&1
+    $exists = $LASTEXITCODE -eq 0
+    $rulePort = if ($exists -and (($shown | Out-String) -match '(?mi)^\s*LocalPort:\s*(\S+)\s*$')) { $Matches[1] } else { $null }
+    if (-not $exists -or ($rulePort -and $rulePort -ne "$port")) {
+        if ($exists) { & netsh.exe advfirewall firewall delete rule "name=$FirewallRule" | Out-Null }
         $out = & netsh.exe advfirewall firewall add rule "name=$FirewallRule" dir=in action=allow protocol=TCP "localport=$port" "remoteip=$TailscaleRange,LocalSubnet" 2>&1
         if ($LASTEXITCODE -ne 0) { return Step-Result 'openConnections' $false "Windows Firewall wasn't changed: $(($out | Out-String).Trim())" $changed }
         $changed.Add("Windows Firewall allows port $port from Tailscale and this PC's network") | Out-Null

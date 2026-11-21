@@ -1148,12 +1148,12 @@ public sealed class Plugin : IDalamudPlugin
                     trialFolder = Path.Combine(Path.GetTempPath(), $"xiv-fleet-trial-{Guid.NewGuid():N}");
                     var scratch = Path.Combine(trialFolder, FileDatabase.FileName);
                     await using var file = await FileDatabase.OpenAsync(scratch, Array.Empty<string>());
-                    result = await FleetMove.SharedToFileAsync(pg, file, scratch, files, by, s => MoveStatus = s, trial: true);
+                    result = await FleetMove.SharedToFileAsync(pg, file, scratch, files, by, s => MoveStatus = s, trial: true, pgFiles: DatabaseUpkeep.Files.Embedded());
                 }
                 else
                 {
                     await using var file = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
-                    result = await FleetMove.SharedToFileAsync(pg, file, FileDatabase.DefaultPath, files, by, s => MoveStatus = s);
+                    result = await FleetMove.SharedToFileAsync(pg, file, FileDatabase.DefaultPath, files, by, s => MoveStatus = s, pgFiles: DatabaseUpkeep.Files.Embedded());
                 }
                 if (trial)
                 {
@@ -1245,7 +1245,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 FileActionFailed = true;
                 FileActionStatus = ex is FileDatabase.RefusedException ? ex.Message
-                    : $"That didn't work, so nothing changed: {SyncFailure.Describe(ex)} If the file is too damaged to restore this way, close every game and copy the backup over {FileDatabase.FileName}.";
+                    : $"That didn't work, so nothing changed: {SyncFailure.Describe(ex)} If the file is too damaged to restore this way, close every game, delete {FileDatabase.FileName}-wal and {FileDatabase.FileName}-shm next to it (if they're there), and copy the backup over {FileDatabase.FileName}.";
                 Log.Warning($"Fleet Companion: {ex.Message}");
             }
             finally

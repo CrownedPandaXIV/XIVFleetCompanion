@@ -224,7 +224,8 @@ public partial class MainWindow
         if (plugin.Configuration.FleetStore == FleetStoreChoice.SharedDatabase && saved != null && !WindowsSetup.IsThisPc(saved.Host, WindowsSetup.Addresses())
             && ImGui.TreeNode("Move the database to this PC"))
         {
-            Ui.Wrapped($"Copies the database from {saved.Host} to this PC, checks every table, then sends every PC and app here. Until that last step, anything that goes wrong puts everything back; the old database is never deleted.");
+            Ui.Wrapped($"Copies the database from {saved.Host} to this PC, checks every table, then sends every PC and app here. Until that last step, anything that goes wrong puts everything back; the old database is never deleted. " +
+                       "The plugins pause on their own, but close the app on your other PCs first: a change made in it during the move isn't copied.");
             var (ts, home) = WindowsSetup.PcAddresses(WindowsSetup.Addresses());
             var choices = (WindowsSetup.IsTailscaleAddress(saved.Host) || home.Count == 0 ? ts.Concat(home) : home.Concat(ts)).ToList();
             if (moveAddress.Length == 0 && choices.Count > 0) moveAddress = choices[0];
@@ -317,6 +318,10 @@ public partial class MainWindow
             foreach (var l in leftovers ?? new List<DatabaseAdmin.Leftover>())
             {
                 Ui.Text($"{l.Name}: {(l.Kind == "kept" ? "the copy that was here before a move" : $"left here when it moved to {l.MovedTo}")}, {l.Bytes / 1048576.0:0} MB");
+                if (l.Kind == "moved-away" && ImGui.IsItemHovered())
+                    ImGui.SetTooltip("A PC that was off during the move finds the new address through this copy. Remove it only once every PC" +
+                                     (l.Pcs is { Count: > 0 } pcs ? $" that used it ({string.Join(", ", pcs)})" : "") +
+                                     " has synced since the move: the PCs page shows when each last did.");
                 ImGui.SameLine();
                 if (ImGui.SmallButton($"Remove##left{l.Name}"))
                 {
