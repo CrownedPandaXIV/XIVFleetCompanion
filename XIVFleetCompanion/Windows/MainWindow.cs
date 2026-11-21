@@ -312,7 +312,7 @@ public partial class MainWindow : Window, IDisposable
                 !config.Enabled ? "Turn syncing on in Settings." :
                 $"This PC syncs every {config.SyncIntervalMinutes} minute(s). {line}."
                 + (plugin.SyncWarning != null ? $"\n{plugin.SyncWarning}" : "")
-                + (plugin.SyncedElsewhere > 0 ? $"\n{plugin.SyncedElsewhere} character(s) are synced by another game, where they last logged in." : ""));
+                + (plugin.SyncedElsewhere > 0 ? $"\n{plugin.SyncedElsewhere} character(s) are synced by another PC or account, where they last logged in." : ""));
     }
 
     private bool SafeReady()
@@ -417,9 +417,9 @@ public partial class MainWindow : Window, IDisposable
             Ui.Text("Fleet Companion Status");
             ImGui.Spacing();
 
-            // Enabled toggle (mirrors Configuration.Enabled)
+            // The same switch as Settings' "Sync this game's fleet", with the same name.
             var enabled = plugin.Configuration.Enabled;
-            if (Ui.Checkbox("Enabled", ref enabled))
+            if (Ui.Checkbox("Sync this game's fleet##status", ref enabled))
             {
                 plugin.Configuration.Enabled = enabled;
                 plugin.Configuration.Save();
@@ -811,6 +811,15 @@ public partial class MainWindow : Window, IDisposable
         }, sub => sub.Character),
         new("account", "Account", sub => Ui.Text(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
         new("sub", "Sub", sub => Ui.Text(sub.SubName), sub => sub.SubName, Locked: true),
+        // Status: back and waiting first, then the soonest back; in port last either way.
+        new("status", "Status", sub =>
+        {
+            var status = FleetReader.SubStatus(sub.ReturnTime, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            if (status == "Back") Colored(Green, status);
+            else if (status == "In port") Colored(Dim, status);
+            else Ui.Text(status);
+        }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
+        // The same columns in the same order as the app's Subs tab (the character first, as the plugin shows it once).
         // A thin bar for how far to the next rank, then the rank with its percent as the app shows it ("68.81"), right after it (both on the left, so stretching the column
         // doesn't pull them apart; the bar's fixed width lines the numbers up).
         new("rank", "Rank", sub =>
@@ -825,28 +834,19 @@ public partial class MainWindow : Window, IDisposable
             Ui.Text(FleetOrder.RankText(sub.Rank, sub.CurrentExp, sub.NextLevelExp));
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => FleetOrder.RankSortKey(sub.Rank, sub.CurrentExp, sub.NextLevelExp)),
-        new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
-        // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
-        new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
-        // Status: back and waiting first, then the soonest back; in port last either way.
-        new("status", "Status", sub =>
-        {
-            var status = FleetReader.SubStatus(sub.ReturnTime, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            if (status == "Back") Colored(Green, status);
-            else if (status == "In port") Colored(Dim, status);
-            else Ui.Text(status);
-        }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
         // Routes stage: when it ranks up and changes build, its route and gil a day (Fight Club's, after repair kits).
         new("nextRank", "Next rank", sub => NextRankCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt == null),
         new("nextBuild", "Next build", sub => NextBuildCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At == null),
+        new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
         new("speed", "Speed", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Speed is double v) RightNumber((long)v); else Colored(Dim, "—"); },
-            sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1, Hidden: true),
+            sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1),
         new("range", "Range", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Range is double v) RightNumber((long)v); else Colored(Dim, "—"); },
-            sub => RouteOf(sub.Cid, sub.SubName)?.Range ?? -1, Hidden: true),
+            sub => RouteOf(sub.Cid, sub.SubName)?.Range ?? -1),
         new("route", "Current route", sub => { if (RouteOf(sub.Cid, sub.SubName) is { } r) RouteCell(r.CurrentRoute, r.CurrentMap); else Colored(Dim, "—"); },
-            sub => RouteOf(sub.Cid, sub.SubName)?.CurrentRoute ?? ""),
+            // By map, then route (as the app), so routes on different maps don't mix.
+            sub => RouteOf(sub.Cid, sub.SubName) is { CurrentRoute.Length: > 0 } r ? $"{r.CurrentMap?.Id ?? 0:D6}|{r.CurrentRoute}" : ""),
         new("gilDay", "Current gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay, NoCurrentGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay == null),
         // The best route for its rank, in amber when it isn't on it.
@@ -859,6 +859,8 @@ public partial class MainWindow : Window, IDisposable
         }, sub => RouteOf(sub.Cid, sub.SubName)?.TargetRoute ?? ""),
         new("targetGilDay", "Target gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),
+        // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
+        new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
 
     // "W-S-U-C" with the dashes softer, so the four parts stand out.

@@ -1409,7 +1409,7 @@ namespace XIVFleetCompanion
 
         /// <summary>"12 (2 left out) (3 left to another setup)", as the PCs tab.</summary>
         public static string PcCharacters(int? synced, int? leftOut, int? elsewhere) =>
-            $"{(synced.HasValue ? synced.Value.ToString(CultureInfo.InvariantCulture) : "—")}{(leftOut > 0 ? $" ({leftOut} left out)" : "")}{(elsewhere > 0 ? $" ({elsewhere} left to another game)" : "")}";
+            $"{(synced.HasValue ? synced.Value.ToString(CultureInfo.InvariantCulture) : "—")}{(leftOut > 0 ? $" ({leftOut} left out)" : "")}{(elsewhere > 0 ? $" ({elsewhere} left to another PC or account)" : "")}";
 
         /// <summary>Compares "2.0.0.9"-style versions, part by part.</summary>
         public static int CompareVersions(string? a, string? b)
@@ -1469,7 +1469,8 @@ namespace XIVFleetCompanion
         public static string Ago(DateTime at, DateTime now)
         {
             var s = Math.Max(0, (now - at).TotalSeconds);
-            return s < 60 ? $"{(int)s}s ago" : s < 3600 ? $"{(int)(s / 60)}m ago" : $"{(int)(s / 3600)}h ago";
+            // Days after 48 hours, as the app ("3 days ago", not "72h ago").
+            return s < 60 ? $"{(int)s}s ago" : s < 3600 ? $"{(int)(s / 60)}m ago" : s < 48 * 3600 ? $"{(int)(s / 3600)}h ago" : $"{(int)(s / 86400)} days ago";
         }
     }
 }

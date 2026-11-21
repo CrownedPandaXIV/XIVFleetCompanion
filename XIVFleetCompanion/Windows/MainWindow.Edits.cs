@@ -122,7 +122,7 @@ public partial class MainWindow
         {
             using var table = Ui.Table("##subRules", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
             if (!table) return;
-            foreach (var h in new[] { "Rank", "Applies to", "Hull", "Stern", "Bow", "Bridge", "Character", "", "" }) Ui.SetupColumn(h);
+            foreach (var h in new[] { "Rank", "Applies to", "Hull", "Stern", "Bow", "Bridge", "Character override", "", "" }) Ui.SetupColumn(h);
             Ui.HeadersRow();
             var scale = ImGuiHelpers.GlobalScale;
             foreach (var d in rules)
@@ -134,7 +134,8 @@ public partial class MainWindow
                 Ui.InputInt("##rank", ref d.Rank, 0);
                 Ui.NextColumn();
                 var (all, slots) = FilterSlots(d.Filter);
-                if (Ui.Checkbox("All##slots", ref all) && all) d.Filter = "";
+                // Unticking All leaves slot 1 ticked (a rule applies to at least one slot), as the app.
+                if (Ui.Checkbox("All##slots", ref all)) d.Filter = all ? "" : SlotsFilter(false, new[] { 1 });
                 for (var s = 1; s <= 4; s++)
                 {
                     ImGui.SameLine();

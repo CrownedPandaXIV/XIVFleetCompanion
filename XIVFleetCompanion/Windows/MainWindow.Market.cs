@@ -1,4 +1,5 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -101,7 +102,7 @@ public partial class MainWindow
 
         Heading("Gil per account");
         MarketAccountsTable.DrawControls();
-        using (var child = Dalamud.Interface.Utility.Raii.ImRaii.Child("##marketAccounts", new Vector2(0, Math.Min(200, (m.Accounts.Count + 2) * ImGui.GetFrameHeightWithSpacing())), false))
+        using (var child = Dalamud.Interface.Utility.Raii.ImRaii.Child("##marketAccounts", new Vector2(0, Math.Min(200 * ImGuiHelpers.GlobalScale, (m.Accounts.Count + 2) * ImGui.GetFrameHeightWithSpacing())), false))
         {
             if (child.Success) MarketAccountsTable.Draw(m.Accounts);
         }
@@ -130,7 +131,7 @@ public partial class MainWindow
             {
                 undercutTable ??= new FleetTable<ComparedListing>("marketUndercut", plugin.Configuration, ListingColumns(rivals: true, cheaperBy: true));
                 undercutTable.DrawControls();
-                using var child = Dalamud.Interface.Utility.Raii.ImRaii.Child("##marketUndercut", new Vector2(0, Math.Min(260, (undercut.Count + 2) * ImGui.GetFrameHeightWithSpacing())), false);
+                using var child = Dalamud.Interface.Utility.Raii.ImRaii.Child("##marketUndercut", new Vector2(0, Math.Min(260 * ImGuiHelpers.GlobalScale, (undercut.Count + 2) * ImGui.GetFrameHeightWithSpacing())), false);
                 if (child.Success) undercutTable.Draw(undercut);
             }
         }

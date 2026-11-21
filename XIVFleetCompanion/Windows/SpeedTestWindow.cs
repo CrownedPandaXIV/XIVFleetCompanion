@@ -26,6 +26,9 @@ public class SpeedTestWindow : Window, IDisposable
     private readonly Queue<(DateTime At, float Seconds)> recentFrames = new();
     private static readonly TimeSpan FrameWindow = TimeSpan.FromSeconds(3);
     private float longestWhileRunning;
+    // Frames are only seen while this page is drawn: with none seen during the test, no frame time is reported (rather
+    // than 0 ms, which would read as no stutter).
+    private int framesWhileRunning;
     private float? longestBefore;
 
     public SpeedTestWindow(Plugin plugin) : base($"XIV Fleet Companion: Speed test v{Plugin.VersionText}###XIVFleetCompanionSpeedTest")
@@ -62,6 +65,7 @@ public class SpeedTestWindow : Window, IDisposable
         // The longest frame seen recently, before the test starts (null when the window has only just opened).
         longestBefore = recentFrames.Count > 0 ? recentFrames.Max(f => f.Seconds) * 1000f : null;
         longestWhileRunning = 0;
+        framesWhileRunning = 0;
         running = true;
         status = "Testing...";
         Task.Run(async () =>
@@ -69,7 +73,7 @@ public class SpeedTestWindow : Window, IDisposable
             try
             {
                 var results = await SpeedTest.RunAsync(connectionString);
-                text = SpeedTest.ToText(results, where, longestWhileRunning * 1000.0, longestBefore);
+                text = SpeedTest.ToText(results, where, framesWhileRunning > 0 ? longestWhileRunning * 1000.0 : null, longestBefore);
                 var failed = results.Count(r => r.Error != null);
                 status = failed == 0 ? "Done." : $"Done; {failed} part{(failed == 1 ? "" : "s")} failed (see below).";
             }
@@ -93,6 +97,7 @@ public class SpeedTestWindow : Window, IDisposable
         recentFrames.Enqueue((now, seconds));
         while (recentFrames.Count > 0 && now - recentFrames.Peek().At > FrameWindow)
             recentFrames.Dequeue();
+        if (running) framesWhileRunning++;
         if (running && seconds > longestWhileRunning)
             longestWhileRunning = seconds;
     }
@@ -103,9 +108,9 @@ public class SpeedTestWindow : Window, IDisposable
     public void DrawPage()
     {
         NoteFrame();
-        Ui.Wrapped("For XIV Fleet Companion 2.0: times reading from the database what the in-game Summary, Subs and " +
-                          "Supplies windows will need. It runs in the background, so the game shouldn't stutter; the longest " +
-                          "game frame is shown to check. Only reads; nothing is changed.");
+        Ui.Wrapped("Times reading what the plugin's pages show (Summary, Subs, Supplies and the rest) from " +
+                          (plugin.OnThisPc ? "the fleet file" : "the database") + ". It runs in the background, so the game " +
+                          "shouldn't stutter; keep this page open while it runs to see the longest game frame. Only reads; nothing is changed.");
         using (ImRaii.Disabled(running))
         {
             if (ImGui.Button(running ? "Testing..." : "Test again")) Run();

@@ -66,19 +66,19 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // the characters and FCs to choose from
         using var tabs = ImRaii.TabBar("##inventoryTabs");
         if (!tabs) return;
-        using (var tab = ImRaii.TabItem("Characters"))
+        using (var tab = ImRaii.TabItem("Character"))
         {
             if (tab) DrawCharacterInventory();
         }
-        using (var tab = ImRaii.TabItem("Free Companies"))
+        using (var tab = ImRaii.TabItem("FC"))
         {
             if (tab) DrawFcInventory();
         }
-        using (var tab = ImRaii.TabItem("Fleet totals"))
+        using (var tab = ImRaii.TabItem("Fleet"))
         {
             if (tab) DrawFleetTotals();
         }
-        using (var tab = ImRaii.TabItem("Where is it?"))
+        using (var tab = ImRaii.TabItem("Where Is It?"))
         {
             if (tab) DrawWhereIsIt();
         }

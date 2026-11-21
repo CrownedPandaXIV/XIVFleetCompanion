@@ -1949,7 +1949,9 @@ internal static partial class Program
               && FleetReader.SubStatus(1000 + 2 * 86400 + 4 * 3600, 1000) == "2d 4:00:00",
             "fleet views: sub status reads In port, Back, or the time until it's back");
         var now = new DateTime(2026, 11, 5, 12, 0, 0);
-        Check(FleetReader.Ago(now.AddSeconds(-12), now) == "12s ago" && FleetReader.Ago(now.AddMinutes(-4), now) == "4m ago" && FleetReader.Ago(now.AddHours(-2), now) == "2h ago",
+        Check(FleetReader.Ago(now.AddSeconds(-12), now) == "12s ago" && FleetReader.Ago(now.AddMinutes(-4), now) == "4m ago" && FleetReader.Ago(now.AddHours(-2), now) == "2h ago"
+            && FleetReader.Ago(now.AddHours(-47), now) == "47h ago" && FleetReader.Ago(now.AddDays(-21), now) == "21 days ago"
+            && FleetOrder.RankPercent(23, 40) == 57,
             "fleet views: how long ago it was read");
 
         // Stage 4: the info bar line and what needs attention.
@@ -2019,7 +2021,7 @@ internal static partial class Program
             "rest of the tabs: the average item level leaves out items the game doesn't know, as the app does");
         Check(FleetReader.SyncedBy("DESKTOP-1", "A") == "A on DESKTOP-1" && FleetReader.SyncedBy("LAPTOP", "") == "(no label) on LAPTOP" && FleetReader.SyncedBy(null, null) == "—",
             "rest of the tabs: Synced by reads as the app's Roster");
-        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another game)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
+        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another PC or account)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
             "rest of the tabs: a game's characters read as the app's PCs page");
         Check(FleetReader.CompareVersions("2.0.0.9", "2.0.0.10") < 0 && FleetReader.CompareVersions("2.0.0", "2.0.0.0") == 0 && FleetReader.CompareVersions(null, "0.1") < 0,
             "rest of the tabs: plugin versions compare part by part");

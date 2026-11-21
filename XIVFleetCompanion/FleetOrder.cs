@@ -29,7 +29,9 @@ namespace XIVFleetCompanion
         /// <summary>The whole percent to the next rank, rounded halves up as the app does, at most 99 (99.6% isn't the next
         /// rank yet); none when unknown or at the top.</summary>
         public static int? RankPercent(long currentExp, long nextLevelExp) =>
-            nextLevelExp > 0 ? (int)Math.Min(99, Math.Floor(100.0 * currentExp / nextLevelExp + 0.5)) : null;
+            // (current / next) * 100, in that order, as the app: 100 * current / next lands on the other side of a half now
+            // and then (23 of 40: the app's 58 against 57).
+            nextLevelExp > 0 ? (int)Math.Min(99, Math.Floor((double)currentExp / nextLevelExp * 100 + 0.5)) : null;
 
         /// <summary>The Subs page's Rank as the app shows it: rank.percent ("68.81", "68.05"), or just the rank when unknown.</summary>
         public static string RankText(int rank, long currentExp, long nextLevelExp) =>

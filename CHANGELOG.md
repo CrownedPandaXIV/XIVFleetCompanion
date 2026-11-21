@@ -107,6 +107,16 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
   seconds, not every frame. Backups reads its settings every few seconds and lists the backup folder away from the
   game (a folder on a PC that's off no longer holds the game up), and looks for the app's backup task once at a time.
   The routes reuse the Parts read instead of reading the same views again.
+- **The same names as the app:** Roster Name and Submarines, Venture type, FC name, Character override, the Parts
+  Summary tab with Class needed and Still needed, Inventory's Character / FC / Fleet / Where Is It? tabs, and
+  "World market / day". The Subs table has the app's columns in the app's order (Speed and Range shown), and sorts
+  Current route by map first. "Another PC or account" instead of "another game"; Status's switch is called "Sync this
+  game's fleet", as in Settings.
+- Choosing a shared database puts the form for its details at the top of Settings, without the shared settings' read
+  error above it.
+- Loot per voyage: By route can be seen below a long subs table. "Ago" says days after 48 hours. Rank percent rounds
+  exactly as the app. Sub Rules' All tick can be unticked (slot 1 stays). Market tables are the right height at any UI
+  scale. The speed test's wording is up to date, and gives no frame time if the page wasn't open while it ran.
 
 ## 2.4.8 - 2026-11-20
 

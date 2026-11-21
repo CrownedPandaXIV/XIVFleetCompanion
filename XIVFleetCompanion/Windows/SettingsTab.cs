@@ -198,15 +198,30 @@ public class SettingsTab : IDisposable
         pgUsername = saved?.Username ?? "";
         pgPassword = "";
         pgHasSavedPassword = !string.IsNullOrEmpty(saved?.Password);
+        hasSavedConnection = saved != null;
         pgSaveResult = saved == null && PostgresCredentialStore.LoadProblem != null
             ? "The saved database details couldn't be read (Windows' saved login is damaged). Enter them again and click Save."
             : "";
         clearArmedUntil = DateTime.MinValue;
     }
 
+    // Whether a database connection is saved (read with the form, not every frame).
+    private bool hasSavedConnection;
+
     /// <summary>shared: the settings shared with the app (drawn by the main window, after the Characters list).</summary>
     public void Draw(Action? shared = null)
     {
+        // A shared database with no details saved yet (just chosen): the form to type them comes first, and the settings
+        // shared with the app (which can't be read without it) wait until it's saved.
+        var connectFirst = configuration.FleetStore == FleetStoreChoice.SharedDatabase && !hasSavedConnection;
+        if (connectFirst)
+        {
+            DrawDatabaseConnection();
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+        }
+
         // Can't ref a property, so use a local copy
         var enabled = configuration.Enabled;
         if (Ui.Checkbox("Sync this game's fleet", ref enabled))
@@ -293,7 +308,7 @@ public class SettingsTab : IDisposable
         ImGui.Spacing();
         DrawCharacters();
 
-        if (shared != null)
+        if (shared != null && !connectFirst)
         {
             ImGui.Spacing();
             shared();
@@ -308,7 +323,7 @@ public class SettingsTab : IDisposable
             Ui.Wrapped($"Every game on this PC keeps your fleet in {FileDatabase.DefaultPath}, backed up once a day " +
                               "(the Status page has Back up now). There's no database to connect to.");
         }
-        else
+        else if (!connectFirst)
             DrawDatabaseConnection();
 
         // FC Tracker's file: only when it's needed (FC Tracker running, not answering directly, and its file not found
@@ -395,6 +410,7 @@ public class SettingsTab : IDisposable
         PostgresCredentialStore.Save(configuration.UseRemoteConnection, pgHost.Trim(), portNum, pgDatabase.Trim(), pgUsername.Trim(), password);
         pgPassword = "";
         pgHasSavedPassword = true;
+        hasSavedConnection = true;
         return "Saved.";
     }
 

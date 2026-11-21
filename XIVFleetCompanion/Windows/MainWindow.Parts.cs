@@ -81,9 +81,9 @@ public partial class MainWindow
     private FleetTable<(string Slot, string Needed, int Count)> PartsCraftTable => partsCraftTable ??= new FleetTable<(string Slot, string Needed, int Count)>("partsCraft",
         plugin.Configuration, new List<FleetColumn<(string Slot, string Needed, int Count)>>
         {
-            new("needed", "Needed", x => Ui.Text(x.Needed), x => x.Needed, Locked: true),
+            new("needed", "Class needed", x => Ui.Text(x.Needed), x => x.Needed, Locked: true),
             new("slot", "Slot", x => Ui.Text(x.Slot), x => System.Array.IndexOf(PartsPlanner.Slots, x.Slot)),
-            new("count", "Still to craft", x => RightNumber(x.Count, Amber), x => x.Count),
+            new("count", "Still needed", x => RightNumber(x.Count, Amber), x => x.Count),
         });
 
     private void DrawParts()
@@ -127,7 +127,7 @@ public partial class MainWindow
                 else PartsTable.Draw(FleetOrder.Roster(rows, n => n.SortIndex ?? int.MaxValue, n => n.Character));
             }
         }
-        using (var tab = ImRaii.TabItem("To craft"))
+        using (var tab = ImRaii.TabItem("Summary"))
         {
             if (tab)
             {

@@ -137,7 +137,7 @@ public partial class MainWindow
             new("rewards", "Rewards", v => RightNumber(v.Rewards), v => v.Rewards),
             new("perDay", "Vendor value / day", v => TableCells.Right(Gil(v.PerDay), Green), v => v.PerDay),
             new("top", "Most valuable", v => Ui.Text(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
-        }.Concat(live ? Universalis.Scopes.Select(s => new FleetColumn<FleetReader.VentureSummary>($"market{s}", $"Market / day ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})",
+        }.Concat(live ? Universalis.Scopes.Select(s => new FleetColumn<FleetReader.VentureSummary>($"market{s}", $"{(s == "world" ? "World" : s == "dc" ? "DC" : "Region")} market / day",
             v => { if (VentureMarketOf(v.Cid, s) is double g) TableCells.Right(Gil(g), Green); else Colored(Dim, "—"); },
             v => VentureMarketOf(v.Cid, s) ?? 0)) : Enumerable.Empty<FleetColumn<FleetReader.VentureSummary>>()).ToList();
 
@@ -254,7 +254,7 @@ public partial class MainWindow
             new("perDay", "Vendor value / day", s => TableCells.Right(Gil(s.PerDay), Green), s => s.PerDay),
             new("expected", "Expected / day", s => GilDayCell(s.ExpectedPerDay, "No sub of this name on its character's Subs page matches Fight Club's routes."),
                 s => s.ExpectedPerDay ?? double.MinValue, s => s.ExpectedPerDay == null),
-        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootSub>($"market{scope}", $"Market / day ({ScopeLabel(scope)})",
+        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootSub>($"market{scope}", $"{ScopeLabel(scope)} market / day",
             s => { if (LootSubMarket(s, scope) is { } m) TableCells.Right(Gil(m.PerDay), Green); else Colored(Dim, "—"); },
             s => LootSubMarket(s, scope)?.PerDay ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootSub>>()).ToList();
 
@@ -264,7 +264,7 @@ public partial class MainWindow
             new("subs", "Subs", r => RightNumber(r.Subs), r => r.Subs),
             new("voyages", "Voyages", r => RightNumber(r.Voyages), r => r.Voyages),
             new("perVoyage", "Vendor gil / voyage", r => GilCell((long)SubRoutes.Round(r.PerVoyage)), r => r.PerVoyage),
-        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootRoute>($"market{scope}", $"Market / voyage ({ScopeLabel(scope)})",
+        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootRoute>($"market{scope}", $"{ScopeLabel(scope)} market / voyage",
             r => { if (LootRouteMarket(r, scope) is { } m) GilCell((long)SubRoutes.Round(m.PerVoyage)); else Colored(Dim, "—"); },
             r => LootRouteMarket(r, scope)?.PerVoyage ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootRoute>>()).ToList();
 
@@ -293,13 +293,14 @@ public partial class MainWindow
         subTable.DrawControls();
         var subs = loot.Subs.Where(s => Matches(incomeFilter, s.Character, s.World, s.Account, s.SubName, s.Route)).ToList();
         if (subs.Count == 0) Ui.Text("Nothing matches.");
-        else subTable.Draw(FleetOrder.Roster(subs, s => s.SortIndex ?? int.MaxValue, s => s.Character ?? ""));
+        // Both tables as tall as their rows, the page scrolling (else the first takes all the height and By route can't be seen).
+        else subTable.Draw(FleetOrder.Roster(subs, s => s.SortIndex ?? int.MaxValue, s => s.Character ?? ""), fitRows: true);
         Heading("By route");
         Colored(Dim, "Each route's voyages, best gil a voyage first.");
         var routeTable = live ? lootRoutesLiveTable ??= new FleetTable<LootRoute>("lootRoutesLive", plugin.Configuration, LootRouteColumns(true))
                               : lootRoutesTable ??= new FleetTable<LootRoute>("lootRoutes", plugin.Configuration, LootRouteColumns(false));
         routeTable.DrawControls();
-        routeTable.Draw(loot.Routes.Where(r => Matches(incomeFilter, r.Route)).ToList());
+        routeTable.Draw(loot.Routes.Where(r => Matches(incomeFilter, r.Route)).ToList(), fitRows: true);
     }
 
     private void DrawVentureIncome(IncomeRead income)
