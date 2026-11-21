@@ -470,8 +470,8 @@ namespace XIVFleetCompanion
         {
             var list = new List<SubRow>();
             await using var cmd = Db.Cmd(
-                @"SELECT cid, character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
-                  FROM fleet_subs_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, character_name, slot NULLS LAST, sub_name", conn);
+                $@"SELECT cid, character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
+                  FROM fleet_subs_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, character_name{Db.C(conn)}, slot NULLS LAST, sub_name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new SubRow(Text(r, "character_name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
@@ -484,7 +484,7 @@ namespace XIVFleetCompanion
         {
             var list = new List<SupplyRow>();
             await using var cmd = Db.Cmd(
-                "SELECT * FROM fleet_supplies_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
+                $"SELECT * FROM fleet_supplies_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new SupplyRow(Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue), Time(r, "last_synced_at"),
@@ -517,7 +517,7 @@ namespace XIVFleetCompanion
         {
             var list = new List<RosterRow>();
             await using var cmd = Db.Cmd(
-                "SELECT * FROM fleet_roster_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
+                $"SELECT * FROM fleet_roster_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new RosterRow(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
@@ -534,7 +534,7 @@ namespace XIVFleetCompanion
         {
             var list = new List<RetainerRow>();
             await using (var cmd = Db.Cmd(
-                "SELECT * FROM fleet_retainers_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, owner_name, hire_order_index NULLS LAST, retainer_name", conn))
+                $"SELECT * FROM fleet_retainers_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, owner_name{Db.C(conn)}, hire_order_index NULLS LAST, retainer_name{Db.C(conn)}", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
             {
                 while (await r.ReadAsync())
@@ -560,7 +560,7 @@ namespace XIVFleetCompanion
         public static async Task<List<PcRow>> ReadPcs(DbConnection conn)
         {
             var list = new List<PcRow>();
-            await using var cmd = Db.Cmd("SELECT * FROM fleet_pcs_view ORDER BY account_label, pc_name", conn);
+            await using var cmd = Db.Cmd($"SELECT * FROM fleet_pcs_view ORDER BY account_label{Db.C(conn)}, pc_name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new PcRow(Text(r, "pc_name"), Text(r, "account_label"), TextOrNull(r, "plugin_version"), Time(r, "last_sync_at"),
@@ -947,7 +947,7 @@ namespace XIVFleetCompanion
         public static async Task<ShoppingRead> ReadShopping(DbConnection conn)
         {
             var held = new List<HeldRow>();
-            await using (var cmd = Db.Cmd("SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who, place", conn))
+            await using (var cmd = Db.Cmd($"SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who{Db.C(conn)}, place{Db.C(conn)}", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     held.Add(new HeldRow(Int(r, "item_id"), Text(r, "who"), Text(r, "place"), Long(r, "qty")));

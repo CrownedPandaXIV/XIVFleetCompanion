@@ -1925,7 +1925,7 @@ internal static partial class Program
         // Stage 4: the info bar line and what needs attention.
         var alerts = new List<AlertRow>
         {
-            new("danger", "house", "Cute Kittehs!", "house not entered for 33 days; demolished after 12 more"),
+            new("danger", "house", "Cute Kittehs!", "house not entered for 33 days; the game can demolish it in 12 more days"),
             new("warn", "low_ceruleum", "Aki (Maduin)", "50 ceruleum (warning below 100)"),
             new("warn", "low_repair_kits", "Aki (Maduin)", "5 repair kits (warning below 10)"),
             new("warn", "low_ceruleum", "Bex (Maduin)", "10 ceruleum (warning below 100)"),

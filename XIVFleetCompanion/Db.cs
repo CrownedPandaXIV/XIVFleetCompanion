@@ -75,6 +75,10 @@ public static class Db
         var v => Convert.ToUInt64(v, CultureInfo.InvariantCulture),
     };
 
+    /// <summary>After a text column in ORDER BY: letter by letter on both database types (PostgreSQL otherwise sorts by its
+    /// language setting, so "alpha" and "Beta" would come in another order than in the fleet file).</summary>
+    public static string C(DbConnection conn) => IsFile(conn) ? "" : " COLLATE \"C\"";
+
     /// <summary>A command, in the order NpgsqlCommand takes them (the readers were written for it).</summary>
     public static DbCommand Cmd(string sql, DbConnection conn, DbTransaction? tx = null) => Command(conn, sql, tx);
 

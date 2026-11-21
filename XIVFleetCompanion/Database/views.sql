@@ -8,6 +8,9 @@
 -- game data tables (ffxiv_*): a new database has none until the app fills them, and a view that needed them couldn't
 -- be made. Names of jobs, ventures and items come from the game's own files in the plugin instead.
 --
+-- A window of N days is N × 24 hours (make_interval(secs => n * 86400), interval '336 hours'), as in SQLite and the app:
+-- PostgreSQL's 'N days' counts calendar days in the connection's time zone, an hour out across a daylight saving change.
+--
 -- Unlike db/updates/, this file is applied again whenever it changes: after the numbered updates, the app compares
 -- its checksum with the one recorded in companion_views and, when they differ, replaces every view here in one
 -- transaction (db/apply-updates.js ensureViews). So edit this file freely; a newer app's views are never replaced by
@@ -51,7 +54,7 @@ $$;
 -- per_day NULL: not enough history yet; per_day 0: none used, so days_left is NULL (they never run out).
 CREATE OR REPLACE VIEW fleet_supplies_view AS
 WITH settings AS (
-  SELECT window_days, target_days, now() - make_interval(days => window_days) AS window_start
+  SELECT window_days, target_days, now() - make_interval(secs => window_days * 86400) AS window_start
   FROM (SELECT
     coalesce((SELECT setting_value::int FROM fleet_economics_settings
               WHERE setting_key = 'supply_window_days' AND setting_value IN (3, 7, 14, 30)), 14) AS window_days,
@@ -249,7 +252,7 @@ house_ages AS (
   WHERE h.has_house
 ),
 supplies AS (
-  SELECT c.cid, c.name || ' (' || c.world || ')' AS who, coalesce(c.ceruleum, 0) AS ceruleum, coalesce(c.repair_kits, 0) AS repair_kits
+  SELECT c.cid, coalesce(c.name, 'Character ' || c.cid) || ' (' || coalesce(c.world, '?') || ')' AS who, coalesce(c.ceruleum, 0) AS ceruleum, coalesce(c.repair_kits, 0) AS repair_kits
   FROM companion_character_current c
   WHERE EXISTS (SELECT 1 FROM companion_submarine_snapshot s WHERE s.cid = c.cid AND s.level > 0)
     AND c.cid NOT IN (SELECT cid FROM fleet_not_synced_view)
@@ -259,7 +262,7 @@ SELECT CASE WHEN days IS NULL OR days < 30 THEN 'warn' ELSE 'danger' END AS leve
        CASE WHEN days IS NULL THEN 'house: no date yet for when it was last entered'
             WHEN days >= 45 THEN 'house not entered for ' || days || ' days: past 45, the game can demolish it any time'
             ELSE 'house not entered for ' || days || ' day' || CASE WHEN days = 1 THEN '' ELSE 's' END
-                 || '; demolished after ' || (45 - days) || ' more' END AS detail,
+                 || '; the game can demolish it in ' || (45 - days) || ' more day' || CASE WHEN 45 - days = 1 THEN '' ELSE 's' END END AS detail,
        coalesce(days, 0) AS weight
 FROM house_ages, settings st WHERE days IS NULL OR days >= st.house_days
 UNION ALL
@@ -269,17 +272,17 @@ UNION ALL
 SELECT 'warn', 'low_repair_kits', s.who, s.repair_kits || ' repair kits (warning below ' || st.repair_kits::int || ')', 0
 FROM supplies s, settings st WHERE st.repair_kits > 0 AND s.repair_kits < st.repair_kits
 UNION ALL
-SELECT 'warn', 'not_synced', name || ' (' || world || ')',
+SELECT 'warn', 'not_synced', coalesce(name, 'Character ' || cid) || ' (' || coalesce(world, '?') || ')',
        'no longer synced (' || floor(extract(epoch FROM behind) / 3600)::int || ' h behind its account): unticked in the plugin, or its AutoRetainer no longer has it', 0
 FROM fleet_not_synced_view
 UNION ALL
 SELECT 'warn', 'autoretainer', pc_name || CASE WHEN account_label <> '' THEN ' (' || account_label || ')' ELSE '' END,
        'AutoRetainer was not running at its last sync, so nothing syncs from there', 0
-FROM companion_pc_status WHERE autoretainer_ready = false AND last_sync_at > now() - interval '1 day'
+FROM companion_pc_status WHERE autoretainer_ready = false AND last_sync_at > now() - interval '24 hours'
 ) alerts
 -- Ties by who, letter by letter (COLLATE "C"), so the order is the same whatever the database's language setting, and
 -- the same as SQLite's.
-ORDER BY level, kind, weight DESC, subject COLLATE "C";
+ORDER BY level, kind, weight DESC, subject COLLATE "C" NULLS LAST;
 
 
 -- 2.x, the rest of the tabs.
@@ -367,7 +370,7 @@ visited AS (
   FROM companion_character_housing WHERE fc_id IS NOT NULL GROUP BY fc_id
 ),
 members AS (
-  SELECT c.fc_id, min(c.account_label) AS account_label, min(so.sort_index) AS sort_index
+  SELECT c.fc_id, min(c.account_label COLLATE "C") AS account_label, min(so.sort_index) AS sort_index
   FROM companion_character_current c LEFT JOIN character_sort_order so ON so.cid = c.cid
   WHERE c.fc_id IS NOT NULL GROUP BY c.fc_id
 ),
@@ -396,7 +399,7 @@ SELECT a.fc_id, a.fc_name, a.fc_master, a.fc_points, a.fc_rank, a.total_members,
             WHEN a.house_days >= st.house_days THEN 'warn'
             ELSE 'ok' END AS house_level,
        CASE WHEN a.has_house AND a.house_days IS NOT NULL THEN greatest(0, 45 - a.house_days) END AS demolition_in_days,
-       CASE WHEN NOT coalesce(a.has_house, false) AND a.reference IS NOT NULL THEN a.reference + interval '30 days' END AS eligible_at,
+       CASE WHEN NOT coalesce(a.has_house, false) AND a.reference IS NOT NULL THEN a.reference + interval '720 hours' END AS eligible_at,
        CASE WHEN coalesce(a.has_house, false) OR a.reference IS NULL THEN NULL
             WHEN a.rank_number >= 6 AND a.days_since_founding >= 30 THEN 'Eligible'
             WHEN a.days_since_founding < 30 THEN 'Eligible in ' || CAST(ceil(30 - a.days_since_founding) AS int) || ' day'
@@ -424,7 +427,7 @@ holders AS (
     SELECT c.fc_id, c.cid,
            row_number() OVER (PARTITION BY c.fc_id
              ORDER BY CASE WHEN h.fc_master IS NOT NULL AND c.name IS NOT NULL AND lower(c.name) = lower(h.fc_master) THEN 0 ELSE 1 END,
-                      so.sort_index NULLS LAST, c.name COLLATE "C", CAST(c.cid AS text) COLLATE "C") AS rn
+                      so.sort_index NULLS LAST, c.name COLLATE "C" NULLS LAST, CAST(c.cid AS text) COLLATE "C") AS rn
     FROM companion_character_current c
     LEFT JOIN character_sort_order so ON so.cid = c.cid
     LEFT JOIN companion_character_housing h ON h.cid = c.cid AND h.fc_id = c.fc_id
@@ -545,7 +548,7 @@ GROUP BY c.cid, c.name, c.world, c.account_label, so.sort_index;
 -- sync (or its newest value, when later); less than a day of it is not enough (enough false, the numbers NULL).
 CREATE OR REPLACE VIEW fleet_income_view AS
 WITH settings AS (
-  SELECT window_days, kit_cost, now() - make_interval(days => window_days) AS window_start
+  SELECT window_days, kit_cost, now() - make_interval(secs => window_days * 86400) AS window_start
   FROM (SELECT
     coalesce((SELECT CAST(setting_value AS int) FROM fleet_economics_settings
               WHERE setting_key = 'income_window_days' AND setting_value IN (3, 7, 14, 30)), 7) AS window_days,
@@ -605,24 +608,35 @@ windows AS (
     SELECT e.end_at, CASE WHEN r.salvage_first IS NOT NULL THEN greatest(st.window_start, r.salvage_first) ELSE e.end_at END AS from_at
     FROM (SELECT coalesce(greatest(ch.last_synced_at, r.newest_at), now()) AS end_at) e) t
 ),
--- Moments items were stored for a new source, and salvage leaving an FC chest.
-new_sources AS (
-  SELECT DISTINCT subject_id AS cid, at FROM series
-  WHERE subject_type = 'character' AND metric = 'inventory_sources' AND value > prev
+-- Each salvage rise in the window, with what else happened at that moment for that character and item: items stored
+-- for a new source (not income), and that salvage leaving its FC chest (moved, not earned). Matched in one sorted pass
+-- over all of them (a window per character, item and moment) rather than by joining them: with a big fleet's history
+-- those joins took minutes. Matched on the exact time: the plugin writes every value of one sync with one time
+-- (MetricWriter: one statement with now() on PostgreSQL, one Db.Now() in the file).
+fc_members AS (
+  SELECT fc_id, cid FROM windows WHERE fc_id IS NOT NULL
 ),
-chest_drops AS (
-  SELECT subject_id AS fc_id, metric, at, max(prev - value) AS fell FROM series
-  WHERE subject_type = 'fc' AND prev > value
-  GROUP BY subject_id, metric, at
-),
-rises AS (
-  SELECT w.cid, CAST(substring(se.metric FROM 10) AS int) AS item_id, se.value - se.prev AS amount,
-         ns.cid IS NOT NULL AS first_stored, coalesce(cd.fell, 0) AS chest_drop
+marks AS (
+  SELECT w.cid, se.metric, se.at, 'rise' AS kind, se.value - se.prev AS amount, 0 AS fell
   FROM windows w
   JOIN series se ON se.subject_type = 'character' AND se.subject_id = w.cid AND se.metric LIKE 'item_qty:225%'
-  LEFT JOIN new_sources ns ON ns.cid = w.cid AND ns.at = se.at
-  LEFT JOIN chest_drops cd ON cd.fc_id = w.fc_id AND cd.metric = se.metric AND cd.at = se.at
   WHERE se.at > w.from_at AND se.value > se.prev
+  UNION ALL
+  SELECT se.subject_id, m.metric, se.at, 'new', 0, 0
+  FROM series se CROSS JOIN metrics m
+  WHERE se.subject_type = 'character' AND se.metric = 'inventory_sources' AND se.value > se.prev AND m.metric LIKE 'item_qty:225%'
+  UNION ALL
+  SELECT f.cid, se.metric, se.at, 'chest', 0, se.prev - se.value
+  FROM series se JOIN fc_members f ON f.fc_id = se.subject_id
+  WHERE se.subject_type = 'fc' AND se.prev > se.value
+),
+rises AS (
+  SELECT cid, CAST(substring(metric FROM 10) AS int) AS item_id, amount, first_stored = 1 AS first_stored, chest_drop
+  FROM (SELECT cid, metric, kind, amount,
+               max(CASE WHEN kind = 'new' THEN 1 ELSE 0 END) OVER (PARTITION BY cid, metric, at) AS first_stored,
+               max(fell) OVER (PARTITION BY cid, metric, at) AS chest_drop
+        FROM marks) x
+  WHERE kind = 'rise'
 ),
 salvage AS (
   SELECT r.cid,
@@ -671,7 +685,7 @@ CROSS JOIN settings st;
 -- market prices).
 CREATE OR REPLACE VIEW fleet_venture_income_view AS
 WITH settings AS (
-  SELECT window_days, now() - make_interval(days => window_days) AS window_start
+  SELECT window_days, now() - make_interval(secs => window_days * 86400) AS window_start
   FROM (SELECT coalesce((SELECT CAST(setting_value AS int) FROM fleet_economics_settings
                          WHERE setting_key = 'income_window_days' AND setting_value IN (3, 7, 14, 30)), 7) AS window_days) chosen
 ),
@@ -832,7 +846,7 @@ CROSS JOIN LATERAL (
     SELECT h.recorded_at, h.value, lead(h.value) OVER newest_first AS earlier, row_number() OVER newest_first AS n
     FROM companion_metric_history h
     WHERE h.subject_type = 'character' AND h.subject_id = se.cid AND h.metric = se.metric
-      AND h.recorded_at > now() - interval '14 days'
+      AND h.recorded_at > now() - interval '336 hours'
     WINDOW newest_first AS (ORDER BY h.recorded_at DESC)) inside
   WHERE n = 1 OR earlier IS DISTINCT FROM value) w
 UNION ALL
@@ -841,7 +855,7 @@ FROM series se
 CROSS JOIN LATERAL (
   SELECT h.recorded_at, h.value FROM companion_metric_history h
   WHERE h.subject_type = 'character' AND h.subject_id = se.cid AND h.metric = se.metric
-    AND h.recorded_at <= now() - interval '14 days'
+    AND h.recorded_at <= now() - interval '336 hours'
   ORDER BY h.recorded_at DESC LIMIT 1) b;
 
 -- The sectors of each voyage SubmarineTracker recorded over the last 14 days (by FC and its id for the sub), in the
@@ -849,7 +863,7 @@ CROSS JOIN LATERAL (
 CREATE OR REPLACE VIEW fleet_voyage_sectors_view AS
 SELECT CAST(v.fc_id AS text) AS fc_id, v.sub_register, v.sub_name, v.returned_at, v.sector, v.leg
 FROM companion_voyage_loot v
-WHERE v.returned_at >= now() - interval '14 days';
+WHERE v.returned_at >= now() - interval '336 hours';
 
 -- Every sector of every voyage SubmarineTracker recorded over the Income window (Loot per Voyage, as the app's Income
 -- tab: ipc/details.js loadLoot), with what it brought back and the window's days.
@@ -862,7 +876,7 @@ SELECT CAST(l.fc_id AS text) AS fc_id, l.sub_register, l.returned_at, l.sector, 
        l.additional_item, l.additional_count, l.leg, st.window_days
 FROM companion_voyage_loot l
 CROSS JOIN settings st
-WHERE l.returned_at > now() - make_interval(days => st.window_days);
+WHERE l.returned_at > now() - make_interval(secs => st.window_days * 86400);
 
 -- How close the Next Rank dates came (the Subs tab's forecast line, ipc/subs.js loadForecastAccuracy): the dates the app
 -- saved over the last 30 days, each sub slot's recorded rank over the last 31 (a value recorded again unchanged left out,
@@ -871,13 +885,13 @@ CREATE OR REPLACE VIEW fleet_rankup_forecast_view AS
 SELECT f.cid, f.slot, f.rank, f.made_at, f.predicted_at, f.sub_name, CAST(c.fc_id AS text) AS fc_id, c.name AS character_name
 FROM companion_rankup_forecast f
 LEFT JOIN companion_character_current c ON c.cid = f.cid
-WHERE f.made_at >= now() - interval '30 days';
+WHERE f.made_at >= now() - interval '720 hours';
 
 CREATE OR REPLACE VIEW fleet_rankup_history_view AS
 WITH series AS (
   SELECT DISTINCT f.cid, 'sub_rank:' || f.slot AS metric
   FROM companion_rankup_forecast f
-  WHERE f.made_at >= now() - interval '30 days'
+  WHERE f.made_at >= now() - interval '720 hours'
 )
 SELECT se.cid, se.metric, w.recorded_at, w.value
 FROM series se
@@ -886,7 +900,7 @@ CROSS JOIN LATERAL (
     SELECT h.recorded_at, h.value, lead(h.value) OVER newest_first AS earlier, row_number() OVER newest_first AS n
     FROM companion_metric_history h
     WHERE h.subject_type = 'character' AND h.subject_id = se.cid AND h.metric = se.metric
-      AND h.recorded_at > now() - interval '31 days'
+      AND h.recorded_at > now() - interval '744 hours'
     WINDOW newest_first AS (ORDER BY h.recorded_at DESC)) inside
   WHERE n = 1 OR earlier IS DISTINCT FROM value) w
 UNION ALL
@@ -895,13 +909,13 @@ FROM series se
 CROSS JOIN LATERAL (
   SELECT h.recorded_at, h.value FROM companion_metric_history h
   WHERE h.subject_type = 'character' AND h.subject_id = se.cid AND h.metric = se.metric
-    AND h.recorded_at <= now() - interval '31 days'
+    AND h.recorded_at <= now() - interval '744 hours'
   ORDER BY h.recorded_at DESC LIMIT 1) b;
 
 CREATE OR REPLACE VIEW fleet_voyage_returns_view AS
 SELECT DISTINCT CAST(v.fc_id AS text) AS fc_id, v.sub_name, v.returned_at
 FROM companion_voyage_loot v
-WHERE v.returned_at >= now() - interval '31 days' AND v.sub_name IS NOT NULL;
+WHERE v.returned_at >= now() - interval '744 hours' AND v.sub_name IS NOT NULL;
 
 -- ---- Shopping List (plugin 2.0's Shopping List stage), as the Parts tab's (ipc/shopping.js). The plugin works the list
 -- out itself (ShoppingList.cs) from the Parts views, these two and the game's own recipes. ----

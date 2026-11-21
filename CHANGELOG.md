@@ -62,6 +62,13 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
 - Removing a copy a move left behind names the PCs that may still need it to find the new address.
 - The move window says to close the app on your other PCs first (a change made there during the move isn't copied).
   A damaged fleet file's advice also says to delete fleet.db-wal and fleet.db-shm.
+- **Income is much faster for a big fleet:** on 80 characters with two months of history it took over two minutes;
+  now about two seconds (the same answers).
+- **The shared database and the fleet file sort the same way:** names and account labels go letter by letter whatever
+  language the database PC's PostgreSQL was set up in, and missing names sort last on both.
+- Windows of a number of days are exactly that many 24-hour days on both, so they don't shift by an hour after a
+  daylight-saving change. The fleet file gets two more indexes (Trends for the whole fleet, the rank-up forecasts).
+- A house warning now says "the game can demolish it in 3 more days" instead of "demolished after 3 more".
 
 ## 2.4.8 - 2026-11-20
 
