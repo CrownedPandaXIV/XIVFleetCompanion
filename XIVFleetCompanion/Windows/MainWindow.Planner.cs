@@ -315,79 +315,86 @@ public partial class MainWindow
             }
         }
 
-        // What this build reaches on each sector.
+        // What this build reaches on each sector, and the loot it can bring back: tables as on every page (columns to
+        // size, move, sort and choose).
         HeadingRuns(("What this build reaches", null), ("   amber: the sources differ, so it might not", Dim));
-        using (var table = ImRaii.Table("##plannerReach", 8, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerH))
-        {
-            if (table)
-            {
-                foreach (var h in new[] { "Sector", "Loot tier", "Retrieval", "Double dip", "T2 / T3 at", "Normal / Optimal at", "Favor at", "Bonus exp" }) ImGui.TableSetupColumn(h);
-                ImGui.TableHeadersRow();
-                foreach (var sp in plan.Sectors)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"{sp.Sector.Location}: {sp.Sector.Name}");
-                    if (sp.Data == null || sp.Result == null || sp.Bonus == null)
-                    {
-                        ImGui.TableNextColumn();
-                        Colored(Dim, "No XIVStats data for this sector yet.");
-                        continue;
-                    }
-                    var r = sp.Result;
-                    ImGui.TableNextColumn();
-                    PlannerPill(r.TierSure, $"Tier {r.Tier}");
-                    if (r.Tier < 3) Colored(Dim, $"{PlannerN(r.Need.T3)} more surveillance for T3");
-                    else if (r.TierSure == "maybe") Colored(Amber, $"{PlannerN(r.Need.T3)} more to be sure");
-                    ImGui.TableNextColumn();
-                    PlannerPill(r.Retrieval == "optimal" ? r.RetrievalSure : r.Retrieval == "normal" ? "maybe" : "no", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(r.Retrieval));
-                    if (r.Retrieval != "optimal" || r.RetrievalSure == "maybe") Colored(Dim, $"{PlannerN(r.Need.Optimal)} more retrieval for optimal");
-                    ImGui.TableNextColumn();
-                    PlannerPill(r.DoubleDip, r.DoubleDip == "yes" ? "Yes" : r.DoubleDip == "maybe" ? "Maybe" : "No");
-                    if (r.DoubleDip != "yes") Colored(Dim, $"{PlannerN(r.Need.Favor)} more favor");
-                    ImGui.TableNextColumn();
-                    TableCells.Right($"{PlannerRange(SubCalculator.BreakpointOf(sp.Data, 0))} / {PlannerRange(SubCalculator.BreakpointOf(sp.Data, 1))}");
-                    ImGui.TableNextColumn();
-                    TableCells.Right($"{PlannerRange(SubCalculator.BreakpointOf(sp.Data, 2))} / {PlannerRange(SubCalculator.BreakpointOf(sp.Data, 3))}");
-                    ImGui.TableNextColumn();
-                    TableCells.Right(PlannerRange(SubCalculator.BreakpointOf(sp.Data, 4)));
-                    ImGui.TableNextColumn();
-                    TableCells.Right($"{(sp.Bonus.Sure > 0 ? $"+{sp.Bonus.Sure}% sure, " : "")}up to +{sp.Bonus.Best}%");
-                    Hover($"{PlannerN(sp.Sector.ExpReward)} experience before bonuses");
-                }
-            }
-        }
-
-        // The loot it can bring back.
+        PlannerReachTable.DrawControls();
+        PlannerReachTable.Draw(plan.Sectors, fitRows: true);
         HeadingRuns(("Possible loot", null), ("   greyed: tiers this build can't count on", Dim));
-        using (var table = ImRaii.Table("##plannerLoot", 6, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerH))
-        {
-            if (table)
-            {
-                foreach (var h in new[] { "Item", "Tier", "Sectors", "Amount each time", "Per voyage", "Gil per voyage" }) ImGui.TableSetupColumn(h);
-                ImGui.TableHeadersRow();
-                foreach (var l in plan.Loot)
-                {
-                    var dim = l.PerVoyage <= 0;
-                    using var color = ImRaii.PushColor(ImGuiCol.Text, Dim, dim);
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(ItemName((int)l.ItemId, false));
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"T{l.Tier}");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(l.Sectors.Count > 0 ? string.Join(", ", l.Sectors) : "—");
-                    ImGui.TableNextColumn();
-                    TableCells.Right(l.Low == l.High ? $"{l.Low}" : $"{l.Low}–{l.High}");
-                    ImGui.TableNextColumn();
-                    TableCells.Right(l.PerVoyage > 0 ? PlannerN(l.PerVoyage, 2) : "—");
-                    ImGui.TableNextColumn();
-                    TableCells.Right(l.Gil > 0 ? PlannerN(l.Gil) : "—", dim ? null : Palette.Gil);
-                }
-            }
-        }
+        PlannerLootTable.DrawControls();
+        PlannerLootTable.Draw(plan.Loot, fitRows: true);
         PlannerSource(data);
     }
+
+    private FleetTable<SubCalculator.SectorPlan>? plannerReachTable;
+    private FleetTable<SubCalculator.RouteLoot>? plannerLootTable;
+
+    // A cell of a sector without XIVStats data: a soft dash.
+    private bool PlannerNoData(SubCalculator.SectorPlan sp)
+    {
+        if (sp.Data != null && sp.Result != null && sp.Bonus != null) return false;
+        Colored(Dim, "—");
+        return true;
+    }
+
+    private FleetTable<SubCalculator.SectorPlan> PlannerReachTable => plannerReachTable ??= new FleetTable<SubCalculator.SectorPlan>("plannerReach", plugin.Configuration,
+        new List<FleetColumn<SubCalculator.SectorPlan>>
+    {
+        new("sector", "Sector", sp => Ui.Text($"{sp.Sector.Location}: {sp.Sector.Name}"), sp => sp.Sector.Location, Locked: true),
+        new("tier", "Loot tier", sp =>
+        {
+            if (sp.Result == null) { Colored(Dim, "No XIVStats data for this sector yet."); return; }
+            var r = sp.Result;
+            PlannerPill(r.TierSure, $"Tier {r.Tier}");
+            if (r.Tier < 3) Colored(Dim, $"{PlannerN(r.Need.T3)} more surveillance for T3");
+            else if (r.TierSure == "maybe") Colored(Amber, $"{PlannerN(r.Need.T3)} more to be sure");
+        }, sp => sp.Result?.Tier ?? -1, sp => sp.Result == null),
+        new("retrieval", "Retrieval", sp =>
+        {
+            if (PlannerNoData(sp)) return;
+            var r = sp.Result!;
+            PlannerPill(r.Retrieval == "optimal" ? r.RetrievalSure : r.Retrieval == "normal" ? "maybe" : "no", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(r.Retrieval));
+            if (r.Retrieval != "optimal" || r.RetrievalSure == "maybe") Colored(Dim, $"{PlannerN(r.Need.Optimal)} more retrieval for optimal");
+        }, sp => sp.Result == null ? -1 : Array.IndexOf(new[] { "poor", "normal", "optimal" }, sp.Result.Retrieval), sp => sp.Result == null),
+        new("doubleDip", "Double dip", sp =>
+        {
+            if (PlannerNoData(sp)) return;
+            var r = sp.Result!;
+            PlannerPill(r.DoubleDip, r.DoubleDip == "yes" ? "Yes" : r.DoubleDip == "maybe" ? "Maybe" : "No");
+            if (r.DoubleDip != "yes") Colored(Dim, $"{PlannerN(r.Need.Favor)} more favor");
+        }, sp => sp.Result == null ? -1 : Array.IndexOf(new[] { "no", "maybe", "yes" }, sp.Result.DoubleDip), sp => sp.Result == null),
+        new("tiers", "T2 / T3 at", sp => { if (!PlannerNoData(sp)) TableCells.Right($"{PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 0))} / {PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 1))}"); },
+            sp => sp.Data == null ? -1 : SubCalculator.BreakpointOf(sp.Data, 1).High, sp => sp.Data == null),
+        new("retrievals", "Normal / Optimal at", sp => { if (!PlannerNoData(sp)) TableCells.Right($"{PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 2))} / {PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 3))}"); },
+            sp => sp.Data == null ? -1 : SubCalculator.BreakpointOf(sp.Data, 3).High, sp => sp.Data == null),
+        new("favor", "Favor at", sp => { if (!PlannerNoData(sp)) TableCells.Right(PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 4))); },
+            sp => sp.Data == null ? -1 : SubCalculator.BreakpointOf(sp.Data, 4).High, sp => sp.Data == null),
+        new("bonus", "Bonus exp", sp =>
+        {
+            if (PlannerNoData(sp)) return;
+            TableCells.Right($"{(sp.Bonus!.Sure > 0 ? $"+{sp.Bonus.Sure}% sure, " : "")}up to +{sp.Bonus.Best}%");
+            Hover($"{PlannerN(sp.Sector.ExpReward)} experience before bonuses");
+        }, sp => sp.Bonus?.Best ?? -1, sp => sp.Bonus == null),
+    });
+
+    // A loot row this build can't count on is greyed.
+    private void PlannerLootText(SubCalculator.RouteLoot l, string text, bool right = false, Vector4? color = null)
+    {
+        var shownColor = l.PerVoyage > 0 ? color : Dim;
+        if (right) TableCells.Right(text, shownColor);
+        else Tinted(shownColor, text);
+    }
+
+    private FleetTable<SubCalculator.RouteLoot> PlannerLootTable => plannerLootTable ??= new FleetTable<SubCalculator.RouteLoot>("plannerLoot", plugin.Configuration,
+        new List<FleetColumn<SubCalculator.RouteLoot>>
+    {
+        new("item", "Item", l => PlannerLootText(l, ItemName((int)l.ItemId, false)), l => ItemName((int)l.ItemId, false), Locked: true),
+        new("tier", "Tier", l => PlannerLootText(l, $"T{l.Tier}"), l => l.Tier),
+        new("sectors", "Sectors", l => PlannerLootText(l, l.Sectors.Count > 0 ? string.Join(", ", l.Sectors) : "—"), l => string.Join(",", l.Sectors)),
+        new("amount", "Amount each time", l => PlannerLootText(l, l.Low == l.High ? $"{l.Low}" : $"{l.Low}–{l.High}", true), l => l.High),
+        new("perVoyage", "Per voyage", l => PlannerLootText(l, l.PerVoyage > 0 ? PlannerN(l.PerVoyage, 2) : "—", true), l => l.PerVoyage),
+        new("gil", "Gil per voyage", l => PlannerLootText(l, l.Gil > 0 ? PlannerN(l.Gil) : "—", true, Palette.Gil), l => l.Gil),
+    });
 
     // Where the data comes from (as the app's Planner foot).
     private void PlannerSource(SubCalculatorData.Data data)

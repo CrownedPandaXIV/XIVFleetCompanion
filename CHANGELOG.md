@@ -16,6 +16,7 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
     Pepper's guide disagree, and how much more of a stat it needs;
   - the loot it can bring back, gil per voyage and per day, experience per day with bonus experience, and repair
     kits a day (parts' wear as Submarine Tracker predicts it).
+  Its two tables work like every other page's: columns to size, move, sort and choose.
   The plugin's figures are checked against the app's for 30 made-up builds and routes. `/xivfleet planner` opens it.
 - **Choosing one of your subs on the Planner:** a panel grouped by account, then character (with world and Free
   Company), each group folding away, with a search for character, world, account, Free Company or sub name. Each sub
