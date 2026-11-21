@@ -153,6 +153,17 @@ namespace XIVFleetCompanion
 
     public static class SubRoutes
     {
+        /// <summary>The Route Optimization heading when no sub is off its Target route: why, so "all on target" isn't said
+        /// when there was nothing to compare (as the app's routesNothingText).</summary>
+        public static string NothingToSwitch(IReadOnlyCollection<SubRoute> subs)
+        {
+            var from85 = subs.Where(s => s.Rank >= 85).ToList();
+            if (from85.Count == 0) return "No sub is rank 85 yet: Target routes start at rank 85, as in Fight Club.";
+            if (!from85.Any(s => s.TargetRoute.Length > 0))
+                return "No sub from rank 85 has a Target route: Fight Club Data isn't imported (Settings, Fight Club Data), or lists nothing for their ranks.";
+            return "Every sub from rank 85 is on its Target route.";
+        }
+
         private const double Hour = 3600 * 1000;
         private const double Day = 24 * Hour;
         private const double MeasureWindowDays = 7;

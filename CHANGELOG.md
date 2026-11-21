@@ -79,6 +79,8 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
 - Free Companies: an FC short on both rank and days says both ("Rank 2/6, and 25 more days").
 - Market prices: the Shadow data centre is known, and Universalis's own list is asked again later if it couldn't be
   read at first.
+- Route Optimization: with no sub off its Target route, it says why (no sub at rank 85 yet, or no Fight Club Data
+  imported) instead of always "all on target", as the app now does.
 
 ## 2.4.8 - 2026-11-20
 

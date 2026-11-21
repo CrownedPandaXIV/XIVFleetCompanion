@@ -1047,6 +1047,12 @@ internal static partial class Program
 
     private static void RoutesAgainstTheApp()
     {
+        // Route Optimization with nothing to switch says why (as the app's routesNothingText).
+        static SubRoute Sub(int rank, string target) => new(1, "S", 1, rank, "SSSS", "MOJ", null, target, null, null, null, null, null, false, null, null!);
+        Check(SubRoutes.NothingToSwitch(new[] { Sub(60, "") }).StartsWith("No sub is rank 85 yet", StringComparison.Ordinal), "routes: no sub at 85 yet");
+        Check(SubRoutes.NothingToSwitch(new[] { Sub(90, ""), Sub(60, "") }).Contains("Fight Club Data isn't imported", StringComparison.Ordinal), "routes: no Target routes");
+        Check(SubRoutes.NothingToSwitch(new[] { Sub(90, "MOJ") }) == "Every sub from rank 85 is on its Target route.", "routes: all on target");
+
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
         using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
         var game = GameFrom(doc.RootElement.GetProperty("game"));

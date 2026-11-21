@@ -218,7 +218,7 @@ public partial class MainWindow
         ReadLine(reader.Routes, FleetReader.PartsEvery);
         if (reader.Routes.Data == null) return;
         var subs = Suboptimal();
-        Heading(subs.Count == 0 ? "Every sub from rank 85 is on its Target route." : $"{subs.Count} sub{(subs.Count == 1 ? " isn't" : "s aren't")} on the best route for {(subs.Count == 1 ? "its" : "their")} rank");
+        Heading(subs.Count == 0 ? SubRoutes.NothingToSwitch(reader.Routes.Data.Subs) : $"{subs.Count} sub{(subs.Count == 1 ? " isn't" : "s aren't")} on the best route for {(subs.Count == 1 ? "its" : "their")} rank");
         var gain = subs.Where(s => s.Gain > 0).Sum(s => s.Gain!.Value);
         if (gain > 0) GilLine("Switching them all would make about", gain, " more gil a day.");
         Colored(Dim, "Subs from rank 85 whose route isn't Fight Club's best at their rank (most gil a day after repair kits). Biggest gain first; " +
