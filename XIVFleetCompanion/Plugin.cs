@@ -371,7 +371,9 @@ public sealed class Plugin : IDalamudPlugin
             else if (look.Seen != partConditionsSeen)
             {
                 partConditionsSeen = look.Seen;
-                Log.Information($"Fleet Companion: sub part condition, {look.Seen}.");
+                // Every login at the house sees no sub list yet: only worth a debug line.
+                if (look.Readings.Count == 0) Log.Debug($"Fleet Companion: sub part condition, {look.Seen}.");
+                else Log.Information($"Fleet Companion: sub part condition, {look.Seen}.");
             }
             if (look.Readings != null && partConditions.Offer(look.Readings) > 0)
                 Log.Debug($"Fleet Companion: {partConditions.Count} sub part condition reading(s) waiting for the next sync.");

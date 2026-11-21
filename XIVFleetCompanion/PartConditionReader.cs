@@ -47,6 +47,8 @@ namespace XIVFleetCompanion
                     readings.Add(new PartCondition.Reading(cid, sub.RegisterTime, name, i + 1, slot, part->ItemId, part->Condition, sub.ReturnTime, now));
                 }
             }
+            if (registered == 0)
+                return new Look(readings, "in the workshop, no sub list yet (the game loads it when the Voyage Control Panel's submarines are opened)");
             var seen = $"in the workshop: {registered} sub(s), {readings.Count} part(s) read"
                 + (container->IsLoaded ? "" : " (the game says the parts container isn't loaded)")
                 + (other.Count > 0 ? $"; places without a sub part: {string.Join(", ", other.Take(8))}" : "");
