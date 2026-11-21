@@ -101,6 +101,12 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
   any UI scale. "Copied" on the Check page shows on the button, keeping the check's result. Supplies' "Updated" line
   sits on its own line. Database tools gives the last sync in local time with its offset, not marked UTC. Exported
   files are dated the same way as the app's on any calendar.
+- **Less work each frame on big fleets:** Inventory (Characters, Fleet totals, Where Is It?), Retainers, Route
+  Optimization, the sidebar and Summary work out their lists once per read, search or setting instead of every frame,
+  and the colours are worked out once per look. Database tools reads the saved login and network adapters every few
+  seconds, not every frame. Backups reads its settings every few seconds and lists the backup folder away from the
+  game (a folder on a PC that's off no longer holds the game up), and looks for the app's backup task once at a time.
+  The routes reuse the Parts read instead of reading the same views again.
 
 ## 2.4.8 - 2026-11-20
 

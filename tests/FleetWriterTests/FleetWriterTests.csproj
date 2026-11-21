@@ -12,6 +12,7 @@
     <Compile Include="..\..\XIVFleetCompanion\FCTrackerConnector.cs" Link="FCTrackerConnector.cs" />
     <Compile Include="..\..\XIVFleetCompanion\AllaganToolsConnector.Items.cs" Link="AllaganToolsConnector.Items.cs" />
     <Compile Include="..\..\XIVFleetCompanion\GamesOnThisPc.cs" Link="GamesOnThisPc.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\Memo.cs" Link="Memo.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SyncSchedule.cs" Link="SyncSchedule.cs" />
     <Compile Include="..\..\XIVFleetCompanion\CharacterChoice.cs" Link="CharacterChoice.cs" />
     <Compile Include="..\..\XIVFleetCompanion\CheckReport.cs" Link="CheckReport.cs" />

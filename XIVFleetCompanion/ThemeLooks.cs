@@ -107,7 +107,11 @@ namespace XIVFleetCompanion
         /// Okabe–Ito palette, shaded for each look's background so they stay readable and apart with every common kind
         /// of colour blindness) instead of green, amber and red; the colours that only say what a thing is are plain.
         /// </summary>
-        public static StatusColors Status(ThemeChoice theme, bool colourBlind)
+        public static StatusColors Status(ThemeChoice theme, bool colourBlind) => statusMade.GetOrAdd((theme, colourBlind), k => MakeStatus(k.Theme, k.ColourBlind));
+        // Worked out once per look and setting: table cells ask for these many times a frame.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<(ThemeChoice Theme, bool ColourBlind), StatusColors> statusMade = new();
+
+        private static StatusColors MakeStatus(ThemeChoice theme, bool colourBlind)
         {
             var t = Info(theme).Tokens;
             if (t == null)

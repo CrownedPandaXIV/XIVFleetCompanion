@@ -218,7 +218,7 @@ public partial class MainWindow : Window, IDisposable
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
         var setupsToCheck = alerts?.Count(a => a.Kind == "autoretainer") ?? 0;
-        var readyList = reader.Parts.Data is { } partsRead ? PartsPlanner.SubsReady(partsRead.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var readyList = SubsReadyNow();
         var readyForParts = readyList.Count;
         attention += readyForParts;
 
@@ -611,7 +611,7 @@ public partial class MainWindow : Window, IDisposable
         var back = FleetReader.SubsBack(reader.Subs.Data, now);
         var alerts = reader.Alerts.Data;
         if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs page)");
-        var ready = reader.Parts.Data is { } partsNow ? PartsPlanner.SubsReady(partsNow.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var ready = SubsReadyNow();
         if (ready.Count > 0) Colored(Green, $"{PartsPlanner.ReadyText(ready)} (Parts page)");
         if (alerts != null)
         {

@@ -357,7 +357,9 @@ namespace XIVFleetCompanion
                     {
                         Settings = await Read(conn, ReadSettings, Settings);
                         Parts = await Read(conn, ReadParts, Parts);
-                        Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
+                        // The Parts views just read are used again for the routes, not read a second time.
+                        var partsJustRead = Parts.Error == null ? Parts.Data?.Inputs : null;
+                        Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds, partsJustRead), Routes);
                         // On the fleet file there's no app to save the Next rank dates for the forecast line: the plugin does.
                         if (Db.IsFile(conn) && Routes.Error == null && Routes.Data is { } planned)
                             await SaveForecasts(conn, planned.Subs);
@@ -712,15 +714,16 @@ namespace XIVFleetCompanion
 
         /// <summary>Every built sub's route answers (the fleet_route_* views, app 1.8.0 and later, and the game's own
         /// files), worked out here (SubRoutes) at `now` (milliseconds since 1970).</summary>
-        public static async Task<RoutesRead> ReadRoutes(DbConnection conn, SubGameData? game, double now)
+        public static async Task<RoutesRead> ReadRoutes(DbConnection conn, SubGameData? game, double now, PartsInputs? parts = null)
         {
             if (game == null) throw new InvalidOperationException("The game's sea map data couldn't be read.");
-            return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn), game, now), now);
+            return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn, parts), game, now), now);
         }
 
-        public static async Task<RoutesInputs> ReadRoutesInputs(DbConnection conn)
+        /// <summary>parts: the Parts views as just read (else they're read here).</summary>
+        public static async Task<RoutesInputs> ReadRoutesInputs(DbConnection conn, PartsInputs? parts = null)
         {
-            var parts = await ReadPartsInputs(conn);
+            parts ??= await ReadPartsInputs(conn);
             var subs = new List<RouteSub>();
             await using (var cmd = Db.Cmd("SELECT * FROM fleet_route_subs_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())

@@ -484,7 +484,6 @@ namespace XIVFleetCompanion
             var fightClub = input.FightClub.OrderBy(f => f.Id).ToList();
             var rules = input.Rules.OrderBy(r => r.Id).ToList();
             var partsRoutes = fightClub.Select(f => f.AsParts).ToList();
-            var kitCost = fightClub.Count > 0 ? fightClub[0].RepairKitCost : 0;
 
             // Game data, as the app reads its copy: sector letters (a sector with none is left out), maps, ranks, parts.
             var letterOf = new Dictionary<int, string>();

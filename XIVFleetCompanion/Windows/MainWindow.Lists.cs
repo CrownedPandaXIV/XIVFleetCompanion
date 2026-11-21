@@ -172,6 +172,7 @@ public partial class MainWindow
 
     // ---- Retainers ----
 
+    private readonly Memo<List<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>> retainerRowsShown = new();
     private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)> RetainersTable => retainersTable ??=
         new FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>("retainers", plugin.Configuration, new List<FleetColumn<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>>
     {
@@ -252,7 +253,8 @@ public partial class MainWindow
             Hover("Allagan Tools only knows a retainer's items once it has been opened at a summoning bell on a PC running the plugin.");
         }
         // In the Roster's order (each owner's place in it), then hiring order, as the app.
-        var rows = read.Retainers
+        // Worked out again only when a new read comes or the search changes (800 retainers' gear is a lot to look up every frame).
+        var rows = retainerRowsShown.Get(() => read.Retainers
             .Select(r =>
             {
                 var job = GameNames.Job(r.Job);
@@ -263,7 +265,7 @@ public partial class MainWindow
                     Check: FleetReader.GearCheck(job, r.TargetMode, r.TargetValue, pieces));
             })
             .Where(x => Matches(retainersFilter, x.R.Owner, x.R.Name, x.R.Account, x.Job, x.Venture))
-            .ToList();
+            .ToList(), read, retainersFilter);
         RetainersTable.Draw(rows);
     }
 

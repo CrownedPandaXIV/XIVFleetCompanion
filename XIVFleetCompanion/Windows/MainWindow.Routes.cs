@@ -48,12 +48,23 @@ public partial class MainWindow
         return expectedIndex.TryGetValue(cid, out var e) ? e : null;
     }
 
+    // Worked out once per read (the sidebar asks for it every frame on every page).
     private List<SubRoute> Suboptimal()
     {
         IndexRoutes();
-        return routeIndexFor?.Subs.Where(s => s.Suboptimal)
-            .OrderBy(s => s.Gain == null ? 1 : 0).ThenByDescending(s => s.Gain ?? 0).ToList() ?? new List<SubRoute>();
+        var read = routeIndexFor;
+        return suboptimalShown.Get(() => read?.Subs.Where(s => s.Suboptimal)
+            .OrderBy(s => s.Gain == null ? 1 : 0).ThenByDescending(s => s.Gain ?? 0).ToList() ?? new List<SubRoute>(), read);
     }
+    private readonly Memo<List<SubRoute>> suboptimalShown = new();
+
+    // The subs ready for new parts (Summary, the sidebar), once per Parts read.
+    private List<(PartNeed Sub, List<PartNeed> Parts)> SubsReadyNow()
+    {
+        var read = reader.Parts.Data;
+        return subsReadyShown.Get(() => read is { } r ? PartsPlanner.SubsReady(r.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>(), read);
+    }
+    private readonly Memo<List<(PartNeed Sub, List<PartNeed> Parts)>> subsReadyShown = new();
 
     /// <summary>"in 2d 5h", "in 7h", "in 40 min" until a time (milliseconds); "now" once it's past, as the app.</summary>
     public static string TimeUntil(double at, double now)

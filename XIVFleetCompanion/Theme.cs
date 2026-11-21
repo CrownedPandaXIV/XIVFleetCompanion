@@ -6,8 +6,12 @@ namespace XIVFleetCompanion
     // The looks' colours in the window (ImGui); the colours themselves are in ThemeLooks.cs.
     public static partial class Theme
     {
-        /// <summary>The window's own colors for a look (none for Dalamud's), from its tokens.</summary>
-        public static (ImGuiCol Col, Vector4 Color)[] Colors(ThemeChoice theme)
+        /// <summary>The window's own colors for a look (none for Dalamud's), from its tokens: worked out once per look
+        /// (they're pushed every frame). Read only.</summary>
+        public static (ImGuiCol Col, Vector4 Color)[] Colors(ThemeChoice theme) => colorsMade.GetOrAdd(theme, MakeColors);
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<ThemeChoice, (ImGuiCol Col, Vector4 Color)[]> colorsMade = new();
+
+        private static (ImGuiCol Col, Vector4 Color)[] MakeColors(ThemeChoice theme)
         {
             if (Info(theme).Tokens is not { } t) return System.Array.Empty<(ImGuiCol, Vector4)>();
             Vector4 C(string hex, float alpha = 1f) => Hex(hex, alpha);

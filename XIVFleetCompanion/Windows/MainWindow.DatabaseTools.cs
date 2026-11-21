@@ -58,8 +58,14 @@ public partial class MainWindow
     private string? removalPlanError;
     private readonly FileDialogManager toolDialog = new();
 
-    private DatabaseAdmin.Connection? SavedConnection() =>
-        PostgresCredentialStore.Load(plugin.Configuration.UseRemoteConnection) is { } c ? new DatabaseAdmin.Connection(c.Host, c.Port, c.Database, c.Username, c.Password) : null;
+    // The saved login (Windows Credential Manager) and this PC's addresses (its network adapters): read at most every 3
+    // seconds while Database tools is open, not every frame (as the Status page does), and again after each tool job.
+    private readonly Every<DatabaseAdmin.Connection?> savedConnectionNow = new(TimeSpan.FromSeconds(3));
+    private readonly Every<List<WindowsSetup.Address>> addressesNow = new(TimeSpan.FromSeconds(3));
+
+    private DatabaseAdmin.Connection? SavedConnection() => savedConnectionNow.Get(() =>
+        PostgresCredentialStore.Load(plugin.Configuration.UseRemoteConnection) is { } c ? new DatabaseAdmin.Connection(c.Host, c.Port, c.Database, c.Username, c.Password) : null);
+    private List<WindowsSetup.Address> Addresses() => addressesNow.Get(WindowsSetup.Addresses);
 
     private void StartTool(string job, Func<Task<(bool Ok, string? Message)>> work)
     {
@@ -85,6 +91,8 @@ public partial class MainWindow
             {
                 toolBusy = false;
                 detected = null;
+                savedConnectionNow.Forget();
+                addressesNow.Forget();
             }
         });
     }
@@ -225,12 +233,12 @@ public partial class MainWindow
 
         // ---- Move the database to this PC ----
         var saved = SavedConnection();
-        if (plugin.Configuration.FleetStore == FleetStoreChoice.SharedDatabase && saved != null && !WindowsSetup.IsThisPc(saved.Host, WindowsSetup.Addresses())
+        if (plugin.Configuration.FleetStore == FleetStoreChoice.SharedDatabase && saved != null && !WindowsSetup.IsThisPc(saved.Host, Addresses())
             && ImGui.TreeNode("Move the database to this PC"))
         {
             Ui.Wrapped($"Copies the database from {saved.Host} to this PC, checks every table, then sends every PC and app here. Until that last step, anything that goes wrong puts everything back; the old database is never deleted. " +
                        "The plugins pause on their own, but close the app on your other PCs first: a change made in it during the move isn't copied.");
-            var (ts, home) = WindowsSetup.PcAddresses(WindowsSetup.Addresses());
+            var (ts, home) = WindowsSetup.PcAddresses(Addresses());
             var choices = (WindowsSetup.IsTailscaleAddress(saved.Host) || home.Count == 0 ? ts.Concat(home) : home.Concat(ts)).ToList();
             if (moveAddress.Length == 0 && choices.Count > 0) moveAddress = choices[0];
             ImGui.SetNextItemWidth(200 * scale);
@@ -245,7 +253,7 @@ public partial class MainWindow
             if (ImGui.Button("Check first"))
                 StartTool("move", async () =>
                 {
-                    moveChecked = await DatabaseAdmin.CheckOld(saved, new DatabaseAdmin.MoveDeps { IsThisPc = h => WindowsSetup.IsThisPc(h, WindowsSetup.Addresses()) });
+                    moveChecked = await DatabaseAdmin.CheckOld(saved, new DatabaseAdmin.MoveDeps { IsThisPc = h => WindowsSetup.IsThisPc(h, Addresses()) });
                     return (moveChecked.Value.Ok, moveChecked.Value.Ok ? "Everything is ready to move." : moveChecked.Value.Error);
                 });
             ImGui.SameLine();
@@ -257,7 +265,7 @@ public partial class MainWindow
                     if (DatabaseAdmin.PortProblem(port) is { } badPort) return (false, badPort);
                     var deps = new DatabaseAdmin.MoveDeps
                     {
-                        IsThisPc = h => WindowsSetup.IsThisPc(h, WindowsSetup.Addresses()),
+                        IsThisPc = h => WindowsSetup.IsThisPc(h, Addresses()),
                         FindTools = () => PgBackups.FindTools(plugin.Backups.Load().Settings.PgBin, SharedBackups.ToolsDir),
                         DownloadPostgres = p => WindowsSetup.DownloadOnce(WindowsSetup.Postgres, WindowsSetup.DownloadFolder, p),
                         RecordInstalled = p => WindowsSetup.RecordInstalled(SharedBackups.Folder, p, false),
@@ -280,7 +288,7 @@ public partial class MainWindow
         // ---- Let other PCs connect ----
         if (!fileOnly && pgHere && ImGui.TreeNode("Let other PCs connect"))
         {
-            var ranges = WindowsSetup.RangesToAllow(WindowsSetup.Addresses());
+            var ranges = WindowsSetup.RangesToAllow(Addresses());
             Ui.Wrapped($"Sets this PC's PostgreSQL to let in your Tailscale PCs and this PC's home network ({string.Join(", ", ranges)}), with the password, and opens Windows Firewall for its port to those only. Copies of PostgreSQL's settings are kept first.");
             ImGui.SetNextItemWidth(100 * scale); Ui.InputInt("Port##connectPort", ref localPort, 0);
             if (ImGui.Button("Let other PCs connect (Windows asks for permission)"))
@@ -304,7 +312,7 @@ public partial class MainWindow
             Ui.Wrapped("What a move leaves in this PC's PostgreSQL: the copy that was here under the same name, or the copy left when the database moved away. The database in use is never one.");
             Password("PostgreSQL's master password##leftMaster", ref adminPassword, 220 * scale);
             ImGui.SetNextItemWidth(100 * scale); Ui.InputInt("Port##leftPort", ref localPort, 0);
-            var current = saved != null && WindowsSetup.IsThisPc(saved.Host, WindowsSetup.Addresses()) ? saved.Database : null;
+            var current = saved != null && WindowsSetup.IsThisPc(saved.Host, Addresses()) ? saved.Database : null;
             Func<string, Task<Npgsql.NpgsqlConnection>> connectTo = name => DatabaseAdmin.Open("localhost", localPort, name, "postgres", adminPassword, 5);
             if (ImGui.Button("Find them"))
             {
@@ -360,7 +368,7 @@ public partial class MainWindow
         // ---- What another PC needs ----
         if (!fileOnly && saved != null && ImGui.TreeNode("What another PC needs"))
         {
-            var addresses = WindowsSetup.Addresses();
+            var addresses = Addresses();
             var (ts, home) = WindowsSetup.PcAddresses(addresses);
             var local = WindowsSetup.IsThisPc(saved.Host, addresses);
             var choices = local ? ts.Select(a => $"{a} (Tailscale)").Concat(home.Select(a => $"{a} (home network)")).ToList() : new List<string> { $"{saved.Host} (same as this PC)" };
@@ -403,7 +411,7 @@ public partial class MainWindow
                 {
                     try
                     {
-                        var addresses = WindowsSetup.Addresses();
+                        var addresses = Addresses();
                         var installed = WindowsSetup.ReadInstalled(SharedBackups.Folder);
                         var dbHere = c != null && WindowsSetup.IsThisPc(c.Host, addresses);
                         var (pg, tsh) = await WindowsSetup.Detect();

@@ -1045,6 +1045,30 @@ internal static partial class Program
         }
     }
 
+    // The pages' cache: kept while the inputs are the same (a list by reference, text and numbers by value), made again
+    // when one changes.
+    private static void MemoChecks()
+    {
+        var memo = new Memo<int>();
+        var made = 0;
+        var list = new List<int> { 1 };
+        int Get(object read, string filter, bool hide) => memo.Get(() => ++made, read, filter, hide);
+        Get(list, "a", false); Get(list, new string('a', 1), false);
+        Check(made == 1, "memo: the same inputs (equal text, the same list) reuse the value");
+        Get(new List<int> { 1 }, "a", false);
+        Check(made == 2, "memo: a new read (another list, even an equal one) makes it again");
+        Get(list, "a", true); Get(list, "b", true);
+        Check(made == 4, "memo: a changed flag or search makes it again");
+        memo.Forget(); Get(list, "b", true);
+        Check(made == 5, "memo: Forget makes it again");
+        var every = new Every<int>(TimeSpan.FromHours(1));
+        var n = 0;
+        every.Get(() => ++n); every.Get(() => ++n);
+        Check(n == 1, "every: read once within its time");
+        every.Forget(); every.Get(() => ++n);
+        Check(n == 2, "every: read again after Forget");
+    }
+
     private static void RoutesAgainstTheApp()
     {
         // Route Optimization with nothing to switch says why (as the app's routesNothingText).
@@ -1649,7 +1673,7 @@ internal static partial class Program
             await Same("item totals", FleetReader.ReadItemTotals, unordered: true);
             await Same("Gil & Market", async c => (await FleetReader.ReadMarketData(c)).Read);
             await Same("what to ask Universalis", async c => { var ask = (await FleetReader.ReadMarketData(c)).Ask; return ask == null ? null : new { Exclude = ask.Exclude.OrderBy(x => x).ToList(), Wanted = ask.Wanted.Select(w => $"{w.World}:{w.ItemId}").OrderBy(x => x).ToList() }; });
-            await Same("routes' inputs", FleetReader.ReadRoutesInputs, unordered: true);
+            await Same("routes' inputs", c => FleetReader.ReadRoutesInputs(c), unordered: true);
             await Same("forecast accuracy", FleetReader.ReadForecasts);
             await Same("Loot per Voyage", FleetReader.ReadLoot);
             await Same("Parts", async c => (await FleetReader.ReadParts(c)).Needs);
@@ -2160,6 +2184,7 @@ internal static partial class Program
         PartsAgainstTheApp();
         await PartsReadFromTheDatabase(conn);
         await MarketAgainstTheApp();
+        MemoChecks();
         RoutesAgainstTheApp();
         await RoutesReadFromTheDatabase(conn);
         await MarketAsksEachPlaceOnce();

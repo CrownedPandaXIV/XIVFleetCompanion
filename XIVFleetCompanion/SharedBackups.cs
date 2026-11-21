@@ -276,15 +276,33 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>Looks whether the app's task is set up, for the window to say which makes the daily backup.</summary>
+        /// Called every frame while Backups is open: one look at a time (not one schtasks.exe a frame until it answers),
+        /// then once an hour, keeping the last answer meanwhile.
         public void LookForAppTask()
         {
-            if (appTask != null && DateTime.Now - appTaskLookedAt < TimeSpan.FromHours(1)) return;
-            appTaskLookedAt = DateTime.Now;
+            if (lookingForAppTask) return;
+            var again = appTask != null ? TimeSpan.FromHours(1) : TimeSpan.FromMinutes(1); // a failed look: tried again in a minute
+            if (DateTime.Now - appTaskLookedAt < again && DateTime.Now >= appTaskLookedAt) return;
+            lookingForAppTask = true;
             Task.Run(async () =>
             {
-                appTask = null;
-                await AppTaskInstalled();
+                try
+                {
+                    if (!OperatingSystem.IsWindows()) { appTask = false; return; }
+                    var r = await PgBackups.Run("schtasks.exe", new[] { "/Query", "/TN", AppTaskName });
+                    appTask = r.Ok;
+                }
+                catch (Exception)
+                {
+                    // looked at again next time
+                }
+                finally
+                {
+                    appTaskLookedAt = DateTime.Now;
+                    lookingForAppTask = false;
+                }
             });
         }
+        private volatile bool lookingForAppTask;
     }
 }
