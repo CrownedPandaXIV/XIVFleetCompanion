@@ -398,7 +398,7 @@ namespace XIVFleetCompanion.Setup
                     if (s.Ranges != null) o["ranges"] = new JsonArray(s.Ranges.Select(r => (JsonNode)r!).ToArray());
                     stepNodes.Add(o);
                 }
-                File.WriteAllText(request, new JsonObject { ["steps"] = stepNodes, ["keepGoing"] = keepGoing, ["resultFile"] = resultFile, ["progressFile"] = progressFile }.ToJsonString());
+                File.WriteAllText(request, new JsonObject { ["steps"] = stepNodes, ["keepGoing"] = keepGoing, ["resultFile"] = resultFile, ["progressFile"] = progressFile }.ToJsonString(), new UTF8Encoding(true));
                 var info = new ProcessStartInfo("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{script}\" -RequestFile \"{request}\"")
                 {
                     UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden,

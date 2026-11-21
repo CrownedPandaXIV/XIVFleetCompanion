@@ -577,14 +577,18 @@ namespace XIVFleetCompanion
 
         // Removes the chests of Free Companies that no tracked character belongs to any more (a
         // character left, or the FC was disbanded), going by companion_character_current, which
-        // holds every account's characters. Returns how many chest slots were removed.
+        // holds every account's characters. Only once the chest hasn't been written for a day: a
+        // character's FC can briefly read as none (AutoRetainer not knowing it yet, after an update or
+        // a re-registration), and a chest still in use is written again at least hourly. Returns how
+        // many chest slots were removed.
         public static async Task<int> RemoveOrphanFcChestsAsync(DbConnection db)
         {
             if (Db.IsFile(db)) { return await FileRemoveOrphanFcChests(db); }
             var conn = (NpgsqlConnection)db;
             const string sql = @"
                 DELETE FROM companion_fc_inventory_snapshot f
-                WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = f.fc_id)";
+                WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = f.fc_id)
+                  AND f.updated_at < localtimestamp - interval '1 day'";
             await using var cmd = new NpgsqlCommand(sql, conn);
             return await cmd.ExecuteNonQueryAsync();
         }
@@ -756,6 +760,8 @@ namespace XIVFleetCompanion
         private readonly Dictionary<string, string> lastWritten = new();
         private readonly TimeSpan refreshEvery;
         private DateTime startedAt;
+        private string? database;
+        private volatile bool forgetAll;
 
         public ChangeTracker(TimeSpan refreshEvery, DateTime now)
         {
@@ -763,15 +769,22 @@ namespace XIVFleetCompanion
             startedAt = now;
         }
 
-        // Call once at the start of each sync.
-        public void BeginSync(DateTime now)
+        // Call once at the start of each sync. database: which database this sync writes to (any text naming it);
+        // what was written to another one is forgotten, so a new, restored or moved database gets everything.
+        public void BeginSync(DateTime now, string? database = null)
         {
-            if (now - startedAt >= refreshEvery)
+            var changedDatabase = database != null && this.database != null && database != this.database;
+            if (database != null) this.database = database;
+            if (forgetAll || changedDatabase || now - startedAt >= refreshEvery)
             {
+                forgetAll = false;
                 lastWritten.Clear();
                 startedAt = now;
             }
         }
+
+        // From any thread (a restore or a move): the next sync writes everything again.
+        public void ForgetAll() => forgetAll = true;
 
         public bool IsUnchanged(string key, string fingerprint)
             => lastWritten.TryGetValue(key, out var previous) && previous == fingerprint;

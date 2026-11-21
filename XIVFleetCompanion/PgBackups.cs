@@ -548,14 +548,41 @@ namespace XIVFleetCompanion
             return null;
         }
 
+        /// <summary>Run just before a restore, in one transaction: drops every fleet view and their function, and forgets
+        /// which views.sql made them. pg_restore --clean drops only what is in the backup, and without CASCADE, so a view
+        /// added by a later version would stop the restore. The views are made again by the next database check
+        /// (DatabaseKeeper.CheckSoon), whether the restore worked or not. The same as the app's backups/run.js.</summary>
+        public const string SetViewsAsideSql = @"DO $$
+DECLARE v record;
+BEGIN
+  FOR v IN SELECT n.nspname AS schema, c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE c.relkind = 'v' AND n.nspname = current_schema() AND c.relname LIKE 'fleet\_%\_view' LOOP
+    EXECUTE format('DROP VIEW IF EXISTS %I.%I CASCADE', v.schema, v.name);  -- by name: one dropped already, with a view it's built on, is skipped
+  END LOOP;
+  DROP FUNCTION IF EXISTS fleet_part_letter(int) CASCADE;
+  IF to_regclass('companion_views') IS NOT NULL THEN DELETE FROM companion_views; END IF;
+END $$;";
+
         /// <summary>Puts the database back as it was in a backup: first a backup of how it is now (so this can be undone),
-        /// then pg_restore --clean in one transaction, so a failure part way changes nothing.</summary>
+        /// then pg_restore --clean in one transaction, so a failure part way changes nothing. The fleet views are set
+        /// aside first (SetViewsAsideSql); call DatabaseKeeper.CheckSoon afterwards, whatever the result.</summary>
         public static async Task<(bool Ok, BackupResult? Safety, string Message)> Restore(Tools tools, PgLogin login, Settings s, string file, DateTime now)
         {
             if (!File.Exists(file)) return (false, null, $"{file} is not there any more.");
             // Removes no old backups: the one being restored may be the oldest. The next daily backup tidies up.
             var safety = await BackupNow(tools, login, s with { CopyFolder = "", Keep = int.MaxValue }, now);
             if (!safety.Ok) return (false, safety, $"Nothing was restored: first backing up the database as it is now failed. {safety.Message}");
+            try
+            {
+                await using var conn = new NpgsqlConnection(ConnectionString(login));
+                await conn.OpenAsync();
+                await using var drop = new NpgsqlCommand(SetViewsAsideSql, conn);
+                await drop.ExecuteNonQueryAsync();
+            }
+            catch (Exception e) when (e is NpgsqlException or InvalidOperationException)
+            {
+                return (false, safety, $"Nothing was restored: the fleet views couldn't be set aside first. {e.Message}");
+            }
             var r = await Run(tools.Restore, ConnectionArgs(login).Concat(new[]
             {
                 "-d", login.Database, "--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges", file,

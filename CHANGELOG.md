@@ -3,6 +3,27 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.5.0 - 2026-11-21
+
+Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 is released.
+
+- **Restoring a shared-database backup works after an update that added fleet views.** Before, any backup made
+  before such an update failed to restore with a PostgreSQL message about CASCADE. The fleet views are now set aside
+  first and made again straight after, whether the restore worked or not.
+- **After a restore or a move, every game writes all of its data again at its next sync.** Before, data that hadn't
+  changed since the plugin last wrote it was skipped for up to an hour, so a new, restored or moved database could
+  show characters without their subs, retainers or bags until then. This also covers other games on the same PC
+  and other PCs.
+- **Moving the fleet or restoring a backup waits for a running sync to finish**, however long it takes. Before, it
+  went ahead after a minute, while a big fleet's sync could still be writing.
+- **Voyage loot is no longer missed when subs are collected out of order.** A sub that came back earlier but was
+  collected after another sub's voyage was stored had its loot skipped for good. The plugin now keeps track per sub.
+- **A problem reading Submarine Tracker's file only affects the voyage loot.** Before, it also stopped this PC's
+  status (the app's PCs page) and venture rewards from saving. It's now listed as a problem on the PCs page.
+- **An FC chest is kept for a day when no character seems to be in that Free Company.** AutoRetainer can briefly
+  not know a character's Free Company, which used to remove the chest until the next hourly rewrite.
+- Setup's administrator step reads its instructions as UTF-8 (a safeguard for Windows user names with accents).
+
 ## 2.4.8 - 2026-11-20
 
 - **Supplies: the table stays below its controls.** After any change was saved in the plugin, the table moved up

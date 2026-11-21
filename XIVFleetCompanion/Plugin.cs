@@ -130,7 +130,9 @@ public sealed class Plugin : IDalamudPlugin
         Backups = new SharedBackups(
             () => PostgresCredentialStore.Load(Configuration.UseRemoteConnection) is { } c ? new PgLogin(c.Host, c.Port, c.Database, c.Username, c.Password) : null,
             () => Configuration.FleetStore == FleetStoreChoice.SharedDatabase,
-            text => Log.Information($"Fleet Companion: {text}"));
+            text => Log.Information($"Fleet Companion: {text}"),
+            // After a restore (whether it worked or not): the views were set aside, and what was written is gone.
+            () => { Keeper.CheckSoon(); changes.ForgetAll(); });
         // Reads follow the database when the app moves it to another PC, as syncs do, so a PC that only reads switches too.
         Fleet = new FleetReader(FleetLocation, GameNames.SubGame, OpenFleetAsync,
             () => (Environment.MachineName, Configuration.AccountLabel ?? "", VersionText), Keeper);
@@ -311,7 +313,8 @@ public sealed class Plugin : IDalamudPlugin
         NoteLogin();
         UpdateInfoBar();
         Backups.Tick(DateTime.Now);
-        if (!Configuration.Enabled) return;
+        // No new sync starts while the fleet is being moved or restored (WaitForSyncAsync).
+        if (!Configuration.Enabled || moving) return;
 
         var now = DateTime.UtcNow;
         var reason = schedule.ShouldStart(now, TimeSpan.FromMinutes(Configuration.SyncIntervalMinutes), syncInProgress);
@@ -522,6 +525,26 @@ public sealed class Plugin : IDalamudPlugin
         return (characters, cids.Count, leftOut, leftOutCids);
     }
 
+    // Names the database a sync writes to, for the change tracker: where it is, and a mark that changes when it's
+    // restored, by this game or any other (the shared database's tables are made again by a restore, so their id
+    // changes; the fleet file notes when it was restored). Unchanged data is then written again after a restore.
+    private static async Task<string> DatabaseIdentityAsync(DbConnection conn)
+    {
+        string mark;
+        try
+        {
+            await using var cmd = Db.Command(conn, Db.IsFile(conn)
+                ? "SELECT value FROM companion_file_info WHERE key = 'restored_at'"
+                : "SELECT to_regclass('companion_character_current')::oid::text");
+            mark = Convert.ToString(await cmd.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        }
+        catch (DbException)
+        {
+            mark = "";
+        }
+        return $"{conn.DataSource}|{conn.Database}|{mark}";
+    }
+
     private async Task RunSyncAsync()
     {
         if (moving) return;
@@ -570,7 +593,7 @@ public sealed class Plugin : IDalamudPlugin
         // Characters that last logged in on another setup are that setup's to sync.
         characters = await KeepOwnCharactersAsync(conn, characters, leftOutCids);
 
-        changes.BeginSync(DateTime.UtcNow);
+        changes.BeginSync(DateTime.UtcNow, await DatabaseIdentityAsync(conn));
         AskAgainForDetailsTables();
         var written = 0;
         var unchanged = 0;
@@ -1029,7 +1052,7 @@ public sealed class Plugin : IDalamudPlugin
             string? trialFolder = null;
             try
             {
-                for (var i = 0; i < 120 && syncInProgress; i++) await Task.Delay(500);
+                await WaitForSyncAsync(s => MoveStatus = s);
                 var files = FileDatabase.Files.Embedded();
                 var by = $"plugin {VersionText}";
                 await using var pg = await PostgresWriter.OpenConnectionAsync(Configuration.UseRemoteConnection)
@@ -1067,6 +1090,7 @@ public sealed class Plugin : IDalamudPlugin
                     return;
                 }
                 Configuration.FleetStore = toShared ? FleetStoreChoice.SharedDatabase : FleetStoreChoice.ThisPc;
+                changes.ForgetAll();
                 Configuration.Enabled = true;
                 Configuration.Save();
                 SaveChoiceForPc(Configuration);
@@ -1110,10 +1134,25 @@ public sealed class Plugin : IDalamudPlugin
         var text = await FileDatabase.RestoreAsync(conn, FileDatabase.DefaultPath, backupPath, FileDatabase.Files.Embedded(), DateTime.Now,
             damaged: Keeper.Health is { Ok: false });
         Keeper.NoteHealth(await FileDatabase.LastHealthAsync(conn));
+        changes.ForgetAll();
         Log.Information($"Fleet Companion: {text}");
         Fleet.ReadIfDue(everything: true);
         return text;
     });
+
+    // Called once `moving` is set: waits for a sync that's already running to finish, however long it takes (a big
+    // fleet's hourly rewrite over a slow connection can take minutes), so nothing is copied or restored while it's
+    // still writing. No new sync starts meanwhile (OnFrameworkUpdate, RunSyncAsync).
+    private async Task WaitForSyncAsync(Action<string> status)
+    {
+        var started = DateTime.UtcNow;
+        while (syncInProgress)
+        {
+            if (DateTime.UtcNow - started > TimeSpan.FromSeconds(30))
+                status("Still waiting for the sync that's running to finish (a big fleet can take a few minutes)...");
+            await Task.Delay(500);
+        }
+    }
 
     private void RunFileAction(string doing, Func<DbConnection, Task<string>> action)
     {
@@ -1125,7 +1164,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             try
             {
-                for (var i = 0; i < 120 && syncInProgress; i++) await Task.Delay(500);
+                await WaitForSyncAsync(s => FileActionStatus = s);
                 await using var conn = await FileDatabase.OpenAsync(FileDatabase.DefaultPath);
                 FileActionStatus = await action(conn);
                 FileActionFailed = Keeper.Health is { Ok: false };
@@ -1269,17 +1308,25 @@ public sealed class Plugin : IDalamudPlugin
         var stRunning = subTrackerRunning ?? stFound;
         if (stFound && fcIds.Count > 0)
         {
+            var newest = await DetailsWriter.ReadNewestVoyagesAsync(conn, fcIds);
+            if (newest == null) { DetailsTablesMissing(); return; }
+            // Any problem with Submarine Tracker's own file (it's SQLite too, so not told apart from the fleet's by
+            // its kind) leaves out only the loot: this PC's status and the venture rewards are still saved.
+            List<DetailsWriter.LootRow>? loot = null;
             try
             {
-                var newest = await DetailsWriter.ReadNewestVoyagesAsync(conn, fcIds);
-                if (newest == null) { DetailsTablesMissing(); return; }
-                var loot = SubmarineTrackerReader.ReadLoot(stPath!, newest, fcIds);
-                if (!await DetailsWriter.WriteVoyageLootAsync(conn, loot)) { DetailsTablesMissing(); return; }
-                if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
+                loot = SubmarineTrackerReader.ReadLoot(stPath!, newest, fcIds);
+                lock (warned) warned.Remove("submarinetracker");
             }
-            catch (Exception ex) when (!Db.IsQueryError(ex))
+            catch (Exception ex)
             {
                 WarnOnce("submarinetracker", $"Fleet Companion: could not read Submarine Tracker's loot ({stPath}) — {ex.Message}");
+                problems.Add("Submarine Tracker's file couldn't be read, so new voyages' loot is not recorded. Updating Submarine Tracker or restarting the game may fix it.");
+            }
+            if (loot != null)
+            {
+                if (!await DetailsWriter.WriteVoyageLootAsync(conn, loot)) { DetailsTablesMissing(); return; }
+                if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
             }
         }
         // Voyages already in its file are still read while it is not running; new ones are not recorded.

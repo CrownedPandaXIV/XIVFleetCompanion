@@ -446,8 +446,9 @@ internal static partial class Program
         Check(await Count(conn, "SELECT count(*) FROM companion_character_current") == 1 && await Count(conn, "SELECT count(*) FROM companion_character_current WHERE name = 'Then' AND gil = 100") == 1
               && await Count(conn, "SELECT count(*) FROM sub_build_rules") == 1,
             $"restore: the fleet is as it was in the backup ({text})");
-        Check(await Count(other, "SELECT count(*) FROM companion_character_current WHERE name = 'Then'") == 1,
-            "restore: a game that had the file open sees the restored fleet straight away, without restarting");
+        Check(await Count(other, "SELECT count(*) FROM companion_character_current WHERE name = 'Then'") == 1
+              && await Count(other, "SELECT count(*) FROM companion_file_info WHERE key = 'restored_at' AND value = '2026-11-07T10:30:00.0000000'") == 1,
+            "restore: a game that had the file open sees the restored fleet straight away, without restarting, and that it was restored (so it writes everything again)");
         await other.DisposeAsync();
         var before = FileDatabase.Backups(path).FirstOrDefault(f => f.Name.Contains("before-restore"));
         Check(before != null && text.Contains(before.Name) && text.Contains("The file is whole"), $"restore: the fleet as it was just before is kept as a backup ({before?.Name})");

@@ -24,15 +24,18 @@ namespace XIVFleetCompanion
         private readonly Func<PgLogin?> login;
         private readonly Func<bool> isShared;
         private readonly Action<string> log;
+        private readonly Action restored;
         private DateTime nextDailyLook;
         private bool? appTask;
         private DateTime appTaskLookedAt;
 
-        public SharedBackups(Func<PgLogin?> login, Func<bool> isShared, Action<string> log)
+        /// <param name="restored">Called after every restore attempt, whatever came of it.</param>
+        public SharedBackups(Func<PgLogin?> login, Func<bool> isShared, Action<string> log, Action? restored = null)
         {
             this.login = login;
             this.isShared = isShared;
             this.log = log;
+            this.restored = restored ?? (() => { });
         }
 
         public bool Busy { get; private set; }
@@ -135,8 +138,15 @@ namespace XIVFleetCompanion
         {
             var check = await PgBackups.CheckFile(tools, file);
             if (check != null) return (false, check);
-            var r = await PgBackups.Restore(tools, l, Load().Settings, file, DateTime.Now);
-            return (r.Ok, r.Message);
+            try
+            {
+                var r = await PgBackups.Restore(tools, l, Load().Settings, file, DateTime.Now);
+                return (r.Ok, r.Message);
+            }
+            finally
+            {
+                restored();
+            }
         });
 
         /// <summary>Get the backup tools: PostgreSQL's zip for the database's version, only the tools kept.</summary>

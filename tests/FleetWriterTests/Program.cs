@@ -1623,7 +1623,7 @@ internal static partial class Program
                 return new { Synced = ages.Synced.Keys.OrderBy(k => k).ToList(), Inventory = ages.Inventory.Keys.Select(k => $"{k.Owner}/{k.Source}").OrderBy(k => k).ToList(),
                     Chest = ages.Chest.Keys.ToList(), Recent = ages.Synced.Values.Concat(ages.Inventory.Values).Concat(ages.Chest.Values).All(t => t < TimeSpan.FromMinutes(5)) };
             });
-            await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToList());
+            await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key.Fc}/{kv.Key.Register}:{kv.Value}").ToList());
             await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 1001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
             await Same("settings", FleetReader.ReadSettings);
             await Same("Subs", FleetReader.ReadSubs);
@@ -2294,6 +2294,9 @@ internal static partial class Program
             new() { SortedContainer = 20000, SortedSlotIndex = 0, ItemId = 22500, Quantity = 1 },
             new() { SortedContainer = 20001, SortedSlotIndex = 3, ItemId = 22501, Quantity = 2 },
         });
+        Check(await FleetWriter.RemoveOrphanFcChestsAsync(conn) == 0,
+            "a chest written in the last day stays though no character is in its FC (AutoRetainer may briefly not know a character's FC)");
+        await Exec(conn, "UPDATE companion_fc_inventory_snapshot SET updated_at = localtimestamp - interval '25 hours' WHERE fc_id = 9999999");
         var removedSlots = await FleetWriter.RemoveOrphanFcChestsAsync(conn);
         chest = await Rows(conn, "SELECT fc_id, count(*) FROM companion_fc_inventory_snapshot GROUP BY fc_id ORDER BY fc_id");
         Check(removedSlots == 2 && Show(chest) == "9000001,1",
@@ -2517,6 +2520,16 @@ internal static partial class Program
         tracker.Remember("inv:1", "A");
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
+        tracker.BeginSync(start.AddMinutes(62), "db one");
+        tracker.Remember("inv:1", "A");
+        tracker.BeginSync(start.AddMinutes(63), "db one");
+        var sameDb = tracker.IsUnchanged("inv:1", "A");
+        tracker.BeginSync(start.AddMinutes(64), "db two");
+        Check(sameDb && !tracker.IsUnchanged("inv:1", "A"), "a different (new, moved or restored) database gets everything written again");
+        tracker.Remember("inv:1", "A");
+        tracker.ForgetAll();
+        tracker.BeginSync(start.AddMinutes(65), "db two");
+        Check(!tracker.IsUnchanged("inv:1", "A"), "after this game restores or moves the fleet, everything is written again");
 
         // Where characters last logged in: only the setup a character last logged in on syncs it.
         Check(await FleetWriter.ReadLoginOwnersAsync(conn, new ulong[] { 1 }) == null
@@ -2960,8 +2973,8 @@ internal static partial class Program
         Check(await DetailsWriter.WriteVoyageLootAsync(conn, loot) && await DetailsWriter.WriteVoyageLootAsync(conn, loot), "voyage loot is written, and writing it again is harmless");
         var newestVoyage = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001, 9000002 });
         Check(Show(await Rows(conn, "SELECT count(*), sum(primary_count) FROM companion_voyage_loot")) == "2,4"
-              && newestVoyage != null && newestVoyage.Count == 1 && newestVoyage[9000001] == 1790000000,
-            "each sector is stored once, and the newest voyage per FC is known so only newer ones are read");
+              && newestVoyage != null && newestVoyage.Count == 1 && newestVoyage[(9000001, 1700000000)] == 1790000000,
+            "each sector is stored once, and the newest voyage per sub is known so only newer ones are read");
 
         // sql/009: the order a voyage ran its sectors in. Voyages stored before it count as not read yet,
         // so the next sync fills in their order; a stored order is not changed.
@@ -2977,7 +2990,7 @@ internal static partial class Program
         await DetailsWriter.WriteVoyageLootAsync(conn, loot);
         var legRows = await Rows(conn, "SELECT sector, leg FROM companion_voyage_loot ORDER BY leg");
         var afterLegs = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001 });
-        Check(Show(legRows) == "22,1 / 15,2" && afterLegs != null && afterLegs[9000001] == 1790000000,
+        Check(Show(legRows) == "22,1 / 15,2" && afterLegs != null && afterLegs[(9000001, 1700000000)] == 1790000000,
             "their order is filled in once, and then they count as read: " + Show(legRows));
 
         var ventures = new List<DetailsWriter.VentureRow>
@@ -3050,13 +3063,29 @@ internal static partial class Program
                     INSERT INTO loot VALUES (x'ce00895441', 1700000001, 1790090000, 3, 22501, 1, 0, 0, 0, 0, 1790090000, 0);";
                 cmd.ExecuteNonQuery();
             }
-            var all = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long>(), new ulong[] { 0x895440 });
-            var newer = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long> { [0x895440] = 1790000000 }, new ulong[] { 0x895440, 0x895441 });
+            var all = SubmarineTrackerReader.ReadLoot(db, new Dictionary<(ulong, uint), long>(), new ulong[] { 0x895440 });
+            var newer = SubmarineTrackerReader.ReadLoot(db, new Dictionary<(ulong, uint), long> { [(0x895440, 1700000000)] = 1790000000 }, new ulong[] { 0x895440, 0x895441 });
             Check(all.Count == 3 && all[0].SubName == "Sub-1" && all[0].AdditionalItem == 22505 && all[0].PrimaryCount == 3
                   && newer.Count == 3 && newer.All(r => r.Return == 1790090000) && newer.Any(r => r.FcId == 0x895441 && !r.Valid && r.SubName == null),
                 "SubmarineTracker's loot is read per FC asked for, only newer than what is stored, with the sub's name");
             Check(string.Join(" ", all.Select(r => $"{r.Sector}:{r.Leg}")) == "15:1 15:1 4:2" && newer.First(r => r.FcId == 0x895441).Leg == 1,
                 "each sector's leg is the order SubmarineTracker added it in (the order it was visited), counted per voyage");
+
+            // Sub 2 came back before sub 1 but was collected (recorded) after sub 1's voyage was stored; and a voyage
+            // of a sub with nothing stored, from long ago.
+            using (var sqlite = new System.Data.SQLite.SQLiteConnection($"Data Source={db}"))
+            {
+                sqlite.Open();
+                using var cmd = sqlite.CreateCommand();
+                cmd.CommandText = @"
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000002, 1790080000, 7, 22502, 1, 0, 0, 0, 0, 1790095000, 1);
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000003, 1780000000, 9, 22503, 1, 0, 0, 0, 0, 1780000000, 1);";
+                cmd.ExecuteNonQuery();
+            }
+            var later = SubmarineTrackerReader.ReadLoot(db, new Dictionary<(ulong, uint), long> { [(0x895440, 1700000000)] = 1790090000 }, new ulong[] { 0x895440 });
+            Check(later.Count == 1 && later[0].Register == 1700000002 && later[0].Return == 1790080000,
+                "a sub that came back earlier but was collected later still has its loot read; a sub's voyage from long before its FC's newest is not read again: "
+                + string.Join(" ", later.Select(r => $"{r.Register}@{r.Return}")));
 
             var statFile = System.IO.Path.Combine(dir, "0040000000ABCDEF_Oldret.statistic.json");
             System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700},{""I"":0,""T"":1790003800}],""PlayerName"":""Aki@Maduin"",""RetainerName"":""Oldret""}");

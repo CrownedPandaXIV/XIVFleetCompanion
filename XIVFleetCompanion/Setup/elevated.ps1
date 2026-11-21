@@ -254,7 +254,7 @@ if ($RequestFile) {
     $request = $null
     $results = New-Object System.Collections.ArrayList
     try {
-        $request = Get-Content -Raw -LiteralPath $RequestFile | ConvertFrom-Json
+        $request = Get-Content -Raw -Encoding UTF8 -LiteralPath $RequestFile | ConvertFrom-Json
         foreach ($step in $request.steps) {
             try { $r = Invoke-Step $step }
             catch { $r = Step-Result $step.kind $false $_.Exception.Message $null }

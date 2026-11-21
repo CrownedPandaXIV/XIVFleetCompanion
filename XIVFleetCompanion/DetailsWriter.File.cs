@@ -47,14 +47,14 @@ namespace XIVFleetCompanion
 
         private static string? Lines(IReadOnlyCollection<string> lines) => string.Join("\n", lines);
 
-        private static async Task<Dictionary<ulong, long>> FileReadNewestVoyages(DbConnection conn, IReadOnlyCollection<ulong> fcIds)
+        private static async Task<Dictionary<(ulong Fc, uint Register), long>> FileReadNewestVoyages(DbConnection conn, IReadOnlyCollection<ulong> fcIds)
         {
-            var newest = new Dictionary<ulong, long>();
+            var newest = new Dictionary<(ulong, uint), long>();
             await using var cmd = Db.Command(conn, "");
-            cmd.CommandText = $@"SELECT fc_id, CAST(max(returned_at) AS INTEGER) FROM companion_voyage_loot
-                                 WHERE fc_id IN {Db.In(cmd, "id", fcIds.Select(Db.FcText))} AND leg IS NOT NULL GROUP BY fc_id";
+            cmd.CommandText = $@"SELECT fc_id, sub_register, CAST(max(returned_at) AS INTEGER) FROM companion_voyage_loot
+                                 WHERE fc_id IN {Db.In(cmd, "id", fcIds.Select(Db.FcText))} AND leg IS NOT NULL GROUP BY fc_id, sub_register";
             await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) newest[Db.Id(reader, 0)] = reader.GetInt64(1);
+            while (await reader.ReadAsync()) newest[(Db.Id(reader, 0), (uint)reader.GetInt64(1))] = reader.GetInt64(2);
             return newest;
         }
 

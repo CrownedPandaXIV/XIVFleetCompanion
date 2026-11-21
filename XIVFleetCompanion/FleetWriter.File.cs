@@ -201,7 +201,8 @@ namespace XIVFleetCompanion
 
         private static Task<int> FileRemoveOrphanFcChests(DbConnection conn) => Db.Exec(conn, @"
             DELETE FROM companion_fc_inventory_snapshot
-            WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = companion_fc_inventory_snapshot.fc_id)");
+            WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = companion_fc_inventory_snapshot.fc_id)
+              AND updated_at < @now - 86400", null, ("now", Db.Now()));
 
         private static Task<int> FileWriteHousing(DbConnection conn, ulong cid, FCTrackerConnector.HousingInfo housing) => Db.Exec(conn, @"
             INSERT INTO companion_character_housing

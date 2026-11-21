@@ -386,6 +386,9 @@ public sealed class DatabaseKeeper
     public string? LastBackup { get; private set; }
     public string? BackupProblem { get; private set; }
 
+    /// <summary>Look again at the next sync rather than in up to 10 minutes (after a restore).</summary>
+    public void CheckSoon() => nextAt = DateTime.MinValue;
+
     /// <param name="filePath">The fleet file (Just this PC), for its daily backup; null on PostgreSQL.</param>
     public async Task RunIfDueAsync(DbConnection conn, string? filePath = null)
     {

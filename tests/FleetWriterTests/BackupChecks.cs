@@ -123,6 +123,24 @@ internal static partial class Program
                 Check(restore.Ok && counts == "2/50" && restore.Safety?.File is { } safety && File.Exists(safety) && restore.Message.Contains(Path.GetFileName(safety)),
                     $"backups: Restore puts the database back as it was, after backing up how it was first: {restore.Message} ({counts})");
             }
+            // A view added after the backup was made (as a later views.sql would) doesn't stop the restore: the fleet views
+            // are set aside first, and the next database check makes them again.
+            await using (var db = new NpgsqlConnection(b.ConnectionString))
+            {
+                await db.OpenAsync();
+                await Exec(db, "CREATE VIEW fleet_newer_view AS SELECT cid, name FROM companion_character_current; " +
+                               "CREATE VIEW fleet_a_view AS SELECT cid FROM fleet_newer_view; " +
+                               "CREATE TABLE companion_views (id int PRIMARY KEY, checksum text, app_version text, applied_at timestamptz); " +
+                               "INSERT INTO companion_views VALUES (1, 'abc', '9.9.9', now())");
+            }
+            var past = await PgBackups.Restore(tools, login, settings, kept[0].File, new DateTime(2026, 11, 13, 7, 0, 0));
+            await using (var db = new NpgsqlConnection(b.ConnectionString))
+            {
+                await db.OpenAsync();
+                await using var look = new NpgsqlCommand("SELECT (to_regclass('fleet_newer_view') IS NULL) || '/' || (SELECT count(*) FROM companion_views)", db);
+                var after = (string)(await look.ExecuteScalarAsync())!;
+                Check(past.Ok && after == "true/0", $"backups: a backup made before a view was added still restores, with the views set aside to be made again: {past.Message} ({after})");
+            }
             var missing = await PgBackups.Restore(tools, login, settings, Path.Combine(folder, "gone.dump"), DateTime.Now);
             Check(!missing.Ok && missing.Message.Contains("is not there"), "backups: a backup that's gone is said so, and nothing is done");
         }

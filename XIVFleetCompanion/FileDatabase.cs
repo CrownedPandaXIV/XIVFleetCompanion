@@ -516,6 +516,9 @@ public static class FileDatabase
                     if (mine != theirs) throw new RefusedException($"{table} didn't restore whole ({mine:N0} of {theirs:N0} rows), so nothing was changed.");
                     rows += mine;
                 }
+                // Every game on this PC writes everything again at its next sync (Plugin.DatabaseIdentityAsync).
+                await Db.Exec(live, "INSERT INTO companion_file_info (key, value) VALUES ('restored_at', @v) ON CONFLICT (key) DO UPDATE SET value = excluded.value", tx,
+                    ("v", now.ToString("o", System.Globalization.CultureInfo.InvariantCulture)));
                 await tx.CommitAsync();
             }
             catch
