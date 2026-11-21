@@ -13,8 +13,9 @@
 --
 -- Unlike db/updates/, this file is applied again whenever it changes: after the numbered updates, the app compares
 -- its checksum with the one recorded in companion_views and, when they differ, replaces every view here in one
--- transaction (db/apply-updates.js ensureViews). So edit this file freely; a newer app's views are never replaced by
--- an older app's. Views and functions only, never tables or data: nothing is stored here, and nothing else depends
+-- transaction (db/apply-updates.js ensureViews); a newer app's views are never replaced by an older app's. Older plugins
+-- on other PCs read these views by column name, so views only gain columns: a released column is never renamed, removed
+-- or retyped (db/released-view-columns.txt lists them; db/updates/README.md). Views and functions only, never tables or data: nothing is stored here, and nothing else depends
 -- on these views, so they are dropped and made again.
 
 DROP VIEW IF EXISTS fleet_settings_view, fleet_shopping_held_view, fleet_shopping_progress_view, fleet_rankup_forecast_view, fleet_rankup_history_view, fleet_voyage_returns_view, fleet_voyage_loot_view, fleet_route_subs_view, fleet_route_fight_club_view, fleet_sub_history_view, fleet_voyage_sectors_view,
@@ -345,7 +346,9 @@ LEFT JOIN character_sort_order so ON so.cid = rl.owner_cid;
 -- What each retainer wears (its equipped items, container 11000), one row per item, for its average item level. The
 -- plugin looks up each item's level in the game's files, leaving out any it doesn't know, as the app does.
 CREATE OR REPLACE VIEW fleet_retainer_gear_view AS
-SELECT retainer_id, item_id FROM companion_inventory_snapshot WHERE sorted_container = 11000 AND item_id IS NOT NULL;
+-- A high-quality piece is stored at its id + 1,000,000 (the game's numbering): given as the item itself, whose level is the same.
+SELECT retainer_id, CASE WHEN item_id >= 1000000 AND item_id < 2000000 THEN item_id - 1000000 ELSE item_id END AS item_id
+FROM companion_inventory_snapshot WHERE sorted_container = 11000 AND item_id IS NOT NULL;
 
 -- Every setup of the plugin (PC and account label), as the PCs tab: its version, when it last synced, which plugins it
 -- found, its characters, what it couldn't see (problems, one per line) and its last "Check what I can see".

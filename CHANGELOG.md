@@ -117,6 +117,18 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
 - Loot per voyage: By route can be seen below a long subs table. "Ago" says days after 48 hours. Rank percent rounds
   exactly as the app. Sub Rules' All tick can be unticked (slot 1 stays). Market tables are the right height at any UI
   scale. The speed test's wording is up to date, and gives no frame time if the page wasn't open while it ran.
+- **Supplies has the app's "Ceruleum from FC Credits" section** (the tanks each Free Company's credits buy and how
+  long they last, per account and per FC, with the tank's price), and the app's summary: the fleet's use a day, what
+  to buy to last the chosen days (with the repair kits' gil) and who runs out first. Days are worded as in the app
+  ("6.2 days", "Under a day", "No use", "Not enough history").
+- **Income has the app's Difference / day column** (real net less expected).
+- **High-quality items say "(HQ)".** A high-quality stack is now stored as the game numbers it, so Inventory, Where Is
+  It? and the Shopping List tell it apart (in the app too). Worn high-quality gear still counts for item level.
+- **Trends' history no longer grows for ever.** Every change is kept; the hourly "still the same" repeats are thinned to
+  one a day once they're over 30 days old, a week at a time in the background. No chart or figure changes.
+- **A database move that fails after every PC was sent to the new database keeps it** (nothing is lost, and syncing
+  carries on); only this PC's own saved details failing is reported.
+- Releases are published only after the full tests pass.
 
 ## 2.4.8 - 2026-11-20
 

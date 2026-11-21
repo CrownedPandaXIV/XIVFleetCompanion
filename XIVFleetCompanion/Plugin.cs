@@ -76,6 +76,8 @@ public sealed class Plugin : IDalamudPlugin
     private ulong loggedInCid = 0;
     private string lastElsewhereNames = "";
 
+    private DateTime historyThinnedAt = DateTime.MinValue;
+
     // How many characters the last sync left to another setup, because they last logged in there.
     public int SyncedElsewhere { get; private set; } = 0;
 
@@ -921,6 +923,21 @@ public sealed class Plugin : IDalamudPlugin
         if (!metricResult.StartsWith("Success"))
             Log.Warning($"Fleet Companion: failed to write metric history — {metricResult}");
 
+        // Trends' old hourly repeats, a week of history at a time, at most once an hour (HistoryThinning). Never stops a sync.
+        if (DateTime.UtcNow - historyThinnedAt >= TimeSpan.FromHours(1))
+        {
+            historyThinnedAt = DateTime.UtcNow;
+            try
+            {
+                var removed = await HistoryThinning.StepAsync(conn, Db.Now());
+                if (removed > 0) Log.Information($"Fleet Companion: removed {removed} old unchanged Trends values (every change is kept).");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Fleet Companion: tidying Trends' old history didn't finish ({ex.Message}); tried again later.");
+            }
+        }
+
         // What didn't save this time, for the main window (the log has each error): it's tried again next sync.
         var notSaved = new List<string>();
         if (charactersNotSaved != null) notSaved.Add(charactersNotSaved);
@@ -958,12 +975,14 @@ public sealed class Plugin : IDalamudPlugin
         Log.Warning(message);
     }
 
-    private static FleetWriter.InventoryItem ToInventoryItem(AllaganToolsConnector.ParsedItem item) => new()
+    // A high-quality stack is stored as the game numbers it, its item id + 1,000,000 (Allagan Tools gives the plain id and
+    // an HQ flag), so every page can say "(HQ)": the views, Where Is It? and the Shopping List already read it that way.
+    internal static FleetWriter.InventoryItem ToInventoryItem(AllaganToolsConnector.ParsedItem item) => new()
     {
         RetainerId = item.RetainerId,
         SortedContainer = item.SortedContainer,
         SortedSlotIndex = item.SortedSlotIndex,
-        ItemId = item.ItemId,
+        ItemId = FleetWriter.StoredItemId(item.ItemId, item.Hq),
         Quantity = item.Quantity,
         GearSetIds = item.GearSetIds,
         MarketPrice = item.MarketPrice,

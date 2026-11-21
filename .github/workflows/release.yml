@@ -16,7 +16,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The full tests first (pr-build.yml, against the app's main): nothing is tagged or published unless they all pass.
+  tests:
+    uses: ./.github/workflows/pr-build.yml
+
   tag-release:
+    needs: tests
     runs-on: ubuntu-24.04
 
     steps:

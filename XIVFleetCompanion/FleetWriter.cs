@@ -32,6 +32,12 @@ namespace XIVFleetCompanion
             public int NumSubSlots;
         }
 
+        /// <summary>The game's own numbering of a high-quality item: its id + 1,000,000.</summary>
+        public const uint HqOffset = 1_000_000;
+
+        /// <summary>The id an item is stored under: a high-quality one at its id + 1,000,000, as the game numbers it.</summary>
+        public static uint StoredItemId(uint itemId, bool hq) => hq && itemId < HqOffset ? itemId + HqOffset : itemId;
+
         public class InventoryItem
         {
             public ulong RetainerId;

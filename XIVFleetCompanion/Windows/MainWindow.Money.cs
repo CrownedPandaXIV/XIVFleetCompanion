@@ -114,6 +114,13 @@ public partial class MainWindow
             if (e.Value.Unmatched > 0)
                 Hover($"{e.Value.Unmatched} of {c.Subs} sub{(c.Subs == 1 ? " is" : "s are")} on a route Fight Club doesn't list, so {(e.Value.Unmatched == 1 ? "it is" : "they are")} left out of expected.");
         }, c => ExpectedOf(c.Cid)?.Expected ?? double.MinValue, c => ExpectedOf(c.Cid)?.Expected == null),
+        // Real net less expected, signed, coloured as Of expected (as the app's Difference / day).
+        new("difference", "Difference / day", c =>
+        {
+            if (Difference(c) is not double d) { if (c.Enough) Colored(Dim, "—"); return; }
+            var text = $"{(d > 0 ? "+" : d < 0 ? "−" : "")}{Gil(Math.Abs(d))}";
+            if (Share(c) is double sh && sh < 0.75) TableCells.Right(text, Red); else if (Share(c) is double sh2 && sh2 < 0.9) TableCells.Right(text, Amber); else TableCells.Right(text);
+        }, c => Difference(c) ?? double.MinValue, c => Difference(c) == null),
         new("share", "Of expected", c =>
         {
             if (Share(c) is not double sh) return;
@@ -121,6 +128,9 @@ public partial class MainWindow
             if (sh < 0.75) TableCells.Right(text, Red); else if (sh < 0.9) TableCells.Right(text, Amber); else TableCells.Right(text);
         }, c => Share(c) ?? double.MinValue, c => Share(c) == null),
     }, c => c.Account, "characters");
+
+    // Real net a day less expected (null without enough history or nothing expected).
+    private double? Difference(IncomeRow c) => c.Enough && ExpectedOf(c.Cid)?.Expected is double e ? c.PerDay - e : null;
 
     // Real net a day against expected (null without enough history or nothing expected).
     private double? Share(IncomeRow c) => c.Enough && ExpectedOf(c.Cid)?.Expected is double e && e > 0 ? c.PerDay / e : null;

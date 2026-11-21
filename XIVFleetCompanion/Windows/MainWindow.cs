@@ -907,11 +907,11 @@ public partial class MainWindow : Window, IDisposable
         }, c => c.Character, Locked: true),
         new("account", "Account", c => Ui.Text(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("ceruleum", "Ceruleum", c => RightNumber(c.Ceruleum, DaysColor(c.CeruleumDaysLeft) ?? (c.CeruleumPerDay != null ? Green : (Vector4?)null)), c => c.Ceruleum),
-        new("ceruleumPerDay", "A day##ceruleum", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
-        new("ceruleumDays", "Days left##ceruleum", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
+        new("ceruleumPerDay", "Ceruleum / day", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
+        new("ceruleumDays", "Ceruleum: days left", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
         new("kits", "Repair kits", c => RightNumber(c.RepairKits, DaysColor(c.RepairKitsDaysLeft) ?? (c.RepairKitsPerDay != null ? Green : (Vector4?)null)), c => c.RepairKits),
-        new("kitsPerDay", "A day##kits", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
-        new("kitsDays", "Days left##kits", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
+        new("kitsPerDay", "Repair kits / day", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
+        new("kitsDays", "Repair kits: days left", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
         new("buy", "To buy", c =>
         {
             var buy = new List<string>();
@@ -931,7 +931,105 @@ public partial class MainWindow : Window, IDisposable
         var supplies = reader.Supplies.Data;
         if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
         if (supplies == null) return;
-        SuppliesTable.Draw(supplies);
+        SuppliesSummary(supplies);
+        SuppliesTable.Draw(supplies, fitRows: true);
+        if (reader.Credits.Data is { } credits) FcCreditsSection(supplies, credits);
+        else if (reader.Credits.Error != null) Colored(Amber, $"Ceruleum from FC Credits couldn't be read: {reader.Credits.Error}");
+    }
+
+    // The fleet's use a day, what to buy to last the chosen days, and who runs out first (as the app's cards).
+    private void SuppliesSummary(List<SupplyRow> rows)
+    {
+        if (rows.Count == 0) { Ui.Text("No characters with subs built yet."); return; }
+        var target = rows[0].TargetDays;
+        var credits = reader.Credits.Data;
+        Runs(("Fleet use per day: ", Dim), ($"{PerDay(rows.Sum(r => r.CeruleumPerDay ?? 0))} ceruleum · {PerDay(rows.Sum(r => r.RepairKitsPerDay ?? 0))} repair kits", null));
+        var kits = rows.Sum(r => (long)r.RepairKitsRestock);
+        Runs(($"To last {target} days, buy: ", Dim), ($"{Number(rows.Sum(r => (long)r.CeruleumRestock))} ceruleum · {Number(kits)} repair kits", null));
+        if (credits != null)
+        {
+            ImGui.SameLine();
+            var chest = credits.Chests.Values.Sum();
+            if (credits.RepairKitCost > 0) Runs(("  (repair kits ≈ ", Dim), ($"{Number((long)Math.Round(kits * credits.RepairKitCost))} gil", Palette.Gil), ($"; FC chests hold {Number(chest)} ceruleum)", Dim));
+            else Colored(Dim, $"  (FC chests hold {Number(chest)} ceruleum)");
+        }
+        var soonest = rows.SelectMany(r => new[] { (r.Character, What: "ceruleum", Days: r.CeruleumPerDay != null ? r.CeruleumDaysLeft : null),
+                                                    (r.Character, What: "repair kits", Days: r.RepairKitsPerDay != null ? r.RepairKitsDaysLeft : null) })
+            .Where(x => x.Days != null).OrderBy(x => x.Days).FirstOrDefault();
+        Runs(("Runs out first: ", Dim), (soonest.Days is double d ? $"{soonest.Character}: {soonest.What} in {FcCredits.DaysText(d).ToLowerInvariant()}" : "Nothing is running out", soonest.Days is double dd ? DaysColor(dd) : null));
+        ImGui.Spacing();
+    }
+
+    // ---- Ceruleum from FC credits (as the app's Supplies page) ----
+
+    private FleetTable<FcCredits.Total>? creditAccountsTable;
+    private FleetTable<FcCredits.FcLine>? creditFcsTable;
+    private int tankCostDraft = -1, tankCostShown = -1;
+    private readonly Memo<FcCredits.Plan> creditPlan = new();
+
+    private FleetTable<FcCredits.Total> CreditAccountsTable => creditAccountsTable ??= new FleetTable<FcCredits.Total>("fcCreditAccounts", plugin.Configuration, new List<FleetColumn<FcCredits.Total>>
+    {
+        new("account", "Account", a => Ui.Text(a.Label), a => a.Label, Locked: true),
+        new("fcs", "Free Companies", a => RightNumber(a.FcCount), a => a.FcCount),
+        new("credits", "Credits", a => RightNumber(a.Credits), a => a.Credits),
+        new("tanks", "Tanks they buy", a => RightNumber(a.Tanks), a => a.Tanks),
+        new("held", "Ceruleum held", a => RightNumber(a.Held), a => a.Held),
+        new("chest", "In FC chests", a => RightNumber(a.Chest), a => a.Chest),
+        new("perDay", "Use per day", a => TableCells.Right(PerDay(a.PerDay), a.PerDay == null ? Dim : (Vector4?)null), a => a.PerDay ?? -1),
+        new("days", "Tanks last", a => TableCells.Right(FcCredits.DaysText(a.Days), a.Days == null ? Dim : DaysColor(a.Days)), a => a.Days ?? -1),
+    });
+
+    private FleetTable<FcCredits.FcLine> CreditFcsTable => creditFcsTable ??= new FleetTable<FcCredits.FcLine>("fcCreditFcs", plugin.Configuration, new List<FleetColumn<FcCredits.FcLine>>
+    {
+        new("fc", "Free Company", f => Ui.Text(f.Name.Length > 0 ? f.Name : "—"), f => f.Name, Locked: true),
+        new("account", "Account", f => Ui.Text(f.Account), f => f.Account),
+        new("credits", "Credits", f => RightNumber(f.Credits), f => f.Credits),
+        new("tanks", "Tanks they buy", f => RightNumber(f.Tanks), f => f.Tanks),
+        new("chest", "In FC chest", f => RightNumber(f.Chest), f => f.Chest),
+        new("perDay", "Members' use per day", f => TableCells.Right(PerDay(f.PerDay), f.PerDay == null ? Dim : (Vector4?)null), f => f.PerDay ?? -1),
+        new("days", "Tanks last", f => TableCells.Right(FcCredits.DaysText(f.Days), f.Days == null ? Dim : DaysColor(f.Days)), f => f.Days ?? -1),
+    });
+
+    private void FcCreditsSection(List<SupplyRow> rows, CreditsRead credits)
+    {
+        Heading("Ceruleum from FC Credits");
+        var plan = creditPlan.Get(() => FcCredits.Work(credits.Fcs,
+            rows.Select(r => new FcCredits.Member(r.FcId, r.Account, r.CeruleumPerDay, r.Ceruleum)).ToList(), credits.Chests, credits.TankCost), rows, credits);
+
+        // The tank's price: follows a change made in the app or on another PC until it's changed here.
+        if (tankCostShown != plan.TankCost) { tankCostShown = plan.TankCost; tankCostDraft = plan.TankCost; }
+        ImGui.AlignTextToFramePadding();
+        Ui.Text("Company credits per ceruleum tank");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        Ui.InputInt("##tankCost", ref tankCostDraft, 0);
+        tankCostDraft = Math.Clamp(tankCostDraft, 1, FcCredits.MaxTankCost);
+        if (tankCostDraft != plan.TankCost)
+        {
+            ImGui.SameLine();
+            using (ImRaii.Disabled(reader.Editing))
+                if (ImGui.Button("Save##tankCost"))
+                {
+                    var cost = tankCostDraft;
+                    reader.Edit("the tank's price", c => FleetEdits.SaveTankCost(c, cost));
+                }
+        }
+        ImGui.SameLine();
+        Colored(Dim, "From the OIC Quartermaster at your Grand Company; check the price in game.");
+
+        var f = plan.Fleet;
+        Runs(("Fleet: FC credits buy ", Dim), ($"{Number(f.Tanks)} tanks", null),
+            ($" ({Number(f.Credits)} credits across {f.FcCount} Free Compan{(f.FcCount == 1 ? "y" : "ies")})", Dim));
+        Runs(("Fleet: those tanks last ", Dim), (FcCredits.DaysText(f.Days), f.Days == null ? Dim : DaysColor(f.Days)),
+            ($" at {PerDay(f.PerDay)} ceruleum a day, on top of the {Number(f.Held)} held and {Number(f.Chest)} in FC chests", Dim));
+        if (plan.Fcs.Count == 0) { Ui.Text("No Free Company credits recorded yet (they come from FC Tracker)."); return; }
+        if (plan.Accounts.Count > 0)
+        {
+            CreditAccountsTable.DrawControls();
+            CreditAccountsTable.Draw(plan.Accounts, fitRows: true);
+        }
+        CreditFcsTable.DrawControls();
+        CreditFcsTable.Draw(plan.Fcs, fitRows: true);
     }
 
     private void PerDayCell(double? perDay)
@@ -942,8 +1040,9 @@ public partial class MainWindow : Window, IDisposable
 
     private void DaysCell(double? daysLeft, double? perDay)
     {
-        // Red under 3 days, amber under 7, green otherwise (and when none are used); dim without enough history.
-        var days = Days(daysLeft, perDay);
+        // Red under 3 days, amber under 7, green otherwise (and when none are used); dim without enough history. Worded as
+        // the app: "6.2 days", "Under a day", "No use", "Not enough history".
+        var days = FcCredits.DaysText(perDay == null ? null : daysLeft ?? double.PositiveInfinity);
         TableCells.Right(days, perDay == null ? Dim : DaysColor(daysLeft) ?? Green);
     }
 }

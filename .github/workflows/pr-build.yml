@@ -3,8 +3,9 @@ name: PR Build
 on:
   pull_request:
     branches: [ master ]
-  # Also run by hand on any branch (Actions, PR Build, Run workflow).
+  # Also run by hand on any branch (Actions, PR Build, Run workflow), and from release.yml before publishing.
   workflow_dispatch:
+  workflow_call:
 
 jobs:
 

@@ -15,7 +15,11 @@ namespace XIVFleetCompanion
     /// <summary>One character with subs, from fleet_supplies_view. PerDay null: not enough history yet; 0: none used.</summary>
     public sealed record SupplyRow(string Character, string World, string Account, int SortIndex, DateTime? LastSynced,
         int Ceruleum, double? CeruleumPerDay, double? CeruleumDaysLeft, int CeruleumRestock,
-        int RepairKits, double? RepairKitsPerDay, double? RepairKitsDaysLeft, int RepairKitsRestock, int WindowDays, int TargetDays);
+        int RepairKits, double? RepairKitsPerDay, double? RepairKitsDaysLeft, int RepairKitsRestock, int WindowDays, int TargetDays, string? FcId = null);
+
+    /// <summary>What the Supplies page's FC credits section and summary need besides its rows: the Free Companies, the
+    /// ceruleum tanks in each FC chest (by FC id), the tank's price in company credits and a repair kit's in gil.</summary>
+    public sealed record CreditsRead(List<FcCredits.Fc> Fcs, Dictionary<string, long> Chests, int TankCost, double RepairKitCost);
 
     /// <summary>The fleet at a glance, from fleet_summary_view (the subs' own counts are worked out live from SubRow).</summary>
     public sealed record SummaryRow(int Retainers, int VenturesDone, int RetainersIdle, int LowCeruleum, int LowRepairKits, double? SoonestRunsOutDays);
@@ -157,6 +161,7 @@ namespace XIVFleetCompanion
 
         public FleetRead<List<SubRow>> Subs { get; private set; } = new(null, null, null);
         public FleetRead<List<SupplyRow>> Supplies { get; private set; } = new(null, null, null);
+        public FleetRead<CreditsRead> Credits { get; private set; } = new(null, null, null);
         public FleetRead<SummaryRow> Summary { get; private set; } = new(null, null, null);
         public FleetRead<List<AlertRow>> Alerts { get; private set; } = new(null, null, null);
         public FleetRead<List<RosterRow>> Roster { get; private set; } = new(null, null, null);
@@ -293,6 +298,7 @@ namespace XIVFleetCompanion
                 Subs = Subs with { Error = notSetUp };
                 Alerts = Alerts with { Error = notSetUp };
                 Supplies = Supplies with { Error = notSetUp };
+                Credits = Credits with { Error = notSetUp };
                 Summary = Summary with { Error = notSetUp };
                 Roster = Roster with { Error = notSetUp };
                 Retainers = Retainers with { Error = notSetUp };
@@ -335,6 +341,7 @@ namespace XIVFleetCompanion
                     if (supplies)
                     {
                         Supplies = await Read(conn, ReadSupplies, Supplies);
+                        Credits = await Read(conn, ReadCredits, Credits);
                         Summary = await Read(conn, ReadSummary, Summary);
                         // The Summary's salvage total (quick), unless the Salvage page reads it now anyway.
                         if (!money) Salvage = await Read(conn, ReadSalvage, Salvage);
@@ -371,7 +378,7 @@ namespace XIVFleetCompanion
                 {
                     var text = ReachFailure(ex);
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
-                    if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
+                    if (supplies) { Supplies = Supplies with { Error = text }; Credits = Credits with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; Loot = Loot with { Error = text }; }
                     if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; Forecasts = Forecasts with { Error = text }; }
@@ -495,8 +502,31 @@ namespace XIVFleetCompanion
                 list.Add(new SupplyRow(Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue), Time(r, "last_synced_at"),
                     Int(r, "ceruleum"), Double(r, "ceruleum_per_day"), Double(r, "ceruleum_days_left"), Int(r, "ceruleum_restock"),
                     Int(r, "repair_kits"), Double(r, "repair_kits_per_day"), Double(r, "repair_kits_days_left"), Int(r, "repair_kits_restock"),
-                    Int(r, "window_days", 14), Int(r, "target_days", 14)));
+                    Int(r, "window_days", 14), Int(r, "target_days", 14),
+                    DecimalOrNull(r, "fc_id") is decimal fc && fc != 0 ? fc.ToString(CultureInfo.InvariantCulture) : null));
             return list;
+        }
+
+        public static async Task<CreditsRead> ReadCredits(DbConnection conn)
+        {
+            var fcs = (await ReadFcs(conn)).Select(f => new FcCredits.Fc(f.FcId.ToString(CultureInfo.InvariantCulture), f.Name, f.Account, f.Points ?? 0)).ToList();
+            var chests = new Dictionary<string, long>();
+            await using (var cmd = Db.Cmd("SELECT fc_id, SUM(quantity) AS n FROM companion_fc_inventory_snapshot WHERE item_id = @item GROUP BY fc_id", conn))
+            {
+                Db.Add(cmd, "item", FcCredits.CeruleumTank);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    if (DecimalOrNull(r, "fc_id") is decimal id) chests[id.ToString(CultureInfo.InvariantCulture)] = LongOrNull(r, "n") ?? 0;
+            }
+            double? tankCost = null, kitCost = null;
+            await using (var cmd = Db.Cmd("SELECT setting_key, setting_value FROM fleet_economics_settings WHERE setting_key IN (@tank, 'repair_kit_cost')", conn))
+            {
+                Db.Add(cmd, "tank", FcCredits.TankCostKey);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    if (Text(r, "setting_key") == FcCredits.TankCostKey) tankCost = Double(r, "setting_value"); else kitCost = Double(r, "setting_value");
+            }
+            return new CreditsRead(fcs, chests, FcCredits.TankCostOf(tankCost), kitCost ?? 0);
         }
 
         public static async Task<SummaryRow> ReadSummary(DbConnection conn)

@@ -162,6 +162,15 @@ namespace XIVFleetCompanion
             return null;
         }
 
+        /// <summary>Company credits per ceruleum tank (Supplies' FC credits section), as the app's.</summary>
+        public static async Task<string?> SaveTankCost(DbConnection conn, double cost)
+        {
+            if (cost != Math.Floor(cost) || cost < 1 || cost > FcCredits.MaxTankCost)
+                return $"Company credits per tank: 1 to {FcCredits.MaxTankCost.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)}.";
+            await SaveEconomics(conn, FcCredits.TankCostKey, (decimal)cost);
+            return null;
+        }
+
         public const int DemolitionDays = 45;
         public const int MinNotSyncedMinutes = 10, MaxNotSyncedMinutes = 1440;
         public const int MaxLowSupply = 99999;

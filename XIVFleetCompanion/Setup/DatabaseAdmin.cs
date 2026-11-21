@@ -565,9 +565,22 @@ namespace XIVFleetCompanion.Setup
                 Set("switch", "working", "leaving the new address in the old database...");
                 heartbeat.Cancel();
                 await Exec(old, "UPDATE companion_database_move SET state = 'moved', updated_at = now(), moved_at = now() WHERE id = 1");
+                // From here every PC is being sent to the new database: it's kept whatever happens next (nothing below
+                // undoes it), and the old one stays as it was.
                 pausing = false;
-                saveConfig(config with { Host = local, Port = port });
-                Set("switch", "done", $"Every app and plugin switches to {address}:{port} at its next refresh or sync.");
+                createdDatabase = false;
+                kept = null;
+                createdRole = false;
+                var note = "";
+                try
+                {
+                    saveConfig(config with { Host = local, Port = port });
+                }
+                catch (Exception e)
+                {
+                    note = $" This PC's own saved details couldn't be updated ({e.Message}); it finds the new place by itself at its next sync, as the others do.";
+                }
+                Set("switch", "done", $"Every app and plugin switches to {address}:{port} at its next refresh or sync.{note}");
                 return (true, null, $"{address}:{port}");
             }
             catch (Exception e)

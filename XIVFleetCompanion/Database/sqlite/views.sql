@@ -333,7 +333,9 @@ LEFT JOIN retainer_gear_targets t ON t.retainer_id = rl.retainer_id
 LEFT JOIN character_sort_order so ON so.cid = rl.owner_cid;
 
 CREATE VIEW fleet_retainer_gear_view AS
-SELECT retainer_id, item_id FROM companion_inventory_snapshot WHERE sorted_container = 11000 AND item_id IS NOT NULL;
+-- A high-quality piece is stored at its id + 1,000,000 (the game's numbering): given as the item itself, whose level is the same.
+SELECT retainer_id, CASE WHEN item_id >= 1000000 AND item_id < 2000000 THEN item_id - 1000000 ELSE item_id END AS item_id
+FROM companion_inventory_snapshot WHERE sorted_container = 11000 AND item_id IS NOT NULL;
 
 CREATE VIEW fleet_pcs_view AS
 SELECT pc_name, account_label, plugin_version, last_sync_at, autoretainer_ready, allagantools_ready, fctracker_found,

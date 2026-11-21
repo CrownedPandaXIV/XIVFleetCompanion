@@ -1045,6 +1045,28 @@ internal static partial class Program
         }
     }
 
+    // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.
+    private static void FcCreditChecks()
+    {
+        var fcs = new List<FcCredits.Fc> { new("1", "Panda Co", "Account 1", 12345), new("2", "Second", "Account 2", 99), new("3", "Third", "Account 2", 1000) };
+        var people = new List<FcCredits.Member> { new("1", "Account 1", 20, 500), new("1", "Account 1", null, 10), new("2", "Account 2", 5, 100), new(null, "Account 2", 5, 50) };
+        var plan = FcCredits.Work(fcs, people, new Dictionary<string, long> { ["1"] = 30 }, FcCredits.DefaultTankCost);
+        var (panda, second, third) = (plan.Fcs[0], plan.Fcs[1], plan.Fcs[2]);
+        Check(plan.TankCost == 100 && panda.Credits == 12345 && panda.Tanks == 123 && panda.Chest == 30 && panda.PerDay == 20 && panda.Days == 123.0 / 20
+              && second.Tanks == 0 && second.Days == 0 && third.Tanks == 10 && third.PerDay == null && third.Days == null,
+            "FC credits: each FC's tanks, its members' use and how long they last, as the app");
+        var p2 = FcCredits.Work(fcs, people, new Dictionary<string, long> { ["1"] = 30, ["3"] = 4 }, 50);
+        var (a1, a2, fleet) = (p2.Accounts[0], p2.Accounts[1], p2.Fleet);
+        Check(a1.Label == "Account 1" && a1.FcCount == 1 && a1.Credits == 12345 && a1.Tanks == 246 && a1.Held == 510 && a1.Chest == 30 && a1.PerDay == 20
+              && a2.Label == "Account 2" && a2.FcCount == 2 && a2.Credits == 1099 && a2.Tanks == 21 && a2.Held == 150 && a2.Chest == 4 && a2.PerDay == 10 && a2.Days == 21.0 / 10
+              && fleet.FcCount == 3 && fleet.Credits == 13444 && fleet.Tanks == 267 && fleet.Held == 660 && fleet.Chest == 34 && fleet.PerDay == 30,
+            "FC credits: per account and for the fleet, as the app");
+        Check(FcCredits.DaysCovered(5, 0) == double.PositiveInfinity && FcCredits.DaysCovered(5, null) == null && FcCredits.TankCostOf(0) == 100 && FcCredits.TankCostOf(250) == 250
+              && FcCredits.Work(new List<FcCredits.Fc>(), people, new Dictionary<string, long>(), 100).Accounts.Count == 0
+              && FcCredits.DaysText(null) == "Not enough history" && FcCredits.DaysText(double.PositiveInfinity) == "No use" && FcCredits.DaysText(0.5) == "Under a day",
+            "FC credits: nothing used lasts for ever, a bad price falls back to 100, days worded as the app");
+    }
+
     // The pages' cache: kept while the inputs are the same (a list by reference, text and numbers by value), made again
     // when one changes.
     private static void MemoChecks()
@@ -1561,6 +1583,51 @@ internal static partial class Program
                 "Success — 1 of 3 metrics recorded.", "Success — 1 of 3 metrics recorded." }),
             "file: Trends values are recorded only when they change, on both: " + string.Join(" / ", recorded));
 
+        // ---- Trends' old hourly repeats thinned (HistoryThinning) ----
+        // One series: changes and repeats 60 and 59 days ago, and repeats 5 days ago. Every change, each day's first value
+        // and everything recent stay; the old repeats go; the value at every hour reads the same after.
+        var day0 = Math.Floor(Db.Now() / 86400) * 86400 - 60 * 86400;
+        var thinRows = new (double At, double Value)[]
+        {
+            (day0, 10), (day0 + 3600, 10), (day0 + 7200, 10), (day0 + 10800, 20), (day0 + 14400, 20),
+            (day0 + 86400 + 1800, 20), (day0 + 86400 + 5400, 20),
+            (day0 + 55 * 86400, 20), (day0 + 55 * 86400 + 3600, 20),
+        };
+        const long thinCid = 18014498578009999;
+        var thinKept = new List<string>();
+        foreach (var c in both)
+        {
+            var onFile = Db.IsFile(c);
+            await Db.Exec(c, "DELETE FROM fleet_economics_settings WHERE setting_key = @k", null, ("k", HistoryThinning.MarkerKey));
+            await Db.Exec(c, "DELETE FROM companion_metric_history WHERE subject_id = @id", null, ("id", thinCid));
+            await Db.Exec(c, onFile ? "INSERT INTO companion_metric_latest (subject_type, subject_id, metric, value, recorded_at) VALUES ('character', @id, 'gil', 20, @t)"
+                                  : "INSERT INTO companion_metric_latest (subject_type, subject_id, metric, value, recorded_at) VALUES ('character', @id, 'gil', 20, to_timestamp(@t)) ON CONFLICT DO NOTHING",
+                null, ("id", thinCid), ("t", Db.Now()));
+            foreach (var (at, value) in thinRows)
+                await Db.Exec(c, onFile ? "INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value) VALUES (@t, 'character', @id, 'gil', @v)"
+                                      : "INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value) VALUES (to_timestamp(@t), 'character', @id, 'gil', @v)",
+                    null, ("t", at), ("id", thinCid), ("v", value));
+            async Task<List<(double At, double Value)>> Series()
+            {
+                await using var cmd = Db.Cmd(onFile ? "SELECT recorded_at AS t, value FROM companion_metric_history WHERE subject_id = @id ORDER BY recorded_at"
+                    : "SELECT extract(epoch FROM recorded_at)::float8 AS t, value::float8 AS value FROM companion_metric_history WHERE subject_id = @id ORDER BY recorded_at", c);
+                Db.Add(cmd, "id", thinCid);
+                var list = new List<(double, double)>();
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) list.Add((Convert.ToDouble(r["t"]), Convert.ToDouble(r["value"])));
+                return list;
+            }
+            static double? At(List<(double At, double Value)> series, double t) => series.Where(x => x.At <= t + 0.001).Select(x => (double?)x.Value).LastOrDefault();
+            var before = await Series();
+            var removed = 0;
+            for (var i = 0; i < 12; i++) removed += await HistoryThinning.StepAsync(c, Db.Now());
+            var after = await Series();
+            var sameEveryHour = Enumerable.Range(0, 61 * 24).Select(h => day0 + h * 3600.0 + 60).All(t => At(before, t) == At(after, t));
+            thinKept.Add($"{removed}:{string.Join(",", after.Select(x => $"{Math.Round((x.At - day0) / 3600)}h={x.Value}"))}:{sameEveryHour}");
+        }
+        Check(thinKept.All(k => k == "4:0h=10,3h=20,24h=20,1320h=20,1321h=20:True"),
+            "Trends' history: old repeats go a week at a time, every change and each day's first value stay, recent ones untouched, every figure the same, on both: " + string.Join(" / ", thinKept));
+
         // ---- The Next rank dates, saved once an hour (ForecastWriter) ----
         var forecastNow = (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds;
         var due = new List<ForecastWriter.Forecast>
@@ -1659,6 +1726,7 @@ internal static partial class Program
             await Same("settings", FleetReader.ReadSettings);
             await Same("Subs", FleetReader.ReadSubs);
             await Same("Supplies", FleetReader.ReadSupplies);
+            await Same("Supplies' FC credits (FCs, chests, prices)", async c => { var r = await FleetReader.ReadCredits(c); return new { r.Fcs, Chests = r.Chests.OrderBy(kv => kv.Key).ToList(), r.TankCost, r.RepairKitCost }; });
             await Same("Summary", FleetReader.ReadSummary);
             await Same("what needs attention", FleetReader.ReadAlerts);
             await Same("Roster", FleetReader.ReadRoster);
@@ -2187,6 +2255,9 @@ internal static partial class Program
         await PartsReadFromTheDatabase(conn);
         await MarketAgainstTheApp();
         MemoChecks();
+        FcCreditChecks();
+        Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
+            "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");
         RoutesAgainstTheApp();
         await RoutesReadFromTheDatabase(conn);
         await MarketAsksEachPlaceOnce();
