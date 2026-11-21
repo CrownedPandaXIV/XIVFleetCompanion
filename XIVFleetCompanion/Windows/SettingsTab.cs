@@ -198,7 +198,9 @@ public class SettingsTab : IDisposable
         pgUsername = saved?.Username ?? "";
         pgPassword = "";
         pgHasSavedPassword = !string.IsNullOrEmpty(saved?.Password);
-        pgSaveResult = "";
+        pgSaveResult = saved == null && PostgresCredentialStore.LoadProblem != null
+            ? "The saved database details couldn't be read (Windows' saved login is damaged). Enter them again and click Save."
+            : "";
         clearArmedUntil = DateTime.MinValue;
     }
 

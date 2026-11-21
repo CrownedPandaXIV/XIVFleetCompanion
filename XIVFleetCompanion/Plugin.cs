@@ -175,6 +175,13 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.Logout -= OnLogout;
         infoBar?.Remove();
 
+        // A sync, move or restore still running (Dalamud updating the plugin mid-sync): a sync stops before its next
+        // character, and both get a few seconds to finish, so this copy isn't still writing while the new one starts.
+        // A move or restore that doesn't finish in time rolls back by itself (each is one transaction).
+        stopping = true;
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while ((syncInProgress || moving) && waited.Elapsed < TimeSpan.FromSeconds(5)) System.Threading.Thread.Sleep(50);
+
         AutoRetainer?.Dispose();
         ECommonsMain.Dispose();
     }
@@ -373,7 +380,7 @@ public sealed class Plugin : IDalamudPlugin
                     if (moved > 0) Log.Information($"Fleet Companion: the account label changed, so {moved} character(s) that last logged in here keep syncing from here.");
                 }
                 Configuration.LoginsRecordedAs = label;
-                Configuration.Save();
+                SaveConfiguration();
             }
 
             // A character unticked here never claims to be this setup's, and one unticked since gives up its claim, so a
@@ -547,8 +554,21 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task RunSyncAsync()
     {
-        if (moving) return;
-        var fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
+        if (moving || stopping) return;
+        (List<CharacterRead> Characters, int Registered, int LeftOut, List<ulong> LeftOutCids)? fromAutoRetainer;
+        try
+        {
+            fromAutoRetainer = await Framework.RunOnFrameworkThread(() => ReadAutoRetainer());
+        }
+        catch (Exception ex) when (ex is MissingMethodException or MissingFieldException or TypeLoadException or InvalidCastException
+                                       or NullReferenceException or KeyNotFoundException or Dalamud.Plugin.Ipc.Exceptions.IpcError)
+        {
+            // AutoRetainer updated ahead of this plugin and answers differently: said once, plainly, with the details logged.
+            WarnOnce("autoretainer-shape", $"Fleet Companion: AutoRetainer's answer couldn't be read — {ex}");
+            NotSynced("AutoRetainer answered in a way this version doesn't understand (it was probably updated). Update XIV Fleet Companion: Dalamud does it when the game starts. It tries again at the next sync.");
+            return;
+        }
+        lock (warned) warned.Remove("autoretainer-shape");
         if (fromAutoRetainer == null)
         {
             await ReportAutoRetainerNotRunningAsync();
@@ -560,23 +580,26 @@ public sealed class Plugin : IDalamudPlugin
         // FCTracker with IPC is asked for its Free Company and house details directly; otherwise its file is read.
         var charactersWithoutFc = new HashSet<ulong>();
         var syncedCids = characters.Select(c => c.Snapshot.Cid).ToList();
-        var (fcTrackerRunning, subTrackerRunning, liveHousing) = await Framework.RunOnFrameworkThread(() =>
+        var (fcTrackerRunning, subTrackerRunning, liveHousing, allaganToolsReady) = await Framework.RunOnFrameworkThread(() =>
         {
             var fcRunning = IsPluginLoaded("FCTracker");
             var live = fcRunning == false ? null : FCTracker?.ReadHousing(syncedCids, charactersWithoutFc);
-            return (fcRunning, IsPluginLoaded("SubmarineTracker"), live);
+            return (fcRunning, IsPluginLoaded("SubmarineTracker"), live, AllaganTools != null && AllaganTools.IsReady());
         });
 
         FcTrackerLoaded = fcTrackerRunning;
         FcTrackerAnsweredDirectly = liveHousing != null;
-        var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc);
+        var fcTrackerProblems = new List<string>();
+        var fcTrackerHousing = liveHousing ?? FCTrackerConnector.ReadHousingData(Configuration.FCTrackerConfigPath, charactersWithoutFc, fcTrackerProblems);
+        if (fcTrackerProblems.Count > 0)
+            WarnOnce("fctracker-file", $"Fleet Companion: FC Tracker's file ({Configuration.FCTrackerConfigPath}): {fcTrackerProblems[0]}. Free Company and house details keep what's stored.");
+        else lock (warned) warned.Remove("fctracker-file");
         Log.Debug(liveHousing != null
             ? $"Fleet Companion: FC Tracker answered directly (IPC) with {fcTrackerHousing.Count} housing entries."
             : $"Fleet Companion: FC Tracker path='{Configuration.FCTrackerConfigPath}' parsed {fcTrackerHousing.Count} housing entries.");
 
-        // Asked once per sync. When AllaganTools is not running, inventories and FC chests
-        // keep their last stored contents (see below).
-        var allaganToolsReady = AllaganTools != null && AllaganTools.IsReady();
+        // Asked once per sync (above, on the game's thread). When AllaganTools is not running, inventories and FC
+        // chests keep their last stored contents (see below).
         if (!allaganToolsReady)
             WarnOnce("allagantools", "Fleet Companion: Allagan Tools is not available; inventories and FC chests are not updated until it is.");
         else
@@ -627,16 +650,48 @@ public sealed class Plugin : IDalamudPlugin
         var problems = new List<string>();
         var chestsReported = new HashSet<ulong>();
         var fcsWithSubs = characters.Where(c => c.Snapshot.SubmarineCount > 0 && c.Snapshot.FcId != 0).Select(c => c.Snapshot.FcId).ToHashSet();
+        // An FC chest is written by the game whose character has the FC's subs (the one that refills it), or by any game
+        // with a character in the FC when nobody has subs there. Otherwise two PCs with characters in one FC would each
+        // put back their own Allagan Tools copy, one maybe weeks old, every hour, and its charts would jump up and down.
+        HashSet<ulong> fleetFcsWithSubs;
+        try { fleetFcsWithSubs = await FleetWriter.ReadFcsWithSubsAsync(conn); }
+        catch (DbException ex) when (Db.IsQueryError(ex)) { fleetFcsWithSubs = new(); }
+        bool WritesChest(ulong fc) => fcsWithSubs.Contains(fc) || !fleetFcsWithSubs.Contains(fc);
         if (!allaganToolsReady) problems.Add("Allagan Tools is not running: bags, retainers' items and FC chests are not updated.");
+        if (fcTrackerProblems.Count > 0)
+            problems.Add($"FC Tracker's file couldn't be read ({fcTrackerProblems[0]}): Free Company and house details, such as the house's last visit, aren't updated. Updating XIV Fleet Companion or FC Tracker may fix it.");
 
         var snapshots = new List<FleetWriter.CharacterSnapshot>();
         var metrics = new Dictionary<(string Type, ulong Id, string Metric), (decimal Value, string? Label)>();
 
+        // An Allagan Tools answer this version can't read (its connection changed in an update): that character's
+        // items, listings and FC chest keep what's stored, and the PCs page says why, once.
+        string? allaganToolsProblem = null;
+
         foreach (var read in characters)
         {
+            if (stopping) return;
             var character = read.Snapshot;
             var cid = character.Cid;
             var who = $"{character.Name}@{character.World}";
+
+            // What Allagan Tools has for this character, its retainers and its FC, asked on the game's thread, where
+            // Allagan Tools changes them (one character at a time, so a big fleet doesn't hold up a frame).
+            var answers = new Dictionary<ulong, AllaganToolsConnector.Answer>();
+            if (allaganToolsReady)
+            {
+                var ids = new List<ulong> { cid };
+                ids.AddRange(read.Retainers.Select(r => r.RetainerId).Where(id => id != 0));
+                if (character.FcId != 0) ids.Add(character.FcId);
+                answers = await Framework.RunOnFrameworkThread(() => ids.Distinct().ToDictionary(id => id, id => AllaganTools!.Read(id)));
+            }
+            var unreadable = answers.Values.FirstOrDefault(a => a.Problem != null)?.Problem;
+            if (unreadable != null) allaganToolsProblem ??= unreadable;
+            // The items Allagan Tools has for one source (empty slots left out), or null when it has never seen it: it
+            // then answers with nothing at all, not even empty slots.
+            List<FleetWriter.InventoryItem>? SeenItems(ulong sourceId)
+                => answers.TryGetValue(sourceId, out var a) && a.Problem == null && a.Items.Count > 0
+                    ? a.Items.Where(i => i.Quantity > 0).Select(ToInventoryItem).ToList() : null;
 
             snapshots.Add(character);
 
@@ -658,7 +713,7 @@ public sealed class Plugin : IDalamudPlugin
             // AllaganTools answers with nothing at all (not even empty slots) for a source it has
             // never seen, such as a retainer never opened at a bell on this PC; that source keeps its
             // last stored items instead of being cleared, and the log says which retainer to open.
-            if (allaganToolsReady)
+            if (allaganToolsReady && unreadable == null)
             {
                 var sources = new List<FleetWriter.InventorySource>
                 {
@@ -738,7 +793,7 @@ public sealed class Plugin : IDalamudPlugin
                 // opened on this PC) answers with nothing and is left as stored; a seen chest is
                 // written even with zero items, so a chest that was emptied is cleared. Keyed by FC,
                 // so characters sharing an FC do not write the same chest twice.
-                if (character.FcId != 0)
+                if (character.FcId != 0 && WritesChest(character.FcId))
                 {
                     var chestSeen = SeenItems(character.FcId);
                     // Only asked for when the FC has subs: it holds their ceruleum, repair kits and salvage.
@@ -804,10 +859,18 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        if (allaganToolsProblem != null)
+        {
+            problems.Add("Allagan Tools didn't answer the way this version expects, so bags, retainers' items and FC chests keep their last stored contents. Update XIV Fleet Companion (and Allagan Tools).");
+            WarnOnce("allagantools-shape", $"Fleet Companion: Allagan Tools' answer couldn't be read ({allaganToolsProblem}); bags, retainers and FC chests keep their stored items.");
+        }
+        else lock (warned) warned.Remove("allagantools-shape");
+
         // Every character's current row, in one statement. The table comes from
         // database version 4; until the database has it, characters are not saved (one
         // warning per plugin session).
         var synced = 0;
+        string? charactersNotSaved = null;
         try
         {
             synced = await FleetWriter.WriteCurrentCharactersAsync(conn, snapshots);
@@ -819,12 +882,14 @@ public sealed class Plugin : IDalamudPlugin
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
         {
+            charactersNotSaved = "the database isn't set up yet: open the XIV Fleet Companion app connected to it once";
             if (!warnedNoCurrentTable)
                 Log.Warning("Fleet Companion: the database isn't set up yet. Open the XIV Fleet Companion app (0.26.0 or newer) and connect it to this database once; it sets everything up. Characters are not saved until then.");
             warnedNoCurrentTable = true;
         }
         catch (DbException ex) when (Db.IsQueryError(ex))
         {
+            charactersNotSaved = $"the characters ({ex.Message})";
             Log.Warning($"Fleet Companion: failed to write current character rows — {ex.Message}");
         }
 
@@ -856,25 +921,29 @@ public sealed class Plugin : IDalamudPlugin
         if (!metricResult.StartsWith("Success"))
             Log.Warning($"Fleet Companion: failed to write metric history — {metricResult}");
 
-        // "Last sync" means the characters were actually written.
-        if (synced > 0)
+        // What didn't save this time, for the main window (the log has each error): it's tried again next sync.
+        var notSaved = new List<string>();
+        if (charactersNotSaved != null) notSaved.Add(charactersNotSaved);
+        if (failed > 0) notSaved.Add($"{failed} of the characters' retainers, bags, subs or other details");
+        if (!metricResult.StartsWith("Success")) notSaved.Add("the history for Trends");
+        SyncWarning = notSaved.Count == 0 ? null
+            : $"Some of this sync couldn't be saved: {string.Join("; ", notSaved)}. It's tried again at the next sync (the Dalamud log, /xllog, has the details).";
+
+        // Another game on this PC with the same Account Label would share this one's setup (MainWindow says so).
+        SameLabelAsAnotherGame = GamesOnThisPc.NoteAndCheck(Path.Combine(Path.GetDirectoryName(FileDatabase.DefaultPath)!, GamesOnThisPc.FileName),
+            PluginInterface.ConfigDirectory.FullName, Configuration.AccountLabel, DateTime.UtcNow);
+
+        // "Last sync" means the characters were written, or there were none here to write (every one synced by another
+        // game, which this sync still recorded).
+        if (charactersNotSaved == null)
         {
             Configuration.LastSyncTimestamp = DateTime.Now;
-            Configuration.Save();
+            SaveConfiguration();
         }
 
         var leftOutText = leftOutCount > 0 ? $" ({leftOutCount} left out in settings)" : "";
         if (SyncedElsewhere > 0) leftOutText += $" ({SyncedElsewhere} synced by another game)";
         Log.Information($"Fleet Companion: synced {synced}/{registeredCount - leftOutCount - SyncedElsewhere} characters{leftOutText}; {written} changed entries written, {unchanged} unchanged skipped, {failed} failed.");
-    }
-
-    // The items AllaganTools has for one character, retainer or FC (empty slots left out), or null when
-    // it has never seen that source: it then answers with nothing at all, not even empty slots.
-    private List<FleetWriter.InventoryItem>? SeenItems(ulong sourceId)
-    {
-        var raw = AllaganTools?.GetCharacterItems(sourceId);
-        if (raw == null || raw.Count == 0) return null;
-        return raw.Where(i => i.Quantity > 0).Select(ToInventoryItem).ToList();
     }
 
     // A warning about something only the player can fix (open a retainer at a bell) is logged once per
@@ -1007,7 +1076,7 @@ public sealed class Plugin : IDalamudPlugin
         var was = Configuration.FleetStore;
         Configuration.FleetStore = choice.Store;
         if (choice.Store == FleetStoreChoice.SharedDatabase) Configuration.UseRemoteConnection = choice.UseRemote;
-        Configuration.Save();
+        SaveConfiguration();
         if (was != FleetStoreChoice.NotChosen)
             Log.Information($"Fleet Companion: another game on this PC ({choice.ChangedBy}) moved the fleet {(choice.Store == FleetStoreChoice.ThisPc ? "to this PC's fleet file" : "to the shared database")}; this game follows.");
     }
@@ -1030,6 +1099,9 @@ public sealed class Plugin : IDalamudPlugin
     // ---- Moving the fleet (FleetMove) ----
 
     private volatile bool moving;
+
+    // Set when the plugin is being unloaded: a sync stops at its next step (Dispose).
+    private volatile bool stopping;
     public bool Moving => moving;
     /// <summary>What the move is doing, or how it ended (null: none yet); MoveFailed when it didn't move.</summary>
     public string? MoveStatus { get; private set; }
@@ -1092,7 +1164,7 @@ public sealed class Plugin : IDalamudPlugin
                 Configuration.FleetStore = toShared ? FleetStoreChoice.SharedDatabase : FleetStoreChoice.ThisPc;
                 changes.ForgetAll();
                 Configuration.Enabled = true;
-                Configuration.Save();
+                SaveConfiguration();
                 SaveChoiceForPc(Configuration);
                 MoveStatus = $"{result.Text} Your fleet is now {(toShared ? "in the shared database" : "on this PC")}; the other games on this PC follow at their next sync.";
                 Log.Information($"Fleet Companion: {MoveStatus}");
@@ -1197,7 +1269,7 @@ public sealed class Plugin : IDalamudPlugin
         PostgresCredentialStore.Save(remote, c.Host, c.Port, c.Database, c.User, c.Password);
         Configuration.UseRemoteConnection = remote;
         Configuration.FleetStore = FleetStoreChoice.SharedDatabase;
-        Configuration.Save();
+        SaveConfiguration();
         SaveChoiceForPc(Configuration);
     }
 
@@ -1206,7 +1278,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         PostgresCredentialStore.Delete(false);
         PostgresCredentialStore.Delete(true);
-        Configuration.Save();
+        SaveConfiguration();
     }
 
     /// <summary>
@@ -1240,6 +1312,20 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>Why the last sync didn't get through (shown in the main window), or null when it did.</summary>
     public string? SyncProblem { get; private set; }
+
+    // Saves the settings on the game's thread, where the settings pages change them: saved from a sync or a move in the
+    // background, Dalamud's copy of them could catch a list half-changed ("collection was modified").
+    private void SaveConfiguration()
+    {
+        if (Framework.IsInFrameworkUpdateThread) Configuration.Save();
+        else _ = Framework.RunOnFrameworkThread(Configuration.Save);
+    }
+
+    /// <summary>At the last sync: another game on this PC syncs with the same Account Label (blank included).</summary>
+    public bool SameLabelAsAnotherGame { get; private set; }
+
+    /// <summary>The last sync got through but some of it couldn't be saved (in plain words), or null.</summary>
+    public string? SyncWarning { get; private set; }
     public DateTime SyncProblemAt { get; private set; }
 
     // The problem last written to the log, so one that repeats every sync is logged once, until syncing works again.
@@ -1302,8 +1388,7 @@ public sealed class Plugin : IDalamudPlugin
         var fcIds = characters.Select(c => c.Snapshot.FcId).Where(f => f != 0).Distinct().ToList();
 
         // Voyage loot, newer than what is stored.
-        var stFolder = OtherPluginFolder("SubmarineTracker");
-        var stPath = stFolder == null ? null : Path.Combine(stFolder, SubmarineTrackerReader.FileName);
+        var stPath = SubmarineTrackerFile();
         var stFound = stPath != null && File.Exists(stPath);
         var stRunning = subTrackerRunning ?? stFound;
         if (stFound && fcIds.Count > 0)
@@ -1356,8 +1441,8 @@ public sealed class Plugin : IDalamudPlugin
             {
                 try
                 {
-                    var since = newest.TryGetValue((file.Cid, file.Retainer), out var s) ? s : 0;
-                    var rows = VentureStatsReader.ReadFile(file.Path, file.Cid, file.Retainer, since);
+                    var rows = VentureStatsReader.ReadFile(file.Path, file.Cid, file.Retainer,
+                        name => newest.TryGetValue((file.Cid, name), out var s) ? s : 0);
                     if (!await DetailsWriter.WriteVenturesAsync(conn, rows)) { DetailsTablesMissing(); return; }
                     ventureFilesRead[file.Path] = file.Changed;
                 }

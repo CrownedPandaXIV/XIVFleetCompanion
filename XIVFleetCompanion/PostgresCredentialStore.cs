@@ -57,6 +57,7 @@ namespace XIVFleetCompanion
                     ? new ConnectionDetails()
                     : JsonSerializer.Deserialize<ConnectionDetails>(cred.Comment) ?? new ConnectionDetails();
 
+                LoadProblem = null;
                 return new PostgresCredential
                 {
                     Host = details.Host,
@@ -68,11 +69,17 @@ namespace XIVFleetCompanion
             }
             catch (Exception ex)
             {
-                // Corrupted or inaccessible credential — caller treats this as "not configured".
-                Plugin.Log.Warning($"Fleet Companion: could not read the saved database credentials — {ex.Message}");
+                // Corrupted or inaccessible credential: the caller treats it as "not configured". Read for every sync and
+                // read, so logged once until it changes; Settings says to enter the details again (LoadProblem).
+                if (LoadProblem != ex.Message)
+                    Plugin.Log.Warning($"Fleet Companion: could not read the saved database credentials — {ex.Message}");
+                LoadProblem = ex.Message;
                 return null;
             }
         }
+
+        /// <summary>Why the saved database details couldn't be read last time (null when they could, or none are saved).</summary>
+        public static string? LoadProblem { get; private set; }
 
         public static void Delete(bool useRemote)
         {

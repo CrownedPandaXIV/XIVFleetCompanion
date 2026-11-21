@@ -174,8 +174,8 @@ namespace XIVFleetCompanion
             if (logins.Count == 0) return true;
             const string sql = @"
                 INSERT INTO companion_character_login (cid, pc_name, account_label, logged_in_at)
-                SELECT t.cid, @pc, @label, t.at
-                FROM unnest(@cid::numeric[], @at::timestamptz[]) AS t(cid, at)
+                SELECT t.cid, @pc, @label, now() - make_interval(secs => t.ago)
+                FROM unnest(@cid::numeric[], @ago::float8[]) AS t(cid, ago)
                 ON CONFLICT (cid) DO UPDATE SET
                     pc_name = EXCLUDED.pc_name,
                     account_label = EXCLUDED.account_label,
@@ -187,7 +187,9 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("pc", pcName);
                 cmd.Parameters.AddWithValue("label", accountLabel);
                 cmd.Parameters.AddWithValue("cid", logins.Select(l => (decimal)l.Key).ToArray());
-                cmd.Parameters.AddWithValue("at", logins.Select(l => DateTime.SpecifyKind(l.Value, DateTimeKind.Utc)).ToArray());
+                // How long ago, by this PC's clock; the time is the database's, so PCs whose clocks differ compare fairly.
+                var now = DateTime.UtcNow;
+                cmd.Parameters.AddWithValue("ago", logins.Select(l => Math.Max(0, (now - DateTime.SpecifyKind(l.Value, DateTimeKind.Utc)).TotalSeconds)).ToArray());
                 await cmd.ExecuteNonQueryAsync();
                 return true;
             }
@@ -517,6 +519,11 @@ namespace XIVFleetCompanion
         // nothing: it is more likely missing data than a character who dismissed every retainer.
         public static async Task WriteRetainersAsync(DbConnection db, ulong ownerCid, IReadOnlyList<RetainerRecord> retainers)
         {
+            // AutoRetainer lists a retainer with id 0 before it has loaded it: the list isn't known yet, so what's stored
+            // stays (written now, the retainers not in it would be removed). A retainer listed twice is written once (the
+            // last), as PostgreSQL refuses to change one row twice in one statement and the file would just overwrite it.
+            if (retainers.Any(r => r.RetainerId == 0)) return;
+            retainers = retainers.GroupBy(r => r.RetainerId).Select(g => g.Last()).ToList();
             if (Db.IsFile(db)) { if (retainers.Count > 0) await FileWriteRetainers(db, ownerCid, retainers); return; }
             var conn = (NpgsqlConnection)db;
             if (retainers.Count == 0) return;
@@ -573,6 +580,18 @@ namespace XIVFleetCompanion
             await using var cmd = new NpgsqlCommand("DELETE FROM companion_character_housing WHERE cid = ANY(@cids)", conn);
             cmd.Parameters.AddWithValue("cids", cids.Select(c => (decimal)c).ToArray());
             return await cmd.ExecuteNonQueryAsync();
+        }
+
+        // The Free Companies with a character that has subs, from every PC's characters (as last synced). Read on both
+        // database types; an FC id is numeric in PostgreSQL and text in the file.
+        public static async Task<HashSet<ulong>> ReadFcsWithSubsAsync(DbConnection db)
+        {
+            var fcs = new HashSet<ulong>();
+            await using var cmd = Db.Command(db, "SELECT DISTINCT fc_id FROM companion_character_current WHERE submarine_count > 0 AND fc_id IS NOT NULL");
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                if (Db.Id(r, 0) is var id and not 0) fcs.Add(id);
+            return fcs;
         }
 
         // Removes the chests of Free Companies that no tracked character belongs to any more (a

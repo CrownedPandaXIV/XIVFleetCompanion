@@ -102,9 +102,10 @@ namespace XIVFleetCompanion
         /// CID -> housing info, resolved through each character's FC entry.
         /// When <paramref name="withoutFc"/> is given, it receives the characters FCTracker
         /// knows to be in no Free Company (a character it has no entry for is left out: unknown).
-        /// Never throws — returns an empty dictionary on any failure.
+        /// Never throws: on a failure it returns what it could read (nothing, for a file it can't read at all) and adds
+        /// why to <paramref name="problems"/>, in plain words.
         /// </summary>
-        public static Dictionary<ulong, HousingInfo> ReadHousingData(string path, HashSet<ulong>? withoutFc = null)
+        public static Dictionary<ulong, HousingInfo> ReadHousingData(string path, HashSet<ulong>? withoutFc = null, List<string>? problems = null)
         {
             var result = new Dictionary<ulong, HousingInfo>();
 
@@ -119,7 +120,10 @@ namespace XIVFleetCompanion
                 var charByCid = root?.GatheredData?.CharByCID;
                 var fcData = root?.GatheredData?.FCData;
                 if (charByCid == null || fcData == null)
+                {
+                    problems?.Add("its file isn't laid out the way this version expects");
                     return result;
+                }
 
                 foreach (var kvp in charByCid)
                 {
@@ -133,15 +137,16 @@ namespace XIVFleetCompanion
                     }
 
                     var fcKey = character.FC.Value.ToString();
-                    if (!fcData.TryGetValue(fcKey, out var fc))
+                    if (!fcData.TryGetValue(fcKey, out var fc) || LooksBlank(fc))
                         continue;
 
                     result[character.CID] = ToHousingInfo(character.FC.Value, fc);
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
             {
-                // Missing, corrupted, or unreadable file — caller treats this as "no data available".
+                // Half-written (FC Tracker saving it right then), damaged, or in a shape this version doesn't know.
+                problems?.Add($"its file couldn't be read ({ex.Message})");
             }
 
             return result;
@@ -199,12 +204,16 @@ namespace XIVFleetCompanion
                 var fcId = character.FC.Value;
                 if (!fcs.TryGetValue(fcId, out var fc))
                     fcs[fcId] = fc = getFc(fcId);
-                if (fc != null)
+                if (fc != null && !LooksBlank(fc))
                     result[cid] = ToHousingInfo(fcId, fc);
             }
             withoutFc?.UnionWith(none);
             return result;
         }
+
+        /// <summary>An entry with no name, points or rank isn't a real Free Company's: FC Tracker renamed what it calls them
+        /// (an update), or hasn't filled it in yet. It's skipped, so the details stored stay rather than being blanked.</summary>
+        public static bool LooksBlank(FcEntry fc) => string.IsNullOrWhiteSpace(fc.FCName) && fc.FCPoints == 0 && fc.Rank == 0;
 
         private static HousingInfo ToHousingInfo(ulong fcId, FcEntry fc) => new()
         {

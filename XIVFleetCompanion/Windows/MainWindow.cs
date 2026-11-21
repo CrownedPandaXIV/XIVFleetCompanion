@@ -213,7 +213,7 @@ public partial class MainWindow : Window, IDisposable
         var alerts = reader.Alerts.Data;
         var low = alerts?.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count() ?? 0;
         var attention = back + (alerts?.Count ?? 0);
-        var statusProblem = plugin.SyncProblem != null || plugin.Keeper.Problem != null || plugin.Keeper.LastResult is { Newer: true } || (plugin.AutoRetainer != null && !SafeReady());
+        var statusProblem = plugin.SyncProblem != null || plugin.SyncWarning != null || plugin.SameLabelAsAnotherGame || plugin.Keeper.Problem != null || plugin.Keeper.LastResult is { Newer: true } || (plugin.AutoRetainer != null && !SafeReady());
         var notSynced = alerts?.Count(a => a.Kind == "not_synced") ?? 0;
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
@@ -291,15 +291,15 @@ public partial class MainWindow : Window, IDisposable
 
         // This PC's sync, at the foot.
         var line = plugin.SyncProblem != null ? "Not syncing" :
-            config.LastSyncTimestamp.HasValue ? $"Synced {FleetReader.Ago(config.LastSyncTimestamp.Value, DateTime.Now)}" : "Not synced yet";
-        var lineColor = plugin.SyncProblem != null ? p.Warn : p.Dim;
+            config.LastSyncTimestamp.HasValue ? $"Synced {FleetReader.Ago(config.LastSyncTimestamp.Value, DateTime.Now)}{(plugin.SyncWarning != null ? ", partly" : "")}" : "Not synced yet";
+        var lineColor = plugin.SyncProblem != null || plugin.SyncWarning != null ? p.Warn : p.Dim;
         var height = ImGui.GetTextLineHeightWithSpacing();
         var y = ImGui.GetWindowHeight() - height - ImGui.GetStyle().WindowPadding.Y;
         if (y > ImGui.GetCursorPosY()) ImGui.SetCursorPosY(y);
         if (folded)
         {
             using (ImRaii.PushFont(UiBuilder.IconFont))
-            using (ImRaii.PushColor(ImGuiCol.Text, plugin.SyncProblem != null ? p.Warn : config.Enabled ? p.Good : p.Dim))
+            using (ImRaii.PushColor(ImGuiCol.Text, plugin.SyncProblem != null || plugin.SyncWarning != null ? p.Warn : config.Enabled ? p.Good : p.Dim))
                 Ui.Text(FontAwesomeIcon.Sync.ToIconString());
         }
         else
@@ -309,7 +309,10 @@ public partial class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(plugin.SyncProblem != null ? $"Not syncing ({plugin.SyncProblemAt:t}): {plugin.SyncProblem}" :
-                config.Enabled ? $"This PC syncs every {config.SyncIntervalMinutes} minute(s). {line}." : "Turn syncing on in Settings.");
+                !config.Enabled ? "Turn syncing on in Settings." :
+                $"This PC syncs every {config.SyncIntervalMinutes} minute(s). {line}."
+                + (plugin.SyncWarning != null ? $"\n{plugin.SyncWarning}" : "")
+                + (plugin.SyncedElsewhere > 0 ? $"\n{plugin.SyncedElsewhere} character(s) are synced by another game, where they last logged in." : ""));
     }
 
     private bool SafeReady()
@@ -449,8 +452,16 @@ public partial class MainWindow : Window, IDisposable
                     Ui.Wrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
             }
 
+            // Two games on this PC with the same label share one setup: their PCs-page row and logins overwrite each other.
+            if (plugin.SameLabelAsAnotherGame)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                    Ui.Wrapped(string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel)
+                        ? "Another game on this PC also syncs with no Account Label. Give each game its own Account Label in Settings (for example, the account's name), or they keep overwriting each other's status."
+                        : $"Another game on this PC also syncs as \"{plugin.Configuration.AccountLabel}\". Give each game its own Account Label in Settings, or they keep overwriting each other's status.");
+            }
             // Only once more than one setup syncs this fleet (the PCs page's list): then it's needed to tell them apart.
-            if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel) && reader.Pcs.Data is { Count: > 1 })
+            else if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel) && reader.Pcs.Data is { Count: > 1 })
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
                     Ui.Wrapped("More than one game syncs this fleet: give this one an Account Label in Settings (for example, the account's name), so they can be told apart.");

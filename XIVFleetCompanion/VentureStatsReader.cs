@@ -28,9 +28,11 @@ namespace XIVFleetCompanion
             return retainer.Length == 0 ? null : (cid, retainer);
         }
 
-        // The rewards in one file newer than `since` (Unix seconds). Missing fields take AutoRetainer's
-        // defaults (not HQ, amount 1, venture 0).
-        public static List<DetailsWriter.VentureRow> ReadFile(string path, ulong cid, string retainerFromName, long since)
+        // The rewards in one file newer than what's stored (Unix seconds; sinceFor gives the newest stored for a retainer
+        // name). Missing fields take AutoRetainer's defaults (not HQ, amount 1, venture 0). Rows are stored under the
+        // name inside the file; a retainer renamed since keeps its old name in the file name, so the newest under either
+        // name counts: its rewards aren't stored a second time under the new name.
+        public static List<DetailsWriter.VentureRow> ReadFile(string path, ulong cid, string retainerFromName, Func<string, long> sinceFor)
         {
             var rows = new List<DetailsWriter.VentureRow>();
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
@@ -38,6 +40,7 @@ namespace XIVFleetCompanion
             var retainer = root.TryGetProperty("RetainerName", out var rn) && rn.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(rn.GetString())
                 && !rn.GetString()!.StartsWith("Unnamed", StringComparison.Ordinal)
                 ? rn.GetString()! : retainerFromName;
+            var since = Math.Max(sinceFor(retainer), sinceFor(retainerFromName));
             if (!root.TryGetProperty("Records", out var records) || records.ValueKind != JsonValueKind.Array) return rows;
             foreach (var r in records.EnumerateArray())
             {

@@ -371,7 +371,7 @@ public partial class MainWindow
                 $"Database: {(saved == null ? "none saved" : $"{saved.Host}:{saved.Port}/{saved.Database} as {saved.User}")}",
                 $"PostgreSQL here: {pgHere}, Tailscale here: {tsHere}",
                 $"Last sync: {plugin.Configuration.LastSyncTimestamp?.ToString("u") ?? "never"}",
-                $"Sync problem: {plugin.SyncProblem ?? "none"}",
+                $"Sync problem: {plugin.SyncProblem ?? "none"}", $"Sync warning: {plugin.SyncWarning ?? "none"}",
                 $"Database version: {plugin.Keeper.StatusText}",
             });
             if (ImGui.Button("Copy the details")) ImGui.SetClipboardText(details);

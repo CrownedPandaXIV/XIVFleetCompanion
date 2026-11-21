@@ -99,7 +99,9 @@ public static class Db
             bool b when IsFileCommand(cmd) => b ? 1L : 0L,
             // The file keeps whole numbers as INTEGER (System.Data.SQLite would store a decimal as text). Both branches are
             // object: as `? (long)d : (double)d` the whole number became a double, rounding ids past 2^53 (2.4.7).
-            decimal d when IsFileCommand(cmd) => d == decimal.Truncate(d) && d >= long.MinValue && d <= long.MaxValue ? (object)(long)d : (double)d,
+            // A whole number past a long (only a Free Company id, which the file keeps as text) goes as its exact text.
+            decimal d when IsFileCommand(cmd) => d != decimal.Truncate(d) ? (double)d
+                : d >= long.MinValue && d <= long.MaxValue ? (object)(long)d : d.ToString(CultureInfo.InvariantCulture),
             DateTime t when IsFileCommand(cmd) => Unix(t),
             _ => value,
         };

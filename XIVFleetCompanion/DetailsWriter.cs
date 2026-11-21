@@ -242,6 +242,8 @@ namespace XIVFleetCompanion
         // its sector order is filled in when missing (database version 9; without it, voyages are stored without it).
         public static async Task<bool> WriteVoyageLootAsync(DbConnection db, IReadOnlyList<LootRow> rows)
         {
+            // One row per sector of a voyage (a repeat would make PostgreSQL refuse the whole statement).
+            rows = rows.GroupBy(r => (r.FcId, r.Register, r.Return, r.Sector)).Select(g => g.First()).ToList();
             if (Db.IsFile(db)) { if (rows.Count > 0) await FileWriteVoyageLoot(db, rows); return true; }
             var conn = (NpgsqlConnection)db;
             if (rows.Count == 0) return true;

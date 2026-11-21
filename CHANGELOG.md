@@ -23,6 +23,29 @@ Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 
 - **An FC chest is kept for a day when no character seems to be in that Free Company.** AutoRetainer can briefly
   not know a character's Free Company, which used to remove the chest until the next hourly rewrite.
 - Setup's administrator step reads its instructions as UTF-8 (a safeguard for Windows user names with accents).
+- **Two PCs with characters in one Free Company no longer swap its chest back and forth.** Only the game whose
+  character has the FC's subs writes the chest (any game does when nobody has subs there), so an old copy on another
+  PC can't put back last month's chest, and the FC's salvage charts stop jumping.
+- **Allagan Tools is asked on the game's thread**, as AutoRetainer is, so a sync can't catch it mid-change and report
+  "open retainer X at a summoning bell" for no reason. If an Allagan Tools update changes how it answers, the plugin
+  keeps the stored items (instead of reading them wrongly) and the PCs page says to update.
+- **FC Tracker's file that can't be read is now said** on the PCs page (and logged once). Before, the house's last
+  visit silently stopped updating until the 45-day demolition warning came up. An entry that looks blank (FC Tracker
+  renamed something) is skipped, so a house isn't wiped from the app.
+- **A sync that only partly saved says so:** the main window shows "Synced ... ago, partly" and, on hover, what wasn't
+  saved. "Last sync" also updates when every character here is synced by another game.
+- **Plainer messages** when the database is still starting up, has too many connections, is out of disk space, or the
+  login isn't allowed to write; these are logged once, not every sync. An AutoRetainer update the plugin doesn't
+  understand yet says to update XIV Fleet Companion, instead of showing an error.
+- **Two games on one PC with the same Account Label (or none) are told so**, and to give each its own label: they
+  share one row on the PCs page and overwrite each other's status.
+- Which game a character last logged in on is now timed by the database's clock, so a PC whose clock is off can't
+  lose (or win) a character wrongly.
+- A renamed retainer's venture rewards aren't stored a second time under its new name.
+- A retainer list AutoRetainer hasn't loaded yet (retainers with no id) is skipped rather than refused by the shared
+  database every sync. A saved database login that can't be read is logged once and Settings says to enter it again.
+- Updating or unloading the plugin mid-sync stops the sync and waits a moment for it, and settings are always saved
+  on the game's thread.
 
 ## 2.4.8 - 2026-11-20
 

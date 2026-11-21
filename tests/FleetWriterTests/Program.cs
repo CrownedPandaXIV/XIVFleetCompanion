@@ -2490,6 +2490,21 @@ internal static partial class Program
               && string.Join(",", withoutFc.OrderBy(k => k)) == "2,3",
             $"FCTracker: in an FC {string.Join(",", parsed.Keys)}, in none {string.Join(",", withoutFc.OrderBy(k => k))} (an FC it has no details for is neither)");
 
+        // FCTracker's file when it can't be used: half-written, laid out differently, or with entries that look blank (a
+        // renamed field): what's stored is kept, and the problem is said.
+        var broken = System.IO.Path.GetTempFileName();
+        var problemsSeen = new List<string>();
+        System.IO.File.WriteAllText(broken, @"{""GatheredData"": {""CharByCID"": {""1"": {""CID"": 1, ""FC"": 90");
+        var half = FCTrackerConnector.ReadHousingData(broken, null, problemsSeen);
+        System.IO.File.WriteAllText(broken, @"{""Data"": {}}");
+        var reshaped = FCTrackerConnector.ReadHousingData(broken, null, problemsSeen);
+        System.IO.File.WriteAllText(broken, @"{""GatheredData"": {""CharByCID"": {""1"": {""CID"": 1, ""FC"": 9000001}}, ""FCData"": {""9000001"": {""Name"": ""Panda Co"", ""Points"": 5}}}}");
+        var blank = FCTrackerConnector.ReadHousingData(broken, null, problemsSeen);
+        System.IO.File.Delete(broken);
+        Check(half.Count == 0 && reshaped.Count == 0 && blank.Count == 0 && problemsSeen.Count == 2
+              && problemsSeen[0].StartsWith("its file couldn't be read") && problemsSeen[1] == "its file isn't laid out the way this version expects",
+            "FCTracker: a file it can't read, or laid out differently, is said; an entry that looks blank is skipped, so the stored details stay: " + string.Join(" | ", problemsSeen));
+
         // FCTracker's IPC: the same answers as its file, asked character by character; each FC is asked for once.
         var liveChars = new Dictionary<ulong, FCTrackerConnector.CharEntry>
         {
@@ -2780,6 +2795,30 @@ internal static partial class Program
 
         await DetailsChecks(conn);
         ReaderChecks();
+        {
+            var gamesFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"games-{Guid.NewGuid():N}.json");
+            var t0 = new DateTime(2026, 11, 21, 12, 0, 0, DateTimeKind.Utc);
+            var alone = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "", t0);
+            var twoBlank = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\B\pluginConfigs\XIVFleetCompanion", " ", t0.AddMinutes(1));
+            var labelled = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\B\pluginConfigs\XIVFleetCompanion", "Alt", t0.AddMinutes(2));
+            var firstAgain = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "", t0.AddMinutes(3));
+            var sameLabel = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "alt", t0.AddMinutes(4));
+            var longGone = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "alt", t0.AddDays(3));
+            System.IO.File.Delete(gamesFile);
+            Check(!alone && twoBlank && !labelled && !firstAgain && sameLabel && !longGone,
+                "games on this PC: two games with no Account Label (or the same one) are told so; different labels, or one not synced for days, aren't");
+        }
+        {
+            ulong[] Slot(ulong item, ulong qty, int extra = 0) { var a = new ulong[25 + extra]; a[2] = item; a[3] = qty; a[6] = 1; a[20] = 10000; a[22] = 3; a[23] = 77; a[24] = 450; for (var i = 0; i < extra; i++) a[25 + i] = (ulong)(i + 1); return a; }
+            var good = AllaganToolsConnector.Parse(new[] { Slot(5111, 3, 2), Slot(0, 0) });
+            var older = AllaganToolsConnector.Parse(new[] { Slot(5111, 3).Take(24).ToArray() });
+            var shorter = AllaganToolsConnector.Parse(new[] { Slot(5111, 3).Take(20).ToArray() });
+            var shifted = AllaganToolsConnector.Parse(new[] { Slot(0, 5) });
+            Check(good.Problem == null && good.Items.Count == 2 && good.Items[0] is { ItemId: 5111, Quantity: 3, Hq: true, SortedContainer: 10000, SortedSlotIndex: 3, RetainerId: 77, MarketPrice: 450 }
+                  && string.Join(",", good.Items[0].GearSetIds) == "1,2" && older.Problem == null && older.Items[0].MarketPrice == 0
+                  && shorter.Problem != null && shorter.Items.Count == 0 && shifted.Problem != null && AllaganToolsConnector.Parse(null).Items.Count == 0,
+                "Allagan Tools: its answer is read by position; a layout it doesn't know is a problem (the items stored are kept), not an empty inventory");
+        }
         Check(JsonDiff(JsonNode.Parse("{\"cid\":18014498578000001}"), JsonNode.Parse("{\"cid\":18014498578000004}"), "") != null
               && JsonDiff(JsonNode.Parse("{\"retainer\":\"33777097243660301\"}"), JsonNode.Parse("{\"retainer\":\"33777097243000000\"}"), "") != null
               && JsonDiff(JsonNode.Parse("{\"lastSeenAt\":1790000000000}"), JsonNode.Parse("{\"lastSeenAt\":1790000060000}"), "") == null
@@ -2933,6 +2972,11 @@ internal static partial class Program
             "a database name that doesn't exist is said plainly: " + wrongName?.Message);
         var refused = new PostgresException("password authentication failed for user \"x\"", "FATAL", "FATAL", PostgresErrorCodes.InvalidPassword);
         Check(SyncFailure.Describe(refused) == SyncFailure.WrongLogin && SyncFailure.IsExpected(refused), "a wrong password is said plainly");
+        PostgresException Pg(string state) => new("server says so", "FATAL", "FATAL", state);
+        Check(SyncFailure.Describe(Pg(PostgresErrorCodes.CannotConnectNow)) == SyncFailure.Starting && SyncFailure.Describe(Pg(PostgresErrorCodes.TooManyConnections)) == SyncFailure.TooBusy
+              && SyncFailure.Describe(Pg(PostgresErrorCodes.InsufficientPrivilege)) == SyncFailure.NotAllowed && SyncFailure.Describe(Pg(PostgresErrorCodes.DiskFull)) == SyncFailure.ServerFull
+              && new[] { PostgresErrorCodes.CannotConnectNow, PostgresErrorCodes.TooManyConnections, PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.DiskFull }.All(c => SyncFailure.IsExpected(Pg(c))),
+            "a database still starting, too busy, a login not allowed and a full disk are said plainly, and logged once");
         var moving = new DatabaseMove.WaitException();
         var away = new DatabaseMove.UnreachableException("100.64.1.9:5432", "timeout");
         Check(SyncFailure.Describe(moving) == moving.Message && SyncFailure.Describe(away) == away.Message && SyncFailure.IsExpected(away),
@@ -3153,7 +3197,12 @@ internal static partial class Program
             var statFile = System.IO.Path.Combine(dir, "0040000000ABCDEF_Oldret.statistic.json");
             System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700},{""I"":0,""T"":1790003800}],""PlayerName"":""Aki@Maduin"",""RetainerName"":""Oldret""}");
             var parsed = VentureStatsReader.ParseFileName("0040000000ABCDEF_Oldret.statistic.json");
-            var rewards = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", 1790000100);
+            var rewards = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", name => name == "Oldret" ? 1790000100 : 0);
+            // Renamed in the game since: the file keeps its old name, the records the new one; the newest stored under
+            // the old name still counts, so nothing is stored twice.
+            System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700}],""RetainerName"":""Newret""}");
+            var renamed = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", name => name == "Oldret" ? 1790003700 : 0);
+            Check(renamed.Count == 0, "AutoRetainer's statistics: a renamed retainer's rewards already stored under its old name aren't stored again under the new one");
             Check(parsed is { } p && p.Cid == 0x0040000000ABCDEF && p.Retainer == "Oldret"
                   && VentureStatsReader.ParseFileName("DefaultConfig.json") == null && VentureStatsReader.ParseFileName("123_Short.statistic.json") == null
                   && rewards.Count == 1 && rewards[0].ItemId == 12345 && rewards[0].Hq && rewards[0].Quantity == 1 && rewards[0].VentureId == 0,
