@@ -276,7 +276,8 @@ internal static partial class Program
             await copy.OpenAsync();
             Check(await Count(copy, "SELECT count(*) FROM companion_character_current WHERE name = 'Backed'") == 1, "backup: the copy has the fleet and opens on its own");
         }
-        Check(!FileDatabase.BackupDue(path, DateTime.Now), "backup: not due again the same day");
+        File.SetLastWriteTime(made, day);   // as if made then: the check below doesn't depend on today's date
+        Check(!FileDatabase.BackupDue(path, day.AddHours(10)) && FileDatabase.BackupDue(path, day.AddDays(1)), "backup: not due again the same day, due the next");
         var second = await FileDatabase.BackUpAsync(conn, path, day.AddHours(1));
         Check(Path.GetFileName(second) == "fleet-2025-03-07-103000.db", $"backup: Back up now the same day keeps both ({Path.GetFileName(second)})");
         // As if made on those days, so the eight more below are newer.
@@ -353,7 +354,7 @@ internal static partial class Program
             await FileDatabase.EnsureAsync(conn, FileDatabase.Files.Embedded(), $"game {seed}");
             for (var i = 0; i < count; i++)
             {
-                var cid = (ulong)(seed * 100_000 + i);
+                var cid = 18014498578000000UL + (ulong)(seed * 100_000 + i);   // real-size: past what a double holds exactly
                 await FleetWriter.WriteCurrentCharactersAsync(conn, new List<FleetWriter.CharacterSnapshot>
                 {
                     new() { Cid = cid, Name = $"G{seed} C{i}", World = "Maduin", Gil = i, AccountLabel = $"game{seed}", FcId = 9232379236109516865 },

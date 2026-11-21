@@ -1,6 +1,6 @@
 {
  "about": "Written by XIVFleetCompanion-App tests/db/plugin-database-fixture.js: the database after the app updates it each way.",
- "appVersion": "1.10.6",
+ "appVersion": "1.11.0",
  "signature": {
   "columns": "SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS v\n            FROM information_schema.columns WHERE table_schema = 'public'\n              AND table_name NOT IN (SELECT table_name FROM information_schema.views WHERE table_schema = 'public') ORDER BY 1",
   "indexes": "SELECT indexdef AS v FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1",

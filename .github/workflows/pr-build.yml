@@ -3,6 +3,8 @@ name: PR Build
 on:
   pull_request:
     branches: [ master ]
+  # Also run by hand on any branch (Actions, PR Build, Run workflow).
+  workflow_dispatch:
 
 jobs:
 
@@ -50,9 +52,14 @@ jobs:
         retention-days: 1
 
 
-  # The plugin's database writes (FleetWriter.cs), run against a scratch Postgres.
+  # The plugin's database writes (FleetWriter.cs), run against a scratch Postgres, in two time zones: UTC, and one a
+  # day ahead of it (where a local time taken for UTC shows).
   writer-tests:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [ Etc/UTC, Pacific/Auckland ]
 
     services:
       postgres:
@@ -83,8 +90,60 @@ jobs:
     - name: Check the release scripts
       run: bash tests/scripts/release-scripts.sh
 
+    # The app is the reference: its branch of the same name (else main) works out the answers the plugin is checked
+    # against, afresh, so a change to the app's working out can't leave the plugin checked against old answers.
+    - name: Find the app's matching branch
+      id: app
+      run: |
+        branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+        if git ls-remote --exit-code --heads https://github.com/CrownedPandaXIV/XIVFleetCompanion-App.git "$branch" > /dev/null; then
+          echo "ref=$branch" >> "$GITHUB_OUTPUT"
+        else
+          echo "ref=main" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Get the app
+      uses: actions/checkout@v5
+      with:
+        repository: CrownedPandaXIV/XIVFleetCompanion-App
+        ref: ${{ steps.app.outputs.ref }}
+        path: app
+
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: app/package-lock.json
+
+    - name: Work out the app's answers again
+      env:
+        PGHOST: 127.0.0.1
+        PGPORT: 5432
+        PGUSER: postgres
+        PGPASSWORD: postgres
+        PGDATABASE: postgres
+      run: |
+        cd app
+        npm ci --ignore-scripts
+        t=../tests/FleetWriterTests
+        for f in parts routes trends edits fight-club; do node tests/db/$f-fixture.js $t/$f-fixture.json; done
+        node tests/themes-fixture.js $t/themes-fixture.json
+        node tests/market-fixture.js $t/market-fixture.json
+        node tests/db/plugin-database-fixture.js ..
+
+    # The plugin ships its copy of the app's database files, and most answers don't change from run to run (the
+    # Subs routes and Trends depend on the time they're worked out, so only the tests below check those).
+    - name: The plugin's copies match the app's ${{ steps.app.outputs.ref }}
+      run: |
+        if ! git diff --stat --exit-code -- XIVFleetCompanion/Database tests/FleetWriterTests \
+             ':!tests/FleetWriterTests/routes-fixture.json' ':!tests/FleetWriterTests/trends-fixture.json'; then
+          echo "::error::The plugin's copies of the app's files are out of date. In the app, run its fixture scripts into the plugin (see tests/FleetWriterTests/README.md) and commit the changes."
+          exit 1
+        fi
+
     - name: Run the writer tests
       env:
+        TZ: ${{ matrix.tz }}
         FLEET_TEST_DB: Host=localhost;Username=postgres;Password=postgres;Database=postgres
         FLEET_TEST_DB2: Host=localhost;Port=5433;Username=postgres;Password=postgres;Database=postgres
       run: dotnet run --project tests/FleetWriterTests
