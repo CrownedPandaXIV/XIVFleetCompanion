@@ -1,5 +1,6 @@
 using FFXIVClientStructs.FFXIV.Client.Game;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace XIVFleetCompanion
 {
@@ -12,33 +13,44 @@ namespace XIVFleetCompanion
     {
         private const int PlacesPerSub = 5;
 
-        /// <summary>Every fitted part of every sub in this workshop, or null when not in a workshop (or it isn't loaded yet).
-        /// A place holding anything but a sub part is skipped, so a change to the game's layout reads nothing rather than
-        /// something wrong.</summary>
-        public static List<PartCondition.Reading>? Read(ulong cid, double now)
+        /// <summary>What one look found: the readings (null when not in a workshop), and in plain words what was seen, for
+        /// the log once per visit.</summary>
+        public sealed record Look(List<PartCondition.Reading>? Readings, string Seen);
+
+        /// <summary>Every fitted part of every sub in this workshop. A place holding anything but a sub part is skipped, so a
+        /// change to the game's layout reads nothing rather than something wrong (and Seen says what was there instead).</summary>
+        public static Look Read(ulong cid, double now)
         {
             var housing = HousingManager.Instance();
-            if (housing == null || housing->WorkshopTerritory == null || cid == 0) return null;
+            if (housing == null || housing->WorkshopTerritory == null) return new Look(null, "not in a workshop");
+            if (cid == 0) return new Look(null, "in a workshop, but no character is logged in");
             var inventory = InventoryManager.Instance();
-            if (inventory == null) return null;
-            var container = inventory->GetInventoryContainer(InventoryType.HousingInteriorPlacedItems2);
-            if (container == null || !container->IsLoaded) return null;
+            var container = inventory == null ? null : inventory->GetInventoryContainer(InventoryType.HousingInteriorPlacedItems2);
+            if (container == null) return new Look(new(), "in the workshop, but the game has no parts container");
 
             var readings = new List<PartCondition.Reading>();
             var subs = housing->WorkshopTerritory->Submersible.Data;
+            var registered = 0;
+            var other = new List<string>();
             for (var i = 0; i < subs.Length && i < 4; i++)
             {
                 var sub = subs[i];
                 if (sub.RegisterTime == 0) continue;
+                registered++;
                 var name = sub.NameString;
                 for (var slot = 0; slot < 4; slot++)
                 {
-                    var part = container->GetInventorySlot(i * PlacesPerSub + slot);
-                    if (part == null || !PartsPlanner.IsSubPart(part->ItemId)) continue;
+                    var place = i * PlacesPerSub + slot;
+                    var part = place < container->Size ? container->GetInventorySlot(place) : null;
+                    if (part == null) { other.Add($"{place}: none"); continue; }
+                    if (!PartsPlanner.IsSubPart(part->ItemId)) { other.Add($"{place}: item {part->ItemId}"); continue; }
                     readings.Add(new PartCondition.Reading(cid, sub.RegisterTime, name, i + 1, slot, part->ItemId, part->Condition, sub.ReturnTime, now));
                 }
             }
-            return readings;
+            var seen = $"in the workshop: {registered} sub(s), {readings.Count} part(s) read"
+                + (container->IsLoaded ? "" : " (the game says the parts container isn't loaded)")
+                + (other.Count > 0 ? $"; places without a sub part: {string.Join(", ", other.Take(8))}" : "");
+            return new Look(readings, seen);
         }
     }
 }

@@ -71,6 +71,7 @@ public sealed class Plugin : IDalamudPlugin
     // Sub part condition, read in the FC workshop and written at the next sync (PartCondition).
     private readonly PartCondition.Log partConditions = new();
     private DateTime partConditionsReadAt = DateTime.MinValue;
+    private string? partConditionsSeen;
     private bool warnedNoCurrentTable = false;
 
     // Characters seen logging in on this setup (cid -> when, UTC), not yet recorded in the database; and the
@@ -364,8 +365,15 @@ public sealed class Plugin : IDalamudPlugin
         partConditionsReadAt = now;
         try
         {
-            var readings = PartConditionReader.Read(ClientState.IsLoggedIn ? PlayerState.ContentId : 0, Db.Unix(now));
-            if (readings != null && partConditions.Offer(readings) > 0)
+            var look = PartConditionReader.Read(ClientState.IsLoggedIn ? PlayerState.ContentId : 0, Db.Unix(now));
+            // Once per workshop visit (and again if what it sees changes): what was read, or why nothing was.
+            if (look.Readings == null) partConditionsSeen = null;
+            else if (look.Seen != partConditionsSeen)
+            {
+                partConditionsSeen = look.Seen;
+                Log.Information($"Fleet Companion: sub part condition, {look.Seen}.");
+            }
+            if (look.Readings != null && partConditions.Offer(look.Readings) > 0)
                 Log.Debug($"Fleet Companion: {partConditions.Count} sub part condition reading(s) waiting for the next sync.");
             lock (warned) warned.Remove("part-condition");
         }
