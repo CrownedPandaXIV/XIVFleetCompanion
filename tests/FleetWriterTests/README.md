@@ -46,7 +46,7 @@ the app's own answers for made-up fleets. When the app changes any of them, refr
 
 ```
 t=../XIVFleetCompanion/tests/FleetWriterTests
-for f in parts routes trends edits fight-club; do node tests/db/$f-fixture.js $t/$f-fixture.json; done
+for f in parts routes trends edits fight-club calculator; do node tests/db/$f-fixture.js $t/$f-fixture.json; done
 node tests/themes-fixture.js $t/themes-fixture.json
 node tests/market-fixture.js $t/market-fixture.json
 node tests/db/plugin-database-fixture.js ../XIVFleetCompanion

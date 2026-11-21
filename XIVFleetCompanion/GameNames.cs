@@ -109,13 +109,14 @@ namespace XIVFleetCompanion
             {
                 var sectors = new List<SubSector>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineExploration>())
-                    sectors.Add(new SubSector((int)r.RowId, r.Location.ExtractText(), (int)r.Map.RowId, r.X, r.Y, r.Z, r.ExpReward, r.SurveyDurationmin, r.StartingPoint));
+                    sectors.Add(new SubSector((int)r.RowId, r.Location.ExtractText(), (int)r.Map.RowId, r.X, r.Y, r.Z, r.ExpReward, r.SurveyDurationmin, r.StartingPoint,
+                        r.Destination.ExtractText(), r.RankReq, r.SurveyDistance, r.CeruleumTankReq));
                 var maps = new Dictionary<int, string>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineMap>()) maps[(int)r.RowId] = r.Name.ExtractText();
                 var ranks = new List<SubRank>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineRank>()) ranks.Add(new SubRank((int)r.RowId, r.SpeedBonus, r.RangeBonus, r.ExpToNext, r.SurveillanceBonus, r.RetrievalBonus, r.FavorBonus));
                 var parts = new List<SubPartStat>();
-                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor));
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor, r.Rank, r.RepairMaterials));
                 if (sectors.Count > 0 && ranks.Count > 0 && parts.Count > 0) subGame = new SubGameData(sectors, maps, ranks, parts);
             }
             catch (Exception ex)

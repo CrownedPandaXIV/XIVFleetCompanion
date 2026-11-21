@@ -1099,6 +1099,97 @@ internal static partial class Program
               && SubRoutes.BuildStats(100, new[] { "W", "S", "W", "W" }, ranks, parts) == null
               && SubRoutes.BuildStats(99, new[] { "W", "W", "W", "W" }, ranks, parts) == null,
             "Sub Calculator: a stat the game data lacks is unknown, not 0");
+        SubCalculatorAgainstTheApp();
+    }
+
+    // The Planner's working out (SubCalculator) against the app's answers for made-up game data (calculator-fixture.json,
+    // written by the app's tests/db/calculator-fixture.js): stats, order, range, voyage, experience, loot, gil and wear.
+    private static void SubCalculatorAgainstTheApp()
+    {
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "calculator-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var root = doc.RootElement;
+        var g = root.GetProperty("game");
+        var all = g.GetProperty("sectors").EnumerateArray().Select(s => new SubSector(s.GetProperty("id").GetInt32(), s.GetProperty("location").GetString() ?? "",
+            s.GetProperty("map").GetInt32(), s.GetProperty("x").GetDouble(), s.GetProperty("y").GetDouble(), s.GetProperty("z").GetDouble(),
+            s.GetProperty("expReward").GetDouble(), s.GetProperty("surveyMinutes").GetDouble(), s.GetProperty("starting").GetBoolean(),
+            s.GetProperty("name").GetString() ?? "", s.GetProperty("rankReq").GetInt32(), s.GetProperty("surveyDistance").GetInt32(), s.GetProperty("tanks").GetInt32())).ToList();
+        var byId = all.Where(s => !s.Starting).ToDictionary(s => s.Id);
+        var starts = all.Where(s => s.Starting).ToList();
+        var ranks = g.GetProperty("ranks").EnumerateArray().ToDictionary(r => r.GetProperty("id").GetInt32(), r => new SubRank(r.GetProperty("id").GetInt32(),
+            r.GetProperty("speed").GetDouble(), r.GetProperty("range").GetDouble(), 0, r.GetProperty("surveillance").GetDouble(), r.GetProperty("retrieval").GetDouble(), r.GetProperty("favor").GetDouble()));
+        var partList = g.GetProperty("parts").EnumerateArray().Select(p => new SubPartStat(p.GetProperty("class").GetInt32(), p.GetProperty("slot").GetInt32(),
+            p.GetProperty("speed").GetDouble(), p.GetProperty("range").GetDouble(), p.GetProperty("surveillance").GetDouble(), p.GetProperty("retrieval").GetDouble(),
+            p.GetProperty("favor").GetDouble(), p.GetProperty("rank").GetInt32(), p.GetProperty("repairKits").GetInt32())).ToList();
+        var parts = partList.ToDictionary(p => (p.Class, p.Slot));
+        var kitCost = root.GetProperty("repairKitCost").GetDouble();
+        var data = SubCalculatorData.Shipped();
+        static double Price(uint id) => id % 97 * 10;
+        static bool Near(double? a, System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? a == null
+            : a is double x && Math.Abs(x - e.GetDouble()) <= 1e-5 * Math.Max(1, Math.Abs(e.GetDouble()));
+
+        int cases = 0, good = 0;
+        var firstWrong = "";
+        foreach (var c in root.GetProperty("cases").EnumerateArray())
+        {
+            cases++;
+            var letters = c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+            var rank = c.GetProperty("rank").GetInt32();
+            var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
+            var route = c.GetProperty("route").EnumerateArray().Select(x => byId[x.GetInt32()]).ToList();
+            if (c.GetProperty("bestOrder").GetBoolean() && route.Count > 1 && stats != null)
+                route = SubCalculator.BestOrder(route, SubRoutes.StartFor(route[0].Id, starts), stats.Speed);
+            var p = SubCalculator.PlanFor(route.Select(s => s.Id).ToList(), stats, letters.Select(l => SubRoutes.PartClass[l]).ToList(), byId, starts, partList, data, Price, kitCost);
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            var es = c.GetProperty("stats");
+            Want(stats != null && Near(stats.Surveillance, es.GetProperty("surveillance")) && Near(stats.Retrieval, es.GetProperty("retrieval"))
+                 && Near(stats.Speed, es.GetProperty("speed")) && Near(stats.Range, es.GetProperty("range")) && Near(stats.Favor, es.GetProperty("favor")), "stats");
+            Want(route.Select(s => s.Id).SequenceEqual(c.GetProperty("order").EnumerateArray().Select(x => x.GetInt32())), "order");
+            if (p == null) { wrong.Add("no plan"); }
+            else
+            {
+                Want(Near(p.Range, c.GetProperty("range")), "range");
+                Want(Near(p.Hours, c.GetProperty("hours")), "hours");
+                Want(Near(p.Exp, c.GetProperty("exp")) && Near(p.ExpSure, c.GetProperty("expSure")) && Near(p.ExpBest, c.GetProperty("expBest")), "experience");
+                Want(p.Tanks == c.GetProperty("tanks").GetInt32(), "tanks");
+                Want(Near(p.GilPerVoyage, c.GetProperty("gilPerVoyage")) && Near(p.GilPerDay, c.GetProperty("gilPerDay")) && Near(p.VoyagesPerDay, c.GetProperty("voyagesPerDay")), "gil");
+                Want(Near(p.KitsPerVoyage, c.GetProperty("kitsPerVoyage")) && Near(p.RepairGilPerDay, c.GetProperty("repairGilPerDay")), "repairs");
+                var ew = c.GetProperty("wear").EnumerateArray().ToList();
+                Want(ew.Count == p.Wear.Count && ew.Select((w, i) => w.ValueKind == System.Text.Json.JsonValueKind.Null ? p.Wear[i] == null
+                    : p.Wear[i] is { } pw && pw.Slot == w.GetProperty("slot").GetInt32() && Near(pw.Lost, w.GetProperty("lost")) && Near(pw.VoyagesLasting, w.GetProperty("voyagesLasting"))
+                      && Near(pw.KitsPerVoyage, w.GetProperty("kitsPerVoyage"))).All(x => x), "wear");
+                var esec = c.GetProperty("sectors").EnumerateArray().ToList();
+                Want(esec.Count == p.Sectors.Count && esec.Select((e, i) =>
+                {
+                    var sp = p.Sectors[i];
+                    if (sp.Sector.Id != e.GetProperty("id").GetInt32()) return false;
+                    var r = e.GetProperty("result");
+                    if (r.ValueKind == System.Text.Json.JsonValueKind.Null) return sp.Result == null;
+                    var res = sp.Result!;
+                    var need = r.GetProperty("need");
+                    var b = e.GetProperty("bonus");
+                    return res.Tier == r.GetProperty("tier").GetInt32() && res.TierSure == r.GetProperty("tierSure").GetString() && res.Retrieval == r.GetProperty("retrieval").GetString()
+                        && res.RetrievalSure == r.GetProperty("retrievalSure").GetString() && res.DoubleDip == r.GetProperty("doubleDip").GetString()
+                        && res.SureTier == r.GetProperty("sureTier").GetInt32() && res.SureRetrieval == r.GetProperty("sureRetrieval").GetString()
+                        && Near(res.Need.T2, need.GetProperty("t2")) && Near(res.Need.T3, need.GetProperty("t3")) && Near(res.Need.Normal, need.GetProperty("normal"))
+                        && Near(res.Need.Optimal, need.GetProperty("optimal")) && Near(res.Need.Favor, need.GetProperty("favor"))
+                        && sp.Bonus!.Sure == b.GetProperty("sure").GetInt32() && sp.Bonus.Best == b.GetProperty("best").GetInt32();
+                }).All(x => x), "sector results");
+                Want(p.MissingData.Select(s => s.Id).SequenceEqual(c.GetProperty("missingData").EnumerateArray().Select(x => x.GetInt32())), "missing data");
+                var el = c.GetProperty("loot").EnumerateArray().ToList();
+                Want(el.Count == p.Loot.Count && el.Select((e, i) =>
+                {
+                    var l = p.Loot[i];
+                    return l.ItemId == e.GetProperty("itemId").GetUInt32() && l.Tier == e.GetProperty("tier").GetInt32() && l.Low == e.GetProperty("low").GetInt32()
+                        && l.High == e.GetProperty("high").GetInt32() && Near(l.PerVoyage, e.GetProperty("perVoyage")) && Near(l.Gil, e.GetProperty("gil"))
+                        && l.Sectors.SequenceEqual(e.GetProperty("sectors").EnumerateArray().Select(x => x.GetString()!));
+                }).All(x => x), "loot");
+            }
+            if (wrong.Count == 0) good++;
+            else if (firstWrong.Length == 0) firstWrong = $" (first wrong: rank {rank} {string.Join("", letters)} route {string.Join(",", route.Select(s => s.Id))}: {string.Join(", ", wrong)})";
+        }
+        Check(cases >= 30 && good == cases, $"Sub Calculator: the plugin's plans match the app's for {good} of {cases} builds and routes{firstWrong}");
     }
 
     // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.

@@ -28,14 +28,18 @@ namespace XIVFleetCompanion
     /// <summary>One sector of a voyage SubmarineTracker recorded, from fleet_voyage_sectors_view (At in milliseconds).</summary>
     public sealed record VoyageSector(string FcId, long Register, string? SubName, double At, int Sector, int? Leg);
 
-    /// <summary>A sector from the game's files (SubmarineExploration): its letter, map, position, experience and survey time.</summary>
-    public sealed record SubSector(int Id, string Location, int Map, double X, double Y, double Z, double ExpReward, double SurveyMinutes, bool Starting);
+    /// <summary>A sector from the game's files (SubmarineExploration): its letter, map, position, experience and survey time;
+    /// for the Sub Calculator also its name, the rank it needs, its survey distance (range) and the ceruleum it takes.</summary>
+    public sealed record SubSector(int Id, string Location, int Map, double X, double Y, double Z, double ExpReward, double SurveyMinutes, bool Starting,
+        string Name = "", int RankReq = 0, int SurveyDistance = 0, int Tanks = 0);
 
     /// <summary>A rank from the game's files (SubmarineRank): its stats before parts, and experience to the next.</summary>
     public sealed record SubRank(int Id, double? Speed, double? Range, double ExpToNext, double? Surveillance = null, double? Retrieval = null, double? Favor = null);
 
-    /// <summary>A part's stats from the game's files (SubmarinePart), by class (1 Whale ... 10 Syldra+) and slot (0 hull ... 3 bridge).</summary>
-    public sealed record SubPartStat(int Class, int Slot, double Speed, double Range, double? Surveillance = null, double? Retrieval = null, double? Favor = null);
+    /// <summary>A part's stats from the game's files (SubmarinePart), by class (1 Whale ... 10 Syldra+) and slot (0 hull ... 3 bridge);
+    /// for the Sub Calculator also the part's rank (wear) and the repair materials a full repair takes.</summary>
+    public sealed record SubPartStat(int Class, int Slot, double Speed, double Range, double? Surveillance = null, double? Retrieval = null, double? Favor = null,
+        int PartRank = 0, int RepairKits = 0);
 
     /// <summary>A build's five stats, in the game's order.</summary>
     public sealed record SubStats(double Surveillance, double Retrieval, double Speed, double Range, double Favor);
@@ -61,8 +65,11 @@ namespace XIVFleetCompanion
     /// <summary>A sub with everything the Subs page shows (gil a day rounded to whole gil, as the app; dates in milliseconds).</summary>
     public sealed record SubRoute(long Cid, string SubName, int? Slot, int Rank, string CurrentSetup, string CurrentRoute, (int Id, string Name)? CurrentMap,
         string TargetRoute, double? TargetGilDay, double? CurrentGilDay, double? Speed, double? Range, int? RankProgressPct, bool CraftEnabled,
-        long? ReturnTime, SubRankUp RankUp)
+        long? ReturnTime, SubRankUp RankUp, int[]? Stops = null)
     {
+        /// <summary>The sectors of its current route, by id (Stops), for the Sub Calculator's Planner.</summary>
+        public int[] Sectors => Stops ?? Array.Empty<int>();
+
         /// <summary>Not on the route Fight Club says is best at its rank (rank 85 and up): the Route Optimization page.</summary>
         public bool Suboptimal => TargetRoute.Length > 0 && TargetRoute != CurrentRoute;
 
@@ -181,7 +188,7 @@ namespace XIVFleetCompanion
 
         // Letter -> SubmarinePart class: Whale, Unkiu, Shark, Coelacanth, Syldra, then the same modified (as the app's
         // LETTER_TO_PART_CLASS_ID, checked against the game's tooltips there).
-        private static readonly Dictionary<string, int> PartClass = new()
+        internal static readonly Dictionary<string, int> PartClass = new()
         {
             ["W"] = 1, ["U"] = 2, ["S"] = 3, ["C"] = 4, ["Y"] = 5, ["W+"] = 6, ["U+"] = 7, ["S+"] = 8, ["C+"] = 9, ["Y+"] = 10,
         };
@@ -191,7 +198,7 @@ namespace XIVFleetCompanion
 
         // JavaScript's Math.hypot as V8 does it (largest first, then a compensated sum), so voyage lengths, cut down to
         // whole seconds, come out the same to the last second.
-        private static double Hypot(double a, double b, double c)
+        internal static double Hypot(double a, double b, double c)
         {
             var values = new[] { Math.Abs(a), Math.Abs(b), Math.Abs(c) };
             var max = values.Max();
@@ -352,7 +359,7 @@ namespace XIVFleetCompanion
             return (Math.Max(0, gained) / spanDays, spanDays);
         }
 
-        private static (double Exp, double Hours)? Voyage(List<SubSector?> sectors, SubSector? start, double speed)
+        internal static (double Exp, double Hours)? Voyage(List<SubSector?> sectors, SubSector? start, double speed)
         {
             if (sectors.Count == 0 || sectors.Count > 5 || start == null || sectors.Any(s => s == null)) return null;
             var s = Math.Max(1, speed);
@@ -369,7 +376,7 @@ namespace XIVFleetCompanion
             return (exp, seconds / 3600);
         }
 
-        private static SubSector? StartFor(int sectorId, List<SubSector> startingPoints)
+        internal static SubSector? StartFor(int sectorId, List<SubSector> startingPoints)
         {
             SubSector? found = null;
             foreach (var p in startingPoints) if (p.Id <= sectorId && (found == null || p.Id > found.Id)) found = p;
@@ -631,7 +638,7 @@ namespace XIVFleetCompanion
                         switchAt?.At is double sa && sa != 0 ? sa : null, switchAt?.Voyages is int sv && sv != 0 ? sv : null, fightClubNext) : null);
 
                 output.Add(new SubRoute(cid, sub.SubName, sub.Slot, rank, string.Join("-", parts), currentRoute, map, targetRoute, targetGil, currentGil,
-                    speed, range, progress, sub.CraftEnabled, sub.ReturnTime, rankUp));
+                    speed, range, progress, sub.CraftEnabled, sub.ReturnTime, rankUp, stops.ToArray()));
             }
             return output;
         }

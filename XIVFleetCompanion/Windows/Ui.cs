@@ -62,6 +62,17 @@ internal static class Ui
         return ImGui.Selectable(label, selected, flags, size);
     }
 
+    // A small button in a table cell; nothing in an export.
+    public static bool SmallButton(string label)
+    {
+        if (Capture is { } c)
+        {
+            c.Add("");
+            return false;
+        }
+        return ImGui.SmallButton(label);
+    }
+
     public static bool InputInt(string label, ref int value, int step = 1, int stepFast = 100)
     {
         if (Capture is { } c)

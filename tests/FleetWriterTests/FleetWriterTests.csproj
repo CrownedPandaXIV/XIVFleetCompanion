@@ -33,6 +33,7 @@
     <Compile Include="..\..\XIVFleetCompanion\Market.cs" Link="Market.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubRoutes.cs" Link="SubRoutes.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubCalculatorData.cs" Link="SubCalculatorData.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\SubCalculator.cs" Link="SubCalculator.cs" />
     <Compile Include="..\..\XIVFleetCompanion\PartCondition.cs" Link="PartCondition.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Loot.cs" Link="Loot.cs" />
     <Compile Include="..\..\XIVFleetCompanion\ShoppingList.cs" Link="ShoppingList.cs" />
@@ -66,6 +67,8 @@
     <None Include="market-fixture.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Made-up fleets and game data, and the app's Subs route answers (the app's tests/db/routes-fixture.js), for SubRoutes. -->
     <None Include="routes-fixture.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Made-up game data and the app's Sub Calculator answers (the app's tests/db/calculator-fixture.js), for SubCalculator. -->
+    <None Include="calculator-fixture.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- A made-up recorded history and the app's Trends answers (the app's tests/db/trends-fixture.js), for the Trends page. -->
     <None Include="trends-fixture.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The app's edits and the tables after each (the app's tests/db/edits-fixture.js), for the in-game edits. -->

@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends, Planner }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -129,6 +129,7 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Summary: DrawSummary(); break;
             case Tab.Subs: DrawSubs(); break;
             case Tab.Routes: DrawRoutes(); break;
+            case Tab.Planner: DrawPlanner(); break;
             case Tab.Supplies: DrawSupplies(); break;
             case Tab.Parts: DrawParts(); break;
             case Tab.Roster: DrawRoster(); break;
@@ -167,11 +168,11 @@ public partial class MainWindow : Window, IDisposable
     {
         [Tab.Summary] = "Summary", [Tab.Trends] = "Trends", [Tab.Subs] = "Subs", [Tab.Routes] = "Route Optimization", [Tab.Parts] = "Parts",
         [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Character Roster", [Tab.Retainers] = "Retainers",
-        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs",
+        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs", [Tab.Planner] = "Planner",
     };
 
     // The sidebar's groups (the app's sidebar has the same).
-    private static readonly string[] Groups = { "Overview", "Submarines", "Characters", "Gil", "Tools", "System" };
+    private static readonly string[] Groups = { "Overview", "Submarines", "Sub Calculator", "Characters", "Gil", "Tools", "System" };
 
     /// <summary>Whether a page is shown for what the player runs (the app's shared/play-style.js hiddenViews).</summary>
     public static bool PageUsed(Tab tab, bool subs, bool retainers) => tab switch
@@ -231,7 +232,7 @@ public partial class MainWindow : Window, IDisposable
         foreach (var group in Groups)
         {
             // Retainers only: no Submarines group at all.
-            if (group == "Submarines" && !subsOn) continue;
+            if ((group == "Submarines" || group == "Sub Calculator") && !subsOn) continue;
             var open = true;
             if (!folded)
             {
@@ -260,6 +261,9 @@ public partial class MainWindow : Window, IDisposable
                         readyForParts > 0 ? PartsPlanner.ReadyText(readyList) : "What each sub's next build needs");
                     if (subsOn) Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
                     if (subsOn) Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
+                    break;
+                case "Sub Calculator":
+                    Entry(Tab.Planner, FontAwesomeIcon.Calculator, "Planner", folded, null, p.Dim, "Try a build and a route: stats, voyage, loot, gil and wear");
                     break;
                 case "Characters":
                     Entry(Tab.Roster, FontAwesomeIcon.Users, "Character Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
@@ -860,6 +864,7 @@ public partial class MainWindow : Window, IDisposable
         new("targetGilDay", "Target gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),
         // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
+        new("planner", "Planner", sub => { if (Ui.SmallButton($"Open in Planner##planner{sub.Cid}{sub.SubName}")) OpenInPlanner(sub.Cid, sub.SubName); Hover("Open this sub's build and route in Sub Calculator → Planner."); }, New: true),
         new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
 

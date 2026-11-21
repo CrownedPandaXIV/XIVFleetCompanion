@@ -7,11 +7,24 @@ All notable changes to the plugin are recorded here. Versions follow
 
 The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
 
+- **Sub Calculator → Planner (new page, as in the app).** Pick a rank, four parts and up to five sectors, or start
+  from one of your subs, and see:
+  - the build's surveillance, retrieval, speed, range and favor;
+  - the range the route uses against the sub's, the voyage length, experience and ceruleum, and a Best order
+    button that puts the sectors in the order using the least range;
+  - for each sector, the loot tier, retrieval and double dip the build reaches, in amber where XIVStats and
+    Pepper's guide disagree, and how much more of a stat it needs;
+  - the loot it can bring back, gil per voyage and per day, experience per day with bonus experience, and repair
+    kits a day (parts' wear as Submarine Tracker predicts it).
+  The plugin's figures are checked against the app's for 30 made-up builds and routes. `/xivfleet planner` opens it.
+- **Choosing one of your subs on the Planner:** a panel grouped by account, then character (with world and Free
+  Company), each group folding away, with a search for character, world, account, Free Company or sub name. Each sub
+  shows its rank, build, route and where it is: at sea until a time, back and waiting, or in port.
+- **Open in Planner** on each row of the Subs and Route Optimization pages loads that sub on the Planner.
 - **The repair kit price is set on the Supplies page**, beside what to buy, instead of in Settings (as in the app).
 - **Sub Calculator data.** The plugin now ships the loot each sector can give, by tier, and the surveillance,
   retrieval and favor breakpoints, from XIVStats, with Pepper's FFXIV Ship Guide's breakpoints beside them. Each
-  release reads them again, so new findings arrive with updates. Nothing shows it yet: the Sub Calculator pages
-  come next.
+  release reads them again, so new findings arrive with updates. The Planner uses it.
 - **All five sub stats.** Surveillance, retrieval and favor are now read from the game's files alongside speed and
   range, for the Sub Calculator.
 - **Sub part condition is recorded.** While a character is in the Free Company's workshop, the plugin reads each

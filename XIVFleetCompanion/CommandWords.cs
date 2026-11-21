@@ -11,7 +11,7 @@ public static class CommandWords
 {
     /// <summary>Pages, by their MainWindow.Tab names in lower case, in the order the help lists them.</summary>
     public static readonly string[] Pages =
-        { "summary", "subs", "routes", "supplies", "parts", "roster", "retainers", "fcs", "inventory", "salvage", "income", "market", "trends", "pcs", "status", "settings" };
+        { "summary", "subs", "routes", "supplies", "parts", "planner", "roster", "retainers", "fcs", "inventory", "salvage", "income", "market", "trends", "pcs", "status", "settings" };
 
     public const string Check = "check";
     public const string SpeedTest = "speedtest";
