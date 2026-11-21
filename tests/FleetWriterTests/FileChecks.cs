@@ -276,7 +276,8 @@ internal static partial class Program
             await copy.OpenAsync();
             Check(await Count(copy, "SELECT count(*) FROM companion_character_current WHERE name = 'Backed'") == 1, "backup: the copy has the fleet and opens on its own");
         }
-        Check(!FileDatabase.BackupDue(path, DateTime.Now), "backup: not due again the same day");
+        File.SetLastWriteTime(made, day);   // as if made then: the check below doesn't depend on today's date
+        Check(!FileDatabase.BackupDue(path, day.AddHours(10)) && FileDatabase.BackupDue(path, day.AddDays(1)), "backup: not due again the same day, due the next");
         var second = await FileDatabase.BackUpAsync(conn, path, day.AddHours(1));
         Check(Path.GetFileName(second) == "fleet-2025-03-07-103000.db", $"backup: Back up now the same day keeps both ({Path.GetFileName(second)})");
         // As if made on those days, so the eight more below are newer.
@@ -353,7 +354,7 @@ internal static partial class Program
             await FileDatabase.EnsureAsync(conn, FileDatabase.Files.Embedded(), $"game {seed}");
             for (var i = 0; i < count; i++)
             {
-                var cid = (ulong)(seed * 100_000 + i);
+                var cid = 18014498578000000UL + (ulong)(seed * 100_000 + i);   // real-size: past what a double holds exactly
                 await FleetWriter.WriteCurrentCharactersAsync(conn, new List<FleetWriter.CharacterSnapshot>
                 {
                     new() { Cid = cid, Name = $"G{seed} C{i}", World = "Maduin", Gil = i, AccountLabel = $"game{seed}", FcId = 9232379236109516865 },
@@ -446,8 +447,9 @@ internal static partial class Program
         Check(await Count(conn, "SELECT count(*) FROM companion_character_current") == 1 && await Count(conn, "SELECT count(*) FROM companion_character_current WHERE name = 'Then' AND gil = 100") == 1
               && await Count(conn, "SELECT count(*) FROM sub_build_rules") == 1,
             $"restore: the fleet is as it was in the backup ({text})");
-        Check(await Count(other, "SELECT count(*) FROM companion_character_current WHERE name = 'Then'") == 1,
-            "restore: a game that had the file open sees the restored fleet straight away, without restarting");
+        Check(await Count(other, "SELECT count(*) FROM companion_character_current WHERE name = 'Then'") == 1
+              && await Count(other, "SELECT count(*) FROM companion_file_info WHERE key = 'restored_at' AND value = '2026-11-07T10:30:00.0000000'") == 1,
+            "restore: a game that had the file open sees the restored fleet straight away, without restarting, and that it was restored (so it writes everything again)");
         await other.DisposeAsync();
         var before = FileDatabase.Backups(path).FirstOrDefault(f => f.Name.Contains("before-restore"));
         Check(before != null && text.Contains(before.Name) && text.Contains("The file is whole"), $"restore: the fleet as it was just before is kept as a backup ({before?.Name})");

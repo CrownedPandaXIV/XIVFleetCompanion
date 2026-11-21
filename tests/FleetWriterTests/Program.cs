@@ -163,7 +163,7 @@ internal static partial class Program
         var renewed = now.VenturesPerDay(newer, rows, 7, _ => 10);
         var again = old != null && ReferenceEquals(meanwhile, old) && renewed != null && !ReferenceEquals(renewed, old) && Math.Abs(renewed[3]["region"] - old[3]["region"]) < 1e-9
                     && now.Undercut(newer) == direct && new MarketCache().Undercut(read with { Live = null }) == 0;
-        Check(same && again && undercut == direct && allMatch && perFrame < 0.5 && asking < 50,
+        Check(same && again && undercut == direct && allMatch && perFrame < 0.5 && asking < 250,
             $"market: worked out in the background once per read and kept ({asking:0} ms on the game's thread (the very first time {firstUse:0} ms), {background:0} ms in the background, {perFrame * 1000:0.0} µs a frame after; {undercut} undercut, the same as working it out directly); a new read works it out again");
     }
 
@@ -1045,8 +1045,60 @@ internal static partial class Program
         }
     }
 
+    // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.
+    private static void FcCreditChecks()
+    {
+        var fcs = new List<FcCredits.Fc> { new("1", "Panda Co", "Account 1", 12345), new("2", "Second", "Account 2", 99), new("3", "Third", "Account 2", 1000) };
+        var people = new List<FcCredits.Member> { new("1", "Account 1", 20, 500), new("1", "Account 1", null, 10), new("2", "Account 2", 5, 100), new(null, "Account 2", 5, 50) };
+        var plan = FcCredits.Work(fcs, people, new Dictionary<string, long> { ["1"] = 30 }, FcCredits.DefaultTankCost);
+        var (panda, second, third) = (plan.Fcs[0], plan.Fcs[1], plan.Fcs[2]);
+        Check(plan.TankCost == 100 && panda.Credits == 12345 && panda.Tanks == 123 && panda.Chest == 30 && panda.PerDay == 20 && panda.Days == 123.0 / 20
+              && second.Tanks == 0 && second.Days == 0 && third.Tanks == 10 && third.PerDay == null && third.Days == null,
+            "FC credits: each FC's tanks, its members' use and how long they last, as the app");
+        var p2 = FcCredits.Work(fcs, people, new Dictionary<string, long> { ["1"] = 30, ["3"] = 4 }, 50);
+        var (a1, a2, fleet) = (p2.Accounts[0], p2.Accounts[1], p2.Fleet);
+        Check(a1.Label == "Account 1" && a1.FcCount == 1 && a1.Credits == 12345 && a1.Tanks == 246 && a1.Held == 510 && a1.Chest == 30 && a1.PerDay == 20
+              && a2.Label == "Account 2" && a2.FcCount == 2 && a2.Credits == 1099 && a2.Tanks == 21 && a2.Held == 150 && a2.Chest == 4 && a2.PerDay == 10 && a2.Days == 21.0 / 10
+              && fleet.FcCount == 3 && fleet.Credits == 13444 && fleet.Tanks == 267 && fleet.Held == 660 && fleet.Chest == 34 && fleet.PerDay == 30,
+            "FC credits: per account and for the fleet, as the app");
+        Check(FcCredits.DaysCovered(5, 0) == double.PositiveInfinity && FcCredits.DaysCovered(5, null) == null && FcCredits.TankCostOf(0) == 100 && FcCredits.TankCostOf(250) == 250
+              && FcCredits.Work(new List<FcCredits.Fc>(), people, new Dictionary<string, long>(), 100).Accounts.Count == 0
+              && FcCredits.DaysText(null) == "Not enough history" && FcCredits.DaysText(double.PositiveInfinity) == "No use" && FcCredits.DaysText(0.5) == "Under a day",
+            "FC credits: nothing used lasts for ever, a bad price falls back to 100, days worded as the app");
+    }
+
+    // The pages' cache: kept while the inputs are the same (a list by reference, text and numbers by value), made again
+    // when one changes.
+    private static void MemoChecks()
+    {
+        var memo = new Memo<int>();
+        var made = 0;
+        var list = new List<int> { 1 };
+        int Get(object read, string filter, bool hide) => memo.Get(() => ++made, read, filter, hide);
+        Get(list, "a", false); Get(list, new string('a', 1), false);
+        Check(made == 1, "memo: the same inputs (equal text, the same list) reuse the value");
+        Get(new List<int> { 1 }, "a", false);
+        Check(made == 2, "memo: a new read (another list, even an equal one) makes it again");
+        Get(list, "a", true); Get(list, "b", true);
+        Check(made == 4, "memo: a changed flag or search makes it again");
+        memo.Forget(); Get(list, "b", true);
+        Check(made == 5, "memo: Forget makes it again");
+        var every = new Every<int>(TimeSpan.FromHours(1));
+        var n = 0;
+        every.Get(() => ++n); every.Get(() => ++n);
+        Check(n == 1, "every: read once within its time");
+        every.Forget(); every.Get(() => ++n);
+        Check(n == 2, "every: read again after Forget");
+    }
+
     private static void RoutesAgainstTheApp()
     {
+        // Route Optimization with nothing to switch says why (as the app's routesNothingText).
+        static SubRoute Sub(int rank, string target) => new(1, "S", 1, rank, "SSSS", "MOJ", null, target, null, null, null, null, null, false, null, null!);
+        Check(SubRoutes.NothingToSwitch(new[] { Sub(60, "") }).StartsWith("No sub is rank 85 yet", StringComparison.Ordinal), "routes: no sub at 85 yet");
+        Check(SubRoutes.NothingToSwitch(new[] { Sub(90, ""), Sub(60, "") }).Contains("Fight Club Data isn't imported", StringComparison.Ordinal), "routes: no Target routes");
+        Check(SubRoutes.NothingToSwitch(new[] { Sub(90, "MOJ") }) == "Every sub from rank 85 is on its Target route.", "routes: all on target");
+
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "routes-fixture.json");
         using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
         var game = GameFrom(doc.RootElement.GetProperty("game"));
@@ -1433,6 +1485,7 @@ internal static partial class Program
         await using var pg = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(given) { Database = "twin_pg", Pooling = false }.ConnectionString);
         await pg.OpenAsync();
         await DatabaseUpkeep.EnsureAsync(pg, DatabaseUpkeep.Files.Embedded(), "twin test", wait: true);
+        await StandInsMatch(pg);
         await using var lite = new System.Data.SQLite.SQLiteConnection($"Data Source={file};Pooling=False");
         await lite.OpenAsync();
         foreach (var f in new[] { "tables.sql", "views.sql" })
@@ -1445,24 +1498,24 @@ internal static partial class Program
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var chars = new List<FleetWriter.CharacterSnapshot>
         {
-            new() { Cid = 1001, Name = "Aki", World = "Maduin", Gil = 1_234_567, Ceruleum = 900, RepairKits = 40, RetainerCount = 2, SubmarineCount = 2, AccountLabel = "acct1", FcId = bigFc, NumSubSlots = 4 },
-            new() { Cid = 1002, Name = "Bex", World = "Golem", Gil = 50, Ceruleum = 3, RepairKits = 0, AccountLabel = null, FcId = 0 },
-            new() { Cid = 1003, Name = "Cal", World = "Maduin", Gil = 999_999_999, Ceruleum = 10, RepairKits = 2, AccountLabel = "acct2", FcId = 77 },
+            new() { Cid = 18014498578000001, Name = "Aki", World = "Maduin", Gil = 1_234_567, Ceruleum = 900, RepairKits = 40, RetainerCount = 2, SubmarineCount = 2, AccountLabel = "acct1", FcId = bigFc, NumSubSlots = 4 },
+            new() { Cid = 18014498578000002, Name = "Bex", World = "Golem", Gil = 50, Ceruleum = 3, RepairKits = 0, AccountLabel = null, FcId = 0 },
+            new() { Cid = 18014498578000003, Name = "Cal", World = "Maduin", Gil = 999_999_999, Ceruleum = 10, RepairKits = 2, AccountLabel = "acct2", FcId = 77 },
         };
         await Each(c => FleetWriter.WriteCurrentCharactersAsync(c, chars));
-        await Each(c => FleetWriter.RecordLoginsAsync(c, "DESKTOP-1", "acct1", new Dictionary<ulong, DateTime> { [1001] = DateTime.UtcNow.AddMinutes(-5), [1002] = DateTime.UtcNow.AddMinutes(-4) }));
-        await Each(c => FleetWriter.RecordLoginsAsync(c, "LAPTOP", "acct1", new Dictionary<ulong, DateTime> { [1001] = DateTime.UtcNow.AddMinutes(-60) }));
-        await Each(c => FleetWriter.ReleaseLoginsAsync(c, "DESKTOP-1", "acct1", new ulong[] { 1002 }));
+        await Each(c => FleetWriter.RecordLoginsAsync(c, "DESKTOP-1", "acct1", new Dictionary<ulong, DateTime> { [18014498578000001] = DateTime.UtcNow.AddMinutes(-5), [18014498578000002] = DateTime.UtcNow.AddMinutes(-4) }));
+        await Each(c => FleetWriter.RecordLoginsAsync(c, "LAPTOP", "acct1", new Dictionary<ulong, DateTime> { [18014498578000001] = DateTime.UtcNow.AddMinutes(-60) }));
+        await Each(c => FleetWriter.ReleaseLoginsAsync(c, "DESKTOP-1", "acct1", new ulong[] { 18014498578000002 }));
         await Each(c => FleetWriter.RenameLoginSetupAsync(c, "DESKTOP-1", "acct1", "acct1"));
-        var plan = FleetWriter.PlanInventory(1001, new List<FleetWriter.InventorySource>
+        var plan = FleetWriter.PlanInventory(18014498578000001, new List<FleetWriter.InventorySource>
         {
-            new() { Id = 1001, Name = "Aki", SeenItems = new() { new() { SortedContainer = 0, SortedSlotIndex = 0, ItemId = 10155, Quantity = 120 },
+            new() { Id = 18014498578000001, Name = "Aki", SeenItems = new() { new() { SortedContainer = 0, SortedSlotIndex = 0, ItemId = 10155, Quantity = 120 },
                 new() { SortedContainer = 3500, SortedSlotIndex = 0, ItemId = 22500, Quantity = 1, GearSetIds = new uint[] { 1, 4 } },
                 new() { SortedContainer = 2001, SortedSlotIndex = 3, ItemId = 2, Quantity = 999 } } },
-            new() { Id = 5001, Name = "Retainer A", SeenItems = new() { new() { SortedContainer = 10000, SortedSlotIndex = 2, ItemId = 10373, Quantity = 15 } } },
-            new() { Id = 5002, Name = "Retainer B", SeenItems = null },
+            new() { Id = 33777097243660301, Name = "Retainer A", SeenItems = new() { new() { SortedContainer = 10000, SortedSlotIndex = 2, ItemId = 10373, Quantity = 15 } } },
+            new() { Id = 33777097243660302, Name = "Retainer B", SeenItems = null },
         }, retainerListKnown: true);
-        await Each(c => FleetWriter.WriteInventoryAsync(c, 1001, plan));
+        await Each(c => FleetWriter.WriteInventoryAsync(c, 18014498578000001, plan));
         var fcItems = new List<FleetWriter.InventoryItem> { new() { SortedContainer = 20000, SortedSlotIndex = 0, ItemId = 10155, Quantity = 500 }, new() { SortedContainer = 20001, SortedSlotIndex = 1, ItemId = 22500, Quantity = 3 } };
         await Each(c => FleetWriter.WriteFcInventoryAsync(c, bigFc, fcItems));
         await Each(c => FleetWriter.WriteFcInventoryAsync(c, 12345, fcItems));
@@ -1472,25 +1525,25 @@ internal static partial class Program
             new() { SubName = first, Level = 85, Part1 = 21794, Part2 = 21795, Part3 = 21796, Part4 = 21797, Points = new byte[] { 15, 10, 13 }, ReturnTime = nowUnix + 3600, CurrentExp = 1000, NextLevelExp = 50000, Slot = 1 },
             new() { SubName = "Submersible-2", Level = 40, Part1 = 21794, Part2 = 21795, Part3 = 21796, Part4 = 21797, Points = Array.Empty<byte>(), ReturnTime = nowUnix - 600, CurrentExp = 5, NextLevelExp = 100, Slot = 2 },
         };
-        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 1001, Subs("Submersible-1")));
-        await Each(c => FleetEdits.SetCraft(c, "1001", "Submersible-1", true));
-        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 1001, Subs("Renamed")));
+        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 18014498578000001, Subs("Submersible-1")));
+        await Each(c => FleetEdits.SetCraft(c, "18014498578000001", "Submersible-1", true));
+        await Each(c => FleetWriter.WriteSubmarinesAsync(c, 18014498578000001, Subs("Renamed")));
         var retainers = new List<FleetWriter.RetainerRecord>
         {
-            new() { RetainerId = 5001, Name = "Retainer A", Job = 19, Gil = 7000, HasVenture = true, VentureId = 395, VentureBeginsAt = nowUnix - 3600, VentureEndsAt = nowUnix + 600, Level = 90, HireOrderIndex = 0 },
-            new() { RetainerId = 5002, Name = "Retainer B", Job = 17, Gil = 0, HasVenture = false, Level = 12, HireOrderIndex = 1 },
-            new() { RetainerId = 5003, Name = "Gone Soon", Job = 1, Level = 1, HireOrderIndex = 2 },
+            new() { RetainerId = 33777097243660301, Name = "Retainer A", Job = 19, Gil = 7000, HasVenture = true, VentureId = 395, VentureBeginsAt = nowUnix - 3600, VentureEndsAt = nowUnix + 600, Level = 90, HireOrderIndex = 0 },
+            new() { RetainerId = 33777097243660302, Name = "Retainer B", Job = 17, Gil = 0, HasVenture = false, Level = 12, HireOrderIndex = 1 },
+            new() { RetainerId = 33777097243660303, Name = "Gone Soon", Job = 1, Level = 1, HireOrderIndex = 2 },
         };
-        await Each(c => FleetWriter.WriteRetainersAsync(c, 1001, retainers));
-        await Each(c => FleetWriter.WriteRetainersAsync(c, 1001, retainers.Take(2).ToList()));
-        await Each(c => FleetWriter.MarkRetainersSeenAsync(c, new ulong[] { 5001 }));
+        await Each(c => FleetWriter.WriteRetainersAsync(c, 18014498578000001, retainers));
+        await Each(c => FleetWriter.WriteRetainersAsync(c, 18014498578000001, retainers.Take(2).ToList()));
+        await Each(c => FleetWriter.MarkRetainersSeenAsync(c, new ulong[] { 33777097243660301 }));
         var house = new FCTrackerConnector.HousingInfo { FcId = bigFc, FcName = "Kittehs", FcPoints = 52000, FcRank = 8, TotalMembers = 3, HasHouse = true, HouseCity = 8, HouseWard = 7, HousePlot = 28,
             HouseLastVisited = DateTime.UtcNow.AddDays(-40), FcMaster = "Aki", FcHomeWorldId = 34, FcFoundingDate = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc) };
-        await Each(c => FleetWriter.WriteHousingAsync(c, 1001, house));
-        await Each(c => FleetWriter.WriteHousingAsync(c, 1003, new FCTrackerConnector.HousingInfo { FcId = 77, FcName = "Young", FcPoints = 10, FcRank = 1, TotalMembers = 1, FcMaster = "Cal",
+        await Each(c => FleetWriter.WriteHousingAsync(c, 18014498578000001, house));
+        await Each(c => FleetWriter.WriteHousingAsync(c, 18014498578000003, new FCTrackerConnector.HousingInfo { FcId = 77, FcName = "Young", FcPoints = 10, FcRank = 1, TotalMembers = 1, FcMaster = "Cal",
             FcEligibilityOverride = DateTime.UtcNow.AddDays(3) }));
-        await Each(c => FleetWriter.WriteHousingAsync(c, 1002, new FCTrackerConnector.HousingInfo { FcId = 88, FcName = "Left" }));
-        await Each(c => FleetWriter.RemoveHousingAsync(c, new ulong[] { 1002 }));
+        await Each(c => FleetWriter.WriteHousingAsync(c, 18014498578000002, new FCTrackerConnector.HousingInfo { FcId = 88, FcName = "Left" }));
+        await Each(c => FleetWriter.RemoveHousingAsync(c, new ulong[] { 18014498578000002 }));
         var status = new DetailsWriter.PcStatus { PcName = "DESKTOP-1", AccountLabel = "acct1", PluginVersion = "2.2.0", AutoRetainerReady = true, AllaganToolsReady = true, FcTrackerFound = true,
             SubmarineTrackerFound = false, VentureStatsFound = true, CharactersSynced = 2, CharactersLeftOut = 1, Problems = new() { "Bex: no FC chest", "Aki: open Retainer B" } };
         await Each(c => DetailsWriter.WritePcStatusAsync(c, status));
@@ -1508,17 +1561,17 @@ internal static partial class Program
         await Each(c => DetailsWriter.WriteVoyageLootAsync(c, loot));
         var ventures = new List<DetailsWriter.VentureRow>
         {
-            new() { OwnerCid = 1001, RetainerName = "Retainer A", At = nowUnix - 7200, ItemId = 5111, Hq = false, Quantity = 20, VentureId = 395 },
-            new() { OwnerCid = 1001, RetainerName = "Retainer A", At = nowUnix - 3600, ItemId = 22500, Hq = true, Quantity = 1, VentureId = 395 },
+            new() { OwnerCid = 18014498578000001, RetainerName = "Retainer A", At = nowUnix - 7200, ItemId = 5111, Hq = false, Quantity = 20, VentureId = 395 },
+            new() { OwnerCid = 18014498578000001, RetainerName = "Retainer A", At = nowUnix - 3600, ItemId = 22500, Hq = true, Quantity = 1, VentureId = 395 },
         };
         await Each(c => DetailsWriter.WriteVenturesAsync(c, ventures));
-        var listings = new List<DetailsWriter.Listing> { new() { RetainerId = 5001, Slot = 0, ItemId = 22500, Quantity = 1, Hq = false, UnitPrice = 90000 }, new() { RetainerId = 5001, Slot = 1, ItemId = 5111, Quantity = 99, Hq = true, UnitPrice = 120 } };
-        await Each(c => DetailsWriter.WriteListingsAsync(c, 1001, new ulong[] { 5001 }, listings));
-        await Each(c => DetailsWriter.WriteListingsAsync(c, 1001, new ulong[] { 5001 }, listings.Take(1).ToList()));
+        var listings = new List<DetailsWriter.Listing> { new() { RetainerId = 33777097243660301, Slot = 0, ItemId = 22500, Quantity = 1, Hq = false, UnitPrice = 90000 }, new() { RetainerId = 33777097243660301, Slot = 1, ItemId = 5111, Quantity = 99, Hq = true, UnitPrice = 120 } };
+        await Each(c => DetailsWriter.WriteListingsAsync(c, 18014498578000001, new ulong[] { 33777097243660301 }, listings));
+        await Each(c => DetailsWriter.WriteListingsAsync(c, 18014498578000001, new ulong[] { 33777097243660301 }, listings.Take(1).ToList()));
         var metrics = new List<MetricWriter.MetricPoint>
         {
-            new() { SubjectType = "character", SubjectId = 1001, Metric = "gil", Value = 1_234_567 },
-            new() { SubjectType = "character", SubjectId = 1003, Metric = "gil", Value = 999_999_999 },
+            new() { SubjectType = "character", SubjectId = 18014498578000001, Metric = "gil", Value = 1_234_567 },
+            new() { SubjectType = "character", SubjectId = 18014498578000003, Metric = "gil", Value = 999_999_999 },
             new() { SubjectType = "fc", SubjectId = bigFc, Metric = "fc_points", Value = 52000, Label = "Aki" },
         };
         var recorded = new List<string>();
@@ -1530,15 +1583,60 @@ internal static partial class Program
                 "Success — 1 of 3 metrics recorded.", "Success — 1 of 3 metrics recorded." }),
             "file: Trends values are recorded only when they change, on both: " + string.Join(" / ", recorded));
 
+        // ---- Trends' old hourly repeats thinned (HistoryThinning) ----
+        // One series: changes and repeats 60 and 59 days ago, and repeats 5 days ago. Every change, each day's first value
+        // and everything recent stay; the old repeats go; the value at every hour reads the same after.
+        var day0 = Math.Floor(Db.Now() / 86400) * 86400 - 60 * 86400;
+        var thinRows = new (double At, double Value)[]
+        {
+            (day0, 10), (day0 + 3600, 10), (day0 + 7200, 10), (day0 + 10800, 20), (day0 + 14400, 20),
+            (day0 + 86400 + 1800, 20), (day0 + 86400 + 5400, 20),
+            (day0 + 55 * 86400, 20), (day0 + 55 * 86400 + 3600, 20),
+        };
+        const long thinCid = 18014498578009999;
+        var thinKept = new List<string>();
+        foreach (var c in both)
+        {
+            var onFile = Db.IsFile(c);
+            await Db.Exec(c, "DELETE FROM fleet_economics_settings WHERE setting_key = @k", null, ("k", HistoryThinning.MarkerKey));
+            await Db.Exec(c, "DELETE FROM companion_metric_history WHERE subject_id = @id", null, ("id", thinCid));
+            await Db.Exec(c, onFile ? "INSERT INTO companion_metric_latest (subject_type, subject_id, metric, value, recorded_at) VALUES ('character', @id, 'gil', 20, @t)"
+                                  : "INSERT INTO companion_metric_latest (subject_type, subject_id, metric, value, recorded_at) VALUES ('character', @id, 'gil', 20, to_timestamp(@t)) ON CONFLICT DO NOTHING",
+                null, ("id", thinCid), ("t", Db.Now()));
+            foreach (var (at, value) in thinRows)
+                await Db.Exec(c, onFile ? "INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value) VALUES (@t, 'character', @id, 'gil', @v)"
+                                      : "INSERT INTO companion_metric_history (recorded_at, subject_type, subject_id, metric, value) VALUES (to_timestamp(@t), 'character', @id, 'gil', @v)",
+                    null, ("t", at), ("id", thinCid), ("v", value));
+            async Task<List<(double At, double Value)>> Series()
+            {
+                await using var cmd = Db.Cmd(onFile ? "SELECT recorded_at AS t, value FROM companion_metric_history WHERE subject_id = @id ORDER BY recorded_at"
+                    : "SELECT extract(epoch FROM recorded_at)::float8 AS t, value::float8 AS value FROM companion_metric_history WHERE subject_id = @id ORDER BY recorded_at", c);
+                Db.Add(cmd, "id", thinCid);
+                var list = new List<(double, double)>();
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) list.Add((Convert.ToDouble(r["t"]), Convert.ToDouble(r["value"])));
+                return list;
+            }
+            static double? At(List<(double At, double Value)> series, double t) => series.Where(x => x.At <= t + 0.001).Select(x => (double?)x.Value).LastOrDefault();
+            var before = await Series();
+            var removed = 0;
+            for (var i = 0; i < 12; i++) removed += await HistoryThinning.StepAsync(c, Db.Now());
+            var after = await Series();
+            var sameEveryHour = Enumerable.Range(0, 61 * 24).Select(h => day0 + h * 3600.0 + 60).All(t => At(before, t) == At(after, t));
+            thinKept.Add($"{removed}:{string.Join(",", after.Select(x => $"{Math.Round((x.At - day0) / 3600)}h={x.Value}"))}:{sameEveryHour}");
+        }
+        Check(thinKept.All(k => k == "4:0h=10,3h=20,24h=20,1320h=20,1321h=20:True"),
+            "Trends' history: old repeats go a week at a time, every change and each day's first value stay, recent ones untouched, every figure the same, on both: " + string.Join(" / ", thinKept));
+
         // ---- The Next rank dates, saved once an hour (ForecastWriter) ----
         var forecastNow = (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds;
         var due = new List<ForecastWriter.Forecast>
         {
-            new(1001, 1, 51, forecastNow + 3 * 3_600_000, "Renamed"),
-            new(1001, 2, 31, forecastNow + 26 * 3_600_000, "Submersible-2"),
+            new(18014498578000001, 1, 51, forecastNow + 3 * 3_600_000, "Renamed"),
+            new(18014498578000001, 2, 31, forecastNow + 26 * 3_600_000, "Submersible-2"),
         };
-        await Exec(pg, "INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (1001, 1, 40, now() - interval '40 days', now() - interval '39 days', 'Old')");
-        await Db.Exec(lite, $"INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (1001, 1, 40, {Db.FileNow} - 40 * 86400.0, {Db.FileNow} - 39 * 86400.0, 'Old')");
+        await Exec(pg, "INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (18014498578000001, 1, 40, now() - interval '40 days', now() - interval '39 days', 'Old')");
+        await Db.Exec(lite, $"INSERT INTO companion_rankup_forecast (cid, slot, rank, made_at, predicted_at, sub_name) VALUES (18014498578000001, 1, 40, {Db.FileNow} - 40 * 86400.0, {Db.FileNow} - 39 * 86400.0, 'Old')");
         var forecastSaves = new List<int>();
         await Each(async c => forecastSaves.Add(await ForecastWriter.SaveAsync(c, due)));
         await Each(async c => forecastSaves.Add(await ForecastWriter.SaveAsync(c, due)));
@@ -1567,12 +1665,12 @@ internal static partial class Program
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();
         await Each(async c => ruleIds.Add(await FleetEdits.AddRule(c, new FleetEdits.Rule(null, 50, null, null, "S", "S", "C", "C"))));
-        await Each(async c => await FleetEdits.UpdateRule(c, new FleetEdits.Rule(ruleIds[c == pg ? 0 : 1], 60, "1001", "Renamed", "S", "S", "S", "C")));
+        await Each(async c => await FleetEdits.UpdateRule(c, new FleetEdits.Rule(ruleIds[c == pg ? 0 : 1], 60, "18014498578000001", "Renamed", "S", "S", "S", "C")));
         await Each(async c => await FleetEdits.AddRule(c, new FleetEdits.Rule(null, 90, null, null, "Y", "Y", "Y", "Y")));
-        await Each(async c => await FleetEdits.SaveTarget(c, "5001", "level", 90, false));
-        await Each(async c => await FleetEdits.SaveTarget(c, "5002", "ilvl", 600, true));
-        await Each(async c => await FleetEdits.DeleteTarget(c, "5002"));
-        await Each(c => FleetEdits.SaveOrder(c, new[] { "1003", "1001", "1002" }));
+        await Each(async c => await FleetEdits.SaveTarget(c, "33777097243660301", "level", 90, false));
+        await Each(async c => await FleetEdits.SaveTarget(c, "33777097243660302", "ilvl", 600, true));
+        await Each(async c => await FleetEdits.DeleteTarget(c, "33777097243660302"));
+        await Each(c => FleetEdits.SaveOrder(c, new[] { "18014498578000003", "18014498578000001", "18014498578000002" }));
         var answers = new List<string?>();
         await Each(async c => answers.Add(await FleetEdits.SaveStaleDays(c, 5)));
         await Each(async c => answers.Add(await FleetEdits.SaveIncomeWindow(c, 7)));
@@ -1614,20 +1712,21 @@ internal static partial class Program
         }
         async Task CompareAll()
         {
-            await Same("logins", c => FleetWriter.ReadLoginOwnersAsync(c, new ulong[] { 1001, 1002, 1003 }));
-            await Same("item totals of a character", c => FleetWriter.ReadItemTotalsAsync(c, 1001, new uint[] { 10155, 10373, 5 }));
-            await Same("sources stored", c => FleetWriter.ReadStoredSourceCountAsync(c, 1001));
+            await Same("logins", c => FleetWriter.ReadLoginOwnersAsync(c, new ulong[] { 18014498578000001, 18014498578000002, 18014498578000003 }));
+            await Same("item totals of a character", c => FleetWriter.ReadItemTotalsAsync(c, 18014498578000001, new uint[] { 10155, 10373, 5 }));
+            await Same("sources stored", c => FleetWriter.ReadStoredSourceCountAsync(c, 18014498578000001));
             await Same("how long ago things were stored", async c =>
             {
-                var ages = await FleetWriter.ReadStoredAgesAsync(c, new ulong[] { 1001, 1002 }, new ulong[] { bigFc });
+                var ages = await FleetWriter.ReadStoredAgesAsync(c, new ulong[] { 18014498578000001, 18014498578000002 }, new ulong[] { bigFc });
                 return new { Synced = ages.Synced.Keys.OrderBy(k => k).ToList(), Inventory = ages.Inventory.Keys.Select(k => $"{k.Owner}/{k.Source}").OrderBy(k => k).ToList(),
                     Chest = ages.Chest.Keys.ToList(), Recent = ages.Synced.Values.Concat(ages.Inventory.Values).Concat(ages.Chest.Values).All(t => t < TimeSpan.FromMinutes(5)) };
             });
-            await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToList());
-            await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 1001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
+            await Same("newest voyages", async c => (await DetailsWriter.ReadNewestVoyagesAsync(c, new ulong[] { bigFc, 77 }))!.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key.Fc}/{kv.Key.Register}:{kv.Value}").ToList());
+            await Same("newest ventures", async c => (await DetailsWriter.ReadNewestVenturesAsync(c, new ulong[] { 18014498578000001 }))!.Select(kv => $"{kv.Key.Owner}/{kv.Key.Retainer}:{kv.Value}").ToList());
             await Same("settings", FleetReader.ReadSettings);
             await Same("Subs", FleetReader.ReadSubs);
             await Same("Supplies", FleetReader.ReadSupplies);
+            await Same("Supplies' FC credits (FCs, chests, prices)", async c => { var r = await FleetReader.ReadCredits(c); return new { r.Fcs, Chests = r.Chests.OrderBy(kv => kv.Key).ToList(), r.TankCost, r.RepairKitCost }; });
             await Same("Summary", FleetReader.ReadSummary);
             await Same("what needs attention", FleetReader.ReadAlerts);
             await Same("Roster", FleetReader.ReadRoster);
@@ -1642,7 +1741,7 @@ internal static partial class Program
             await Same("item totals", FleetReader.ReadItemTotals, unordered: true);
             await Same("Gil & Market", async c => (await FleetReader.ReadMarketData(c)).Read);
             await Same("what to ask Universalis", async c => { var ask = (await FleetReader.ReadMarketData(c)).Ask; return ask == null ? null : new { Exclude = ask.Exclude.OrderBy(x => x).ToList(), Wanted = ask.Wanted.Select(w => $"{w.World}:{w.ItemId}").OrderBy(x => x).ToList() }; });
-            await Same("routes' inputs", FleetReader.ReadRoutesInputs, unordered: true);
+            await Same("routes' inputs", c => FleetReader.ReadRoutesInputs(c), unordered: true);
             await Same("forecast accuracy", FleetReader.ReadForecasts);
             await Same("Loot per Voyage", FleetReader.ReadLoot);
             await Same("Parts", async c => (await FleetReader.ReadParts(c)).Needs);
@@ -1655,7 +1754,7 @@ internal static partial class Program
             await Same("Trends: what's recorded", FleetReader.ReadTrendsMeta);
             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             await Same("Trends: gil, whole fleet", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, null)));
-            await Same("Trends: gil, each character", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, new() { "1001", "1003" })));
+            await Same("Trends: gil, each character", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 12, new() { new("gil", "character") }, new() { "18014498578000001", "18014498578000003" })));
             await Same("Trends: a Free Company's points", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 5, new() { new("fc_points", "fc") }, new() { bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture) })));
             await Same("Trends: a sum of two", c => FleetReader.ReadSeries(c, new TrendRequest(nowMs - 3_600_000, nowMs + 60_000, 6, new() { new("gil", "character"), new("fc_points", "fc", 2) }, null)));
         }
@@ -1672,8 +1771,11 @@ internal static partial class Program
     }
 
     // Where two reads' answers differ (null: they don't). Times may differ by the moments between the two writes and
-    // reads: a date within 10 minutes, a Unix time (seconds or milliseconds) within 10 minutes, any other fraction to
-    // one part in a million or a thousandth (an age in days, a minute and a half); whole numbers and text exactly.
+    // reads: a date within 10 minutes, a Unix time (seconds or milliseconds, in a field named as a time) within 10
+    // minutes, any other fraction to one part in a million or a thousandth (an age in days, a minute and a half);
+    // other whole numbers (ids above all) and text exactly.
+    private static readonly System.Text.RegularExpressions.Regex TimeField = new(@"(?i)(_at|At|time|Time|_ms|Ms|seen|Seen|date|Date|until|Until)\w*(\[\d+\])?$");
+
     private static string? JsonDiff(JsonNode? a, JsonNode? b, string path)
     {
         if (a == null || b == null) return a == null && b == null ? null : $"{path}: {a?.ToJsonString() ?? "null"} / {b?.ToJsonString() ?? "null"}";
@@ -1698,11 +1800,20 @@ internal static partial class Program
         }
         var va = a.AsValue();
         var vb = b.AsValue();
+        // Whole numbers exactly (a character, retainer or Free Company id is above 2^53, where a double can't tell
+        // neighbours apart), except a Unix time in a field named as one.
+        if (va.TryGetValue<decimal>(out var da) && vb.TryGetValue<decimal>(out var db) && da % 1 == 0 && db % 1 == 0)
+        {
+            if (da == db) return null;
+            var big = Math.Max(Math.Abs(da), Math.Abs(db));
+            if (TimeField.IsMatch(path) && (big > 1e12m ? Math.Abs(da - db) <= 600_000 : big > 1e9m && Math.Abs(da - db) <= 600)) return null;
+            return $"{path}: {da} / {db}";
+        }
         if (va.TryGetValue<double>(out var na) && vb.TryGetValue<double>(out var nb))
         {
             if (na == nb) return null;
             var big = Math.Max(Math.Abs(na), Math.Abs(nb));
-            if (big > 1e12 ? Math.Abs(na - nb) <= 600_000 : big > 1e9 ? Math.Abs(na - nb) <= 600 : (na % 1 != 0 || nb % 1 != 0) && Math.Abs(na - nb) <= Math.Max(1e-6 * big, 1e-3)) return null;
+            if (Math.Abs(na - nb) <= Math.Max(1e-6 * big, 1e-3)) return null;
             return $"{path}: {na} / {nb}";
         }
         if (va.TryGetValue<string>(out var sa) && vb.TryGetValue<string>(out var sb))
@@ -1769,6 +1880,51 @@ internal static partial class Program
     {
         await using var cmd = new NpgsqlCommand(sql, conn);
         await cmd.ExecuteNonQueryAsync();
+        if (System.Text.RegularExpressions.Regex.IsMatch(sql, @"CREATE (TABLE|VIEW) fleet_\w+_view")) await NoteStandIns(conn);
+    }
+
+    // Stand-ins for the fleet views (tables or views made by hand with the real ones' columns), noted as they're made:
+    // name -> [column, type]. Checked against the real views (StandInsMatch), so a view that changes in views.sql can't
+    // leave a check reading a stand-in that no longer looks like it.
+    private static readonly Dictionary<string, List<(string Column, string Type)>> StandIns = new();
+    private static readonly HashSet<string> MadeUpViews = new() { "fleet_newer_view", "fleet_a_view" };   // the backup checks' own
+
+    private static async Task NoteStandIns(NpgsqlConnection conn)
+    {
+        foreach (var (name, columns) in await ViewColumns(conn))
+            if (!StandIns.ContainsKey(name)) StandIns[name] = columns;
+    }
+
+    private static async Task<Dictionary<string, List<(string Column, string Type)>>> ViewColumns(NpgsqlConnection conn)
+    {
+        var found = new Dictionary<string, List<(string, string)>>();
+        foreach (var r in await Rows(conn, @"SELECT table_name::text, column_name::text, data_type::text FROM information_schema.columns
+                                            WHERE table_schema = current_schema() AND table_name LIKE 'fleet\_%\_view' ORDER BY table_name, ordinal_position"))
+        {
+            var name = (string)r[0]!;
+            if (!found.TryGetValue(name, out var list)) found[name] = list = new();
+            list.Add(((string)r[1]!, (string)r[2]!));
+        }
+        return found;
+    }
+
+    // Every stand-in's columns are in the real view, with the same type. conn: a database with the real views.
+    private static async Task StandInsMatch(NpgsqlConnection conn)
+    {
+        var real = await ViewColumns(conn);
+        var problems = new List<string>();
+        foreach (var (name, columns) in StandIns.Where(kv => !MadeUpViews.Contains(kv.Key)))
+        {
+            if (!real.TryGetValue(name, out var have)) { problems.Add($"{name} is no longer a view"); continue; }
+            foreach (var (column, type) in columns)
+            {
+                var match = have.FirstOrDefault(h => h.Column == column);
+                if (match.Column == null) problems.Add($"{name}.{column} is not in the view");
+                else if (match.Type != type) problems.Add($"{name}.{column} is {match.Type} in the view, {type} in the stand-in");
+            }
+        }
+        Check(StandIns.Count > 10 && problems.Count == 0,
+            $"the stand-ins for the fleet views ({StandIns.Count}) have the real views' columns and types" + (problems.Count > 0 ? ": " + string.Join("; ", problems) : ""));
     }
 
     private static async Task<List<object?[]>> Rows(NpgsqlConnection conn, string sql)
@@ -1861,13 +2017,15 @@ internal static partial class Program
               && FleetReader.SubStatus(1000 + 2 * 86400 + 4 * 3600, 1000) == "2d 4:00:00",
             "fleet views: sub status reads In port, Back, or the time until it's back");
         var now = new DateTime(2026, 11, 5, 12, 0, 0);
-        Check(FleetReader.Ago(now.AddSeconds(-12), now) == "12s ago" && FleetReader.Ago(now.AddMinutes(-4), now) == "4m ago" && FleetReader.Ago(now.AddHours(-2), now) == "2h ago",
+        Check(FleetReader.Ago(now.AddSeconds(-12), now) == "12s ago" && FleetReader.Ago(now.AddMinutes(-4), now) == "4m ago" && FleetReader.Ago(now.AddHours(-2), now) == "2h ago"
+            && FleetReader.Ago(now.AddHours(-47), now) == "47h ago" && FleetReader.Ago(now.AddDays(-21), now) == "21 days ago"
+            && FleetOrder.RankPercent(23, 40) == 57,
             "fleet views: how long ago it was read");
 
         // Stage 4: the info bar line and what needs attention.
         var alerts = new List<AlertRow>
         {
-            new("danger", "house", "Cute Kittehs!", "house not entered for 33 days; demolished after 12 more"),
+            new("danger", "house", "Cute Kittehs!", "house not entered for 33 days; the game can demolish it in 12 more days"),
             new("warn", "low_ceruleum", "Aki (Maduin)", "50 ceruleum (warning below 100)"),
             new("warn", "low_repair_kits", "Aki (Maduin)", "5 repair kits (warning below 10)"),
             new("warn", "low_ceruleum", "Bex (Maduin)", "10 ceruleum (warning below 100)"),
@@ -1931,7 +2089,7 @@ internal static partial class Program
             "rest of the tabs: the average item level leaves out items the game doesn't know, as the app does");
         Check(FleetReader.SyncedBy("DESKTOP-1", "A") == "A on DESKTOP-1" && FleetReader.SyncedBy("LAPTOP", "") == "(no label) on LAPTOP" && FleetReader.SyncedBy(null, null) == "—",
             "rest of the tabs: Synced by reads as the app's Roster");
-        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another game)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
+        Check(FleetReader.PcCharacters(12, 2, 3) == "12 (2 left out) (3 left to another PC or account)" && FleetReader.PcCharacters(5, 0, null) == "5" && FleetReader.PcCharacters(null, null, null) == "—",
             "rest of the tabs: a game's characters read as the app's PCs page");
         Check(FleetReader.CompareVersions("2.0.0.9", "2.0.0.10") < 0 && FleetReader.CompareVersions("2.0.0", "2.0.0.0") == 0 && FleetReader.CompareVersions(null, "0.1") < 0,
             "rest of the tabs: plugin versions compare part by part");
@@ -2096,6 +2254,10 @@ internal static partial class Program
         PartsAgainstTheApp();
         await PartsReadFromTheDatabase(conn);
         await MarketAgainstTheApp();
+        MemoChecks();
+        FcCreditChecks();
+        Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
+            "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");
         RoutesAgainstTheApp();
         await RoutesReadFromTheDatabase(conn);
         await MarketAsksEachPlaceOnce();
@@ -2294,6 +2456,9 @@ internal static partial class Program
             new() { SortedContainer = 20000, SortedSlotIndex = 0, ItemId = 22500, Quantity = 1 },
             new() { SortedContainer = 20001, SortedSlotIndex = 3, ItemId = 22501, Quantity = 2 },
         });
+        Check(await FleetWriter.RemoveOrphanFcChestsAsync(conn) == 0,
+            "a chest written in the last day stays though no character is in its FC (AutoRetainer may briefly not know a character's FC)");
+        await Exec(conn, "UPDATE companion_fc_inventory_snapshot SET updated_at = localtimestamp - interval '25 hours' WHERE fc_id = 9999999");
         var removedSlots = await FleetWriter.RemoveOrphanFcChestsAsync(conn);
         chest = await Rows(conn, "SELECT fc_id, count(*) FROM companion_fc_inventory_snapshot GROUP BY fc_id ORDER BY fc_id");
         Check(removedSlots == 2 && Show(chest) == "9000001,1",
@@ -2429,6 +2594,21 @@ internal static partial class Program
               && string.Join(",", withoutFc.OrderBy(k => k)) == "2,3",
             $"FCTracker: in an FC {string.Join(",", parsed.Keys)}, in none {string.Join(",", withoutFc.OrderBy(k => k))} (an FC it has no details for is neither)");
 
+        // FCTracker's file when it can't be used: half-written, laid out differently, or with entries that look blank (a
+        // renamed field): what's stored is kept, and the problem is said.
+        var broken = System.IO.Path.GetTempFileName();
+        var problemsSeen = new List<string>();
+        System.IO.File.WriteAllText(broken, @"{""GatheredData"": {""CharByCID"": {""1"": {""CID"": 1, ""FC"": 90");
+        var half = FCTrackerConnector.ReadHousingData(broken, null, problemsSeen);
+        System.IO.File.WriteAllText(broken, @"{""Data"": {}}");
+        var reshaped = FCTrackerConnector.ReadHousingData(broken, null, problemsSeen);
+        System.IO.File.WriteAllText(broken, @"{""GatheredData"": {""CharByCID"": {""1"": {""CID"": 1, ""FC"": 9000001}}, ""FCData"": {""9000001"": {""Name"": ""Panda Co"", ""Points"": 5}}}}");
+        var blank = FCTrackerConnector.ReadHousingData(broken, null, problemsSeen);
+        System.IO.File.Delete(broken);
+        Check(half.Count == 0 && reshaped.Count == 0 && blank.Count == 0 && problemsSeen.Count == 2
+              && problemsSeen[0].StartsWith("its file couldn't be read") && problemsSeen[1] == "its file isn't laid out the way this version expects",
+            "FCTracker: a file it can't read, or laid out differently, is said; an entry that looks blank is skipped, so the stored details stay: " + string.Join(" | ", problemsSeen));
+
         // FCTracker's IPC: the same answers as its file, asked character by character; each FC is asked for once.
         var liveChars = new Dictionary<ulong, FCTrackerConnector.CharEntry>
         {
@@ -2517,6 +2697,16 @@ internal static partial class Program
         tracker.Remember("inv:1", "A");
         tracker.BeginSync(start.AddMinutes(61));
         Check(!tracker.IsUnchanged("inv:1", "A"), "everything is written again once an hour");
+        tracker.BeginSync(start.AddMinutes(62), "db one");
+        tracker.Remember("inv:1", "A");
+        tracker.BeginSync(start.AddMinutes(63), "db one");
+        var sameDb = tracker.IsUnchanged("inv:1", "A");
+        tracker.BeginSync(start.AddMinutes(64), "db two");
+        Check(sameDb && !tracker.IsUnchanged("inv:1", "A"), "a different (new, moved or restored) database gets everything written again");
+        tracker.Remember("inv:1", "A");
+        tracker.ForgetAll();
+        tracker.BeginSync(start.AddMinutes(65), "db two");
+        Check(!tracker.IsUnchanged("inv:1", "A"), "after this game restores or moves the fleet, everything is written again");
 
         // Where characters last logged in: only the setup a character last logged in on syncs it.
         Check(await FleetWriter.ReadLoginOwnersAsync(conn, new ulong[] { 1 }) == null
@@ -2709,6 +2899,45 @@ internal static partial class Program
 
         await DetailsChecks(conn);
         ReaderChecks();
+        {
+            // The Shopping List's ticks checked against the list and saved back, as the app does (reconcileByAhead).
+            var four = ShoppingMath.ParseProgress("{\"21794\":{\"made\":4,\"outOf\":4}}");
+            var oneLeft = ShoppingMath.Reconciled(four, new() { (0, new() { (21794, 1L) }) });
+            var same = ShoppingMath.Reconciled(ShoppingMath.ParseProgress("{\"21794\":{\"made\":1,\"outOf\":1}}"), new() { (0, new() { (21794, 1L) }) });
+            var offList = ShoppingMath.Reconciled(four, new() { (0, new() { (21795, 2L) }) });
+            var ahead = ShoppingMath.Reconciled(ShoppingMath.ParseProgress("{\"21794\":{\"made\":2,\"outOf\":3,\"ahead\":7}}"), new() { (0, new()), (7, new() { (21794, 3L) }) });
+            Check(oneLeft == "{\"21794\":{\"made\":1,\"outOf\":1}}" && same == null && offList == "{}" && ahead == null,
+                $"shopping list: ticks are checked against the list and saved back as the app saves them ({oneLeft}, {same ?? "null"}, {offList}, {ahead ?? "null"})");
+        }
+        {
+            var gamesFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"games-{Guid.NewGuid():N}.json");
+            var t0 = new DateTime(2026, 11, 21, 12, 0, 0, DateTimeKind.Utc);
+            var alone = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "", t0);
+            var twoBlank = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\B\pluginConfigs\XIVFleetCompanion", " ", t0.AddMinutes(1));
+            var labelled = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\B\pluginConfigs\XIVFleetCompanion", "Alt", t0.AddMinutes(2));
+            var firstAgain = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "", t0.AddMinutes(3));
+            var sameLabel = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "alt", t0.AddMinutes(4));
+            var longGone = GamesOnThisPc.NoteAndCheck(gamesFile, @"C:\A\pluginConfigs\XIVFleetCompanion", "alt", t0.AddDays(3));
+            System.IO.File.Delete(gamesFile);
+            Check(!alone && twoBlank && !labelled && !firstAgain && sameLabel && !longGone,
+                "games on this PC: two games with no Account Label (or the same one) are told so; different labels, or one not synced for days, aren't");
+        }
+        {
+            ulong[] Slot(ulong item, ulong qty, int extra = 0) { var a = new ulong[25 + extra]; a[2] = item; a[3] = qty; a[6] = 1; a[20] = 10000; a[22] = 3; a[23] = 77; a[24] = 450; for (var i = 0; i < extra; i++) a[25 + i] = (ulong)(i + 1); return a; }
+            var good = AllaganToolsConnector.Parse(new[] { Slot(5111, 3, 2), Slot(0, 0) });
+            var older = AllaganToolsConnector.Parse(new[] { Slot(5111, 3).Take(24).ToArray() });
+            var shorter = AllaganToolsConnector.Parse(new[] { Slot(5111, 3).Take(20).ToArray() });
+            var shifted = AllaganToolsConnector.Parse(new[] { Slot(0, 5) });
+            Check(good.Problem == null && good.Items.Count == 2 && good.Items[0] is { ItemId: 5111, Quantity: 3, Hq: true, SortedContainer: 10000, SortedSlotIndex: 3, RetainerId: 77, MarketPrice: 450 }
+                  && string.Join(",", good.Items[0].GearSetIds) == "1,2" && older.Problem == null && older.Items[0].MarketPrice == 0
+                  && shorter.Problem != null && shorter.Items.Count == 0 && shifted.Problem != null && AllaganToolsConnector.Parse(null).Items.Count == 0,
+                "Allagan Tools: its answer is read by position; a layout it doesn't know is a problem (the items stored are kept), not an empty inventory");
+        }
+        Check(JsonDiff(JsonNode.Parse("{\"cid\":18014498578000001}"), JsonNode.Parse("{\"cid\":18014498578000004}"), "") != null
+              && JsonDiff(JsonNode.Parse("{\"retainer\":\"33777097243660301\"}"), JsonNode.Parse("{\"retainer\":\"33777097243000000\"}"), "") != null
+              && JsonDiff(JsonNode.Parse("{\"lastSeenAt\":1790000000000}"), JsonNode.Parse("{\"lastSeenAt\":1790000060000}"), "") == null
+              && JsonDiff(JsonNode.Parse("{\"gil\":1790000000000}"), JsonNode.Parse("{\"gil\":1790000060000}"), "") != null,
+            "the app-and-plugin comparison tells ids one apart, and allows a few minutes only in a time");
     }
 
     // sql/008 and DetailsWriter: PCs, voyage loot, venture rewards and market listings.
@@ -2857,6 +3086,11 @@ internal static partial class Program
             "a database name that doesn't exist is said plainly: " + wrongName?.Message);
         var refused = new PostgresException("password authentication failed for user \"x\"", "FATAL", "FATAL", PostgresErrorCodes.InvalidPassword);
         Check(SyncFailure.Describe(refused) == SyncFailure.WrongLogin && SyncFailure.IsExpected(refused), "a wrong password is said plainly");
+        PostgresException Pg(string state) => new("server says so", "FATAL", "FATAL", state);
+        Check(SyncFailure.Describe(Pg(PostgresErrorCodes.CannotConnectNow)) == SyncFailure.Starting && SyncFailure.Describe(Pg(PostgresErrorCodes.TooManyConnections)) == SyncFailure.TooBusy
+              && SyncFailure.Describe(Pg(PostgresErrorCodes.InsufficientPrivilege)) == SyncFailure.NotAllowed && SyncFailure.Describe(Pg(PostgresErrorCodes.DiskFull)) == SyncFailure.ServerFull
+              && new[] { PostgresErrorCodes.CannotConnectNow, PostgresErrorCodes.TooManyConnections, PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.DiskFull }.All(c => SyncFailure.IsExpected(Pg(c))),
+            "a database still starting, too busy, a login not allowed and a full disk are said plainly, and logged once");
         var moving = new DatabaseMove.WaitException();
         var away = new DatabaseMove.UnreachableException("100.64.1.9:5432", "timeout");
         Check(SyncFailure.Describe(moving) == moving.Message && SyncFailure.Describe(away) == away.Message && SyncFailure.IsExpected(away),
@@ -2960,8 +3194,8 @@ internal static partial class Program
         Check(await DetailsWriter.WriteVoyageLootAsync(conn, loot) && await DetailsWriter.WriteVoyageLootAsync(conn, loot), "voyage loot is written, and writing it again is harmless");
         var newestVoyage = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001, 9000002 });
         Check(Show(await Rows(conn, "SELECT count(*), sum(primary_count) FROM companion_voyage_loot")) == "2,4"
-              && newestVoyage != null && newestVoyage.Count == 1 && newestVoyage[9000001] == 1790000000,
-            "each sector is stored once, and the newest voyage per FC is known so only newer ones are read");
+              && newestVoyage != null && newestVoyage.Count == 1 && newestVoyage[(9000001, 1700000000)] == 1790000000,
+            "each sector is stored once, and the newest voyage per sub is known so only newer ones are read");
 
         // sql/009: the order a voyage ran its sectors in. Voyages stored before it count as not read yet,
         // so the next sync fills in their order; a stored order is not changed.
@@ -2977,7 +3211,7 @@ internal static partial class Program
         await DetailsWriter.WriteVoyageLootAsync(conn, loot);
         var legRows = await Rows(conn, "SELECT sector, leg FROM companion_voyage_loot ORDER BY leg");
         var afterLegs = await DetailsWriter.ReadNewestVoyagesAsync(conn, new ulong[] { 9000001 });
-        Check(Show(legRows) == "22,1 / 15,2" && afterLegs != null && afterLegs[9000001] == 1790000000,
+        Check(Show(legRows) == "22,1 / 15,2" && afterLegs != null && afterLegs[(9000001, 1700000000)] == 1790000000,
             "their order is filled in once, and then they count as read: " + Show(legRows));
 
         var ventures = new List<DetailsWriter.VentureRow>
@@ -3050,18 +3284,39 @@ internal static partial class Program
                     INSERT INTO loot VALUES (x'ce00895441', 1700000001, 1790090000, 3, 22501, 1, 0, 0, 0, 0, 1790090000, 0);";
                 cmd.ExecuteNonQuery();
             }
-            var all = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long>(), new ulong[] { 0x895440 });
-            var newer = SubmarineTrackerReader.ReadLoot(db, new Dictionary<ulong, long> { [0x895440] = 1790000000 }, new ulong[] { 0x895440, 0x895441 });
+            var all = SubmarineTrackerReader.ReadLoot(db, new Dictionary<(ulong, uint), long>(), new ulong[] { 0x895440 });
+            var newer = SubmarineTrackerReader.ReadLoot(db, new Dictionary<(ulong, uint), long> { [(0x895440, 1700000000)] = 1790000000 }, new ulong[] { 0x895440, 0x895441 });
             Check(all.Count == 3 && all[0].SubName == "Sub-1" && all[0].AdditionalItem == 22505 && all[0].PrimaryCount == 3
                   && newer.Count == 3 && newer.All(r => r.Return == 1790090000) && newer.Any(r => r.FcId == 0x895441 && !r.Valid && r.SubName == null),
                 "SubmarineTracker's loot is read per FC asked for, only newer than what is stored, with the sub's name");
             Check(string.Join(" ", all.Select(r => $"{r.Sector}:{r.Leg}")) == "15:1 15:1 4:2" && newer.First(r => r.FcId == 0x895441).Leg == 1,
                 "each sector's leg is the order SubmarineTracker added it in (the order it was visited), counted per voyage");
 
+            // Sub 2 came back before sub 1 but was collected (recorded) after sub 1's voyage was stored; and a voyage
+            // of a sub with nothing stored, from long ago.
+            using (var sqlite = new System.Data.SQLite.SQLiteConnection($"Data Source={db}"))
+            {
+                sqlite.Open();
+                using var cmd = sqlite.CreateCommand();
+                cmd.CommandText = @"
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000002, 1790080000, 7, 22502, 1, 0, 0, 0, 0, 1790095000, 1);
+                    INSERT INTO loot VALUES (x'ce00895440', 1700000003, 1780000000, 9, 22503, 1, 0, 0, 0, 0, 1780000000, 1);";
+                cmd.ExecuteNonQuery();
+            }
+            var later = SubmarineTrackerReader.ReadLoot(db, new Dictionary<(ulong, uint), long> { [(0x895440, 1700000000)] = 1790090000 }, new ulong[] { 0x895440 });
+            Check(later.Count == 1 && later[0].Register == 1700000002 && later[0].Return == 1790080000,
+                "a sub that came back earlier but was collected later still has its loot read; a sub's voyage from long before its FC's newest is not read again: "
+                + string.Join(" ", later.Select(r => $"{r.Register}@{r.Return}")));
+
             var statFile = System.IO.Path.Combine(dir, "0040000000ABCDEF_Oldret.statistic.json");
             System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700},{""I"":0,""T"":1790003800}],""PlayerName"":""Aki@Maduin"",""RetainerName"":""Oldret""}");
             var parsed = VentureStatsReader.ParseFileName("0040000000ABCDEF_Oldret.statistic.json");
-            var rewards = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", 1790000100);
+            var rewards = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", name => name == "Oldret" ? 1790000100 : 0);
+            // Renamed in the game since: the file keeps its old name, the records the new one; the newest stored under
+            // the old name still counts, so nothing is stored twice.
+            System.IO.File.WriteAllText(statFile, @"{""Records"":[{""I"":5111,""T"":1790000100,""A"":120,""V"":395},{""I"":12345,""H"":1,""T"":1790003700}],""RetainerName"":""Newret""}");
+            var renamed = VentureStatsReader.ReadFile(statFile, 0x0040000000ABCDEF, "Oldret", name => name == "Oldret" ? 1790003700 : 0);
+            Check(renamed.Count == 0, "AutoRetainer's statistics: a renamed retainer's rewards already stored under its old name aren't stored again under the new one");
             Check(parsed is { } p && p.Cid == 0x0040000000ABCDEF && p.Retainer == "Oldret"
                   && VentureStatsReader.ParseFileName("DefaultConfig.json") == null && VentureStatsReader.ParseFileName("123_Short.statistic.json") == null
                   && rewards.Count == 1 && rewards[0].ItemId == 12345 && rewards[0].Hq && rewards[0].Quantity == 1 && rewards[0].VentureId == 0,

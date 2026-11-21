@@ -158,13 +158,18 @@ public static class DatabaseUpkeep
                 {
                     try
                     {
-                        await using (var cmd = new NpgsqlCommand(u.Sql, conn, tx)) await cmd.ExecuteNonQueryAsync();
+                        await GiveWayQuickly(conn, tx);
+                        await using (var cmd = new NpgsqlCommand(u.Sql, conn, tx) { CommandTimeout = 0 }) await cmd.ExecuteNonQueryAsync();
                         await Record(conn, u.Version, u.Name, recordedBy, tx);
                         await tx.CommitAsync();
                     }
                     catch (PostgresException e) when (e.SqlState == "42501")
                     {
                         throw NoRights(conn, e);
+                    }
+                    catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.LockNotAvailable)
+                    {
+                        throw new InvalidOperationException($"Database update {u.Version} ({u.Name}) waits for another PC to finish with the database; it's tried again in a few minutes.", e);
                     }
                     catch (Exception e)
                     {
@@ -222,7 +227,8 @@ public static class DatabaseUpkeep
         await using var tx = await conn.BeginTransactionAsync();
         try
         {
-            await using (var cmd = new NpgsqlCommand(files.Views, conn, tx)) await cmd.ExecuteNonQueryAsync();
+            await GiveWayQuickly(conn, tx);
+            await using (var cmd = new NpgsqlCommand(files.Views, conn, tx) { CommandTimeout = 0 }) await cmd.ExecuteNonQueryAsync();
             await using (var cmd = new NpgsqlCommand(
                 @"INSERT INTO companion_views (id, checksum, app_version, applied_at) VALUES (1, @c, @v, now())
                   ON CONFLICT (id) DO UPDATE SET checksum = EXCLUDED.checksum, app_version = EXCLUDED.app_version, applied_at = now()", conn, tx))
@@ -327,6 +333,14 @@ public static class DatabaseUpkeep
             "Connect with the login that owns the tables (the one the app uses), or open the app once to update them.", cause);
     }
 
+    // An update can take as long as it needs (years of history), but waits at most 10 seconds for a table another PC is
+    // using: everything else on that table would queue behind it meanwhile. It then gives way and is tried again later.
+    private static async Task GiveWayQuickly(NpgsqlConnection conn, NpgsqlTransaction tx)
+    {
+        await using var cmd = new NpgsqlCommand("SET LOCAL lock_timeout = '10s'", conn, tx);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     private static async Task Exec(NpgsqlConnection conn, string sql)
     {
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -385,6 +399,9 @@ public sealed class DatabaseKeeper
     /// <summary>The fleet file's newest backup this plugin made, and a problem making one (else null).</summary>
     public string? LastBackup { get; private set; }
     public string? BackupProblem { get; private set; }
+
+    /// <summary>Look again at the next sync rather than in up to 10 minutes (after a restore).</summary>
+    public void CheckSoon() => nextAt = DateTime.MinValue;
 
     /// <param name="filePath">The fleet file (Just this PC), for its daily backup; null on PostgreSQL.</param>
     public async Task RunIfDueAsync(DbConnection conn, string? filePath = null)

@@ -20,6 +20,8 @@ public class CheckWindow : Window, IDisposable
     private bool running;
     private string? text;
     private string status = "";
+    // "Copied" shows on the button for a moment, leaving the check's own result line as it was.
+    private DateTime copiedAt = DateTime.MinValue;
 
     public CheckWindow(Plugin plugin) : base($"XIV Fleet Companion: Check what I can see v{Plugin.VersionText}###XIVFleetCompanionCheck")
     {
@@ -207,10 +209,10 @@ public class CheckWindow : Window, IDisposable
         ImGui.SameLine();
         using (ImRaii.Disabled(text == null))
         {
-            if (ImGui.Button("Copy results") && text != null)
+            if (ImGui.Button((DateTime.Now - copiedAt).TotalSeconds is >= 0 and < 2 ? "Copied##copyResults" : "Copy results##copyResults") && text != null)
             {
                 ImGui.SetClipboardText(text);
-                status = "Copied. Paste it wherever you need it.";
+                copiedAt = DateTime.Now;
             }
         }
         ImGui.SameLine();

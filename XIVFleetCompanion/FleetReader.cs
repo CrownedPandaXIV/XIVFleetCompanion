@@ -15,7 +15,11 @@ namespace XIVFleetCompanion
     /// <summary>One character with subs, from fleet_supplies_view. PerDay null: not enough history yet; 0: none used.</summary>
     public sealed record SupplyRow(string Character, string World, string Account, int SortIndex, DateTime? LastSynced,
         int Ceruleum, double? CeruleumPerDay, double? CeruleumDaysLeft, int CeruleumRestock,
-        int RepairKits, double? RepairKitsPerDay, double? RepairKitsDaysLeft, int RepairKitsRestock, int WindowDays, int TargetDays);
+        int RepairKits, double? RepairKitsPerDay, double? RepairKitsDaysLeft, int RepairKitsRestock, int WindowDays, int TargetDays, string? FcId = null);
+
+    /// <summary>What the Supplies page's FC credits section and summary need besides its rows: the Free Companies, the
+    /// ceruleum tanks in each FC chest (by FC id), the tank's price in company credits and a repair kit's in gil.</summary>
+    public sealed record CreditsRead(List<FcCredits.Fc> Fcs, Dictionary<string, long> Chests, int TankCost, double RepairKitCost);
 
     /// <summary>The fleet at a glance, from fleet_summary_view (the subs' own counts are worked out live from SubRow).</summary>
     public sealed record SummaryRow(int Retainers, int VenturesDone, int RetainersIdle, int LowCeruleum, int LowRepairKits, double? SoonestRunsOutDays);
@@ -157,6 +161,7 @@ namespace XIVFleetCompanion
 
         public FleetRead<List<SubRow>> Subs { get; private set; } = new(null, null, null);
         public FleetRead<List<SupplyRow>> Supplies { get; private set; } = new(null, null, null);
+        public FleetRead<CreditsRead> Credits { get; private set; } = new(null, null, null);
         public FleetRead<SummaryRow> Summary { get; private set; } = new(null, null, null);
         public FleetRead<List<AlertRow>> Alerts { get; private set; } = new(null, null, null);
         public FleetRead<List<RosterRow>> Roster { get; private set; } = new(null, null, null);
@@ -217,8 +222,10 @@ namespace XIVFleetCompanion
                 var (pc, account, version) = checkIn();
                 checkInRefused = !await DetailsWriter.WritePcReadAsync(conn, pc, account, version);
             }
-            catch (PostgresException)
+            catch (PostgresException ex) when (ex.SqlState is "42501" or "42P01" or "42703")
             {
+                // A login that may only read, or a database without the table: not again. Anything else (a timeout, a
+                // lock, a deadlock) is tried again at the next check-in.
                 checkInRefused = true;
             }
             catch (Exception)
@@ -291,6 +298,7 @@ namespace XIVFleetCompanion
                 Subs = Subs with { Error = notSetUp };
                 Alerts = Alerts with { Error = notSetUp };
                 Supplies = Supplies with { Error = notSetUp };
+                Credits = Credits with { Error = notSetUp };
                 Summary = Summary with { Error = notSetUp };
                 Roster = Roster with { Error = notSetUp };
                 Retainers = Retainers with { Error = notSetUp };
@@ -305,6 +313,7 @@ namespace XIVFleetCompanion
                 Routes = Routes with { Error = notSetUp };
                 Market = Market with { Error = notSetUp };
                 Settings = Settings with { Error = notSetUp };
+                Forecasts = Forecasts with { Error = notSetUp };
                 return;
             }
             busy = true;
@@ -332,6 +341,7 @@ namespace XIVFleetCompanion
                     if (supplies)
                     {
                         Supplies = await Read(conn, ReadSupplies, Supplies);
+                        Credits = await Read(conn, ReadCredits, Credits);
                         Summary = await Read(conn, ReadSummary, Summary);
                         // The Summary's salvage total (quick), unless the Salvage page reads it now anyway.
                         if (!money) Salvage = await Read(conn, ReadSalvage, Salvage);
@@ -354,7 +364,9 @@ namespace XIVFleetCompanion
                     {
                         Settings = await Read(conn, ReadSettings, Settings);
                         Parts = await Read(conn, ReadParts, Parts);
-                        Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds), Routes);
+                        // The Parts views just read are used again for the routes, not read a second time.
+                        var partsJustRead = Parts.Error == null ? Parts.Data?.Inputs : null;
+                        Routes = await Read(conn, c => ReadRoutes(c, game, (DateTime.UtcNow - DateTime.UnixEpoch).TotalMilliseconds, partsJustRead), Routes);
                         // On the fleet file there's no app to save the Next rank dates for the forecast line: the plugin does.
                         if (Db.IsFile(conn) && Routes.Error == null && Routes.Data is { } planned)
                             await SaveForecasts(conn, planned.Subs);
@@ -366,10 +378,10 @@ namespace XIVFleetCompanion
                 {
                     var text = ReachFailure(ex);
                     if (subs) { Subs = Subs with { Error = text }; Alerts = Alerts with { Error = text }; RetainerCounts = RetainerCounts with { Error = text }; }
-                    if (supplies) { Supplies = Supplies with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
+                    if (supplies) { Supplies = Supplies with { Error = text }; Credits = Credits with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; Loot = Loot with { Error = text }; }
-                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; }
+                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; Forecasts = Forecasts with { Error = text }; }
                     if (market) Market = Market with { Error = text };
                 }
                 finally
@@ -470,8 +482,8 @@ namespace XIVFleetCompanion
         {
             var list = new List<SubRow>();
             await using var cmd = Db.Cmd(
-                @"SELECT cid, character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
-                  FROM fleet_subs_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, character_name, slot NULLS LAST, sub_name", conn);
+                $@"SELECT cid, character_name, world, account_label, sort_index, sub_name, slot, rank, build, return_time, current_exp, next_level_exp
+                  FROM fleet_subs_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, character_name{Db.C(conn)}, slot NULLS LAST, sub_name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new SubRow(Text(r, "character_name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
@@ -484,14 +496,37 @@ namespace XIVFleetCompanion
         {
             var list = new List<SupplyRow>();
             await using var cmd = Db.Cmd(
-                "SELECT * FROM fleet_supplies_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
+                $"SELECT * FROM fleet_supplies_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new SupplyRow(Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue), Time(r, "last_synced_at"),
                     Int(r, "ceruleum"), Double(r, "ceruleum_per_day"), Double(r, "ceruleum_days_left"), Int(r, "ceruleum_restock"),
                     Int(r, "repair_kits"), Double(r, "repair_kits_per_day"), Double(r, "repair_kits_days_left"), Int(r, "repair_kits_restock"),
-                    Int(r, "window_days", 14), Int(r, "target_days", 14)));
+                    Int(r, "window_days", 14), Int(r, "target_days", 14),
+                    DecimalOrNull(r, "fc_id") is decimal fc && fc != 0 ? fc.ToString(CultureInfo.InvariantCulture) : null));
             return list;
+        }
+
+        public static async Task<CreditsRead> ReadCredits(DbConnection conn)
+        {
+            var fcs = (await ReadFcs(conn)).Select(f => new FcCredits.Fc(f.FcId.ToString(CultureInfo.InvariantCulture), f.Name, f.Account, f.Points ?? 0)).ToList();
+            var chests = new Dictionary<string, long>();
+            await using (var cmd = Db.Cmd("SELECT fc_id, SUM(quantity) AS n FROM companion_fc_inventory_snapshot WHERE item_id = @item GROUP BY fc_id", conn))
+            {
+                Db.Add(cmd, "item", FcCredits.CeruleumTank);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    if (DecimalOrNull(r, "fc_id") is decimal id) chests[id.ToString(CultureInfo.InvariantCulture)] = LongOrNull(r, "n") ?? 0;
+            }
+            double? tankCost = null, kitCost = null;
+            await using (var cmd = Db.Cmd("SELECT setting_key, setting_value FROM fleet_economics_settings WHERE setting_key IN (@tank, 'repair_kit_cost')", conn))
+            {
+                Db.Add(cmd, "tank", FcCredits.TankCostKey);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    if (Text(r, "setting_key") == FcCredits.TankCostKey) tankCost = Double(r, "setting_value"); else kitCost = Double(r, "setting_value");
+            }
+            return new CreditsRead(fcs, chests, FcCredits.TankCostOf(tankCost), kitCost ?? 0);
         }
 
         public static async Task<SummaryRow> ReadSummary(DbConnection conn)
@@ -517,7 +552,7 @@ namespace XIVFleetCompanion
         {
             var list = new List<RosterRow>();
             await using var cmd = Db.Cmd(
-                "SELECT * FROM fleet_roster_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, name", conn);
+                $"SELECT * FROM fleet_roster_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new RosterRow(Long(r, "cid"), Text(r, "name"), Text(r, "world"), Text(r, "account_label"), Int(r, "sort_index", int.MaxValue),
@@ -534,7 +569,7 @@ namespace XIVFleetCompanion
         {
             var list = new List<RetainerRow>();
             await using (var cmd = Db.Cmd(
-                "SELECT * FROM fleet_retainers_view ORDER BY account_label NULLS LAST, sort_index NULLS LAST, owner_name, hire_order_index NULLS LAST, retainer_name", conn))
+                $"SELECT * FROM fleet_retainers_view ORDER BY account_label{Db.C(conn)} NULLS LAST, sort_index NULLS LAST, owner_name{Db.C(conn)}, hire_order_index NULLS LAST, retainer_name{Db.C(conn)}", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
             {
                 while (await r.ReadAsync())
@@ -560,7 +595,7 @@ namespace XIVFleetCompanion
         public static async Task<List<PcRow>> ReadPcs(DbConnection conn)
         {
             var list = new List<PcRow>();
-            await using var cmd = Db.Cmd("SELECT * FROM fleet_pcs_view ORDER BY account_label, pc_name", conn);
+            await using var cmd = Db.Cmd($"SELECT * FROM fleet_pcs_view ORDER BY account_label{Db.C(conn)}, pc_name{Db.C(conn)}", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 list.Add(new PcRow(Text(r, "pc_name"), Text(r, "account_label"), TextOrNull(r, "plugin_version"), Time(r, "last_sync_at"),
@@ -683,6 +718,8 @@ namespace XIVFleetCompanion
                 while (await r.ReadAsync()) loot.Add((TextOrNull(r, "world"), Int(r, "item")));
             }
             catch (PostgresException ex) when (ex.SqlState == "42P01") { }
+            // A fleet file whose views are older than this plugin: no loot prices, but the rest of the page still shows.
+            catch (System.Data.SQLite.SQLiteException ex) when (ex.Message.Contains("no such table") || ex.Message.Contains("no such view")) { }
             return (read, new MarketAsk(exclude, listings.Select(l => (l.World, l.ItemId)).Concat(ventures.Select(v => ((string?)v.World, v.ItemId))).Concat(loot).ToList()));
         }
 
@@ -707,15 +744,16 @@ namespace XIVFleetCompanion
 
         /// <summary>Every built sub's route answers (the fleet_route_* views, app 1.8.0 and later, and the game's own
         /// files), worked out here (SubRoutes) at `now` (milliseconds since 1970).</summary>
-        public static async Task<RoutesRead> ReadRoutes(DbConnection conn, SubGameData? game, double now)
+        public static async Task<RoutesRead> ReadRoutes(DbConnection conn, SubGameData? game, double now, PartsInputs? parts = null)
         {
             if (game == null) throw new InvalidOperationException("The game's sea map data couldn't be read.");
-            return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn), game, now), now);
+            return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn, parts), game, now), now);
         }
 
-        public static async Task<RoutesInputs> ReadRoutesInputs(DbConnection conn)
+        /// <summary>parts: the Parts views as just read (else they're read here).</summary>
+        public static async Task<RoutesInputs> ReadRoutesInputs(DbConnection conn, PartsInputs? parts = null)
         {
-            var parts = await ReadPartsInputs(conn);
+            parts ??= await ReadPartsInputs(conn);
             var subs = new List<RouteSub>();
             await using (var cmd = Db.Cmd("SELECT * FROM fleet_route_subs_view", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
@@ -920,19 +958,29 @@ namespace XIVFleetCompanion
         /// minute old.</summary>
         public void ReadHoldingsIfDue(string key, string where, string idColumn, IEnumerable<object> ids, bool force = false)
         {
-            if (!force && HoldingsKey == key && Holdings.At.HasValue && DateTime.Now - Holdings.At.Value < ListsEvery) return;
+            if (!force && HoldingsKey == key && Fresh(Holdings.At, ListsEvery)) return;
             RunInventoryRead(async conn =>
             {
                 var before = HoldingsKey == key ? Holdings : new FleetRead<List<HoldingRow>>(null, null, null);
-                HoldingsKey = key;
+                // The rows first, then the key they're for: the window never sees the new key with the old rows.
                 Holdings = before;
+                HoldingsKey = key;
                 Holdings = await Read(conn, c => ReadHoldings(c, where, idColumn, ids), before);
             }, text => Holdings = Holdings with { Error = text });
         }
 
+        // Read within `every`. The times are the PC's own clock: when it goes back (the end of summer time) a read looks
+        // newer than now, and is counted as due rather than fresh for an hour.
+        private static bool Fresh(DateTime? at, TimeSpan every)
+        {
+            if (at is not DateTime when) return false;
+            var age = DateTime.Now - when;
+            return age >= TimeSpan.Zero && age < every;
+        }
+
         public void ReadItemTotalsIfDue(bool force = false)
         {
-            if (!force && ItemTotals.At.HasValue && DateTime.Now - ItemTotals.At.Value < ListsEvery) return;
+            if (!force && Fresh(ItemTotals.At, ListsEvery)) return;
             RunInventoryRead(async conn => ItemTotals = await Read(conn, ReadItemTotals, ItemTotals), text => ItemTotals = ItemTotals with { Error = text });
         }
 
@@ -940,14 +988,14 @@ namespace XIVFleetCompanion
         public void ReadShoppingIfDue(bool force = false)
         {
             var at = Shopping.At;
-            if (!force && at.HasValue && DateTime.Now - at.Value < PartsEvery && !(Parts.At is DateTime partsAt && partsAt > at.Value)) return;
+            if (!force && Fresh(at, PartsEvery) && !(Parts.At is DateTime partsAt && partsAt > at.Value)) return;
             RunInventoryRead(async conn => Shopping = await Read(conn, ReadShopping, Shopping), text => Shopping = Shopping with { Error = text });
         }
 
         public static async Task<ShoppingRead> ReadShopping(DbConnection conn)
         {
             var held = new List<HeldRow>();
-            await using (var cmd = Db.Cmd("SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who, place", conn))
+            await using (var cmd = Db.Cmd($"SELECT * FROM fleet_shopping_held_view ORDER BY item_id, who{Db.C(conn)}, place{Db.C(conn)}", conn))
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     held.Add(new HeldRow(Int(r, "item_id"), Text(r, "who"), Text(r, "place"), Long(r, "qty")));
@@ -981,46 +1029,84 @@ namespace XIVFleetCompanion
         private volatile bool editing;
         /// <summary>True while an edit is being saved.</summary>
         public bool Editing => editing;
-        /// <summary>The last edit: what it was, why it failed (null: saved) and when.</summary>
-        public (string What, string? Error, DateTime At)? LastEdit { get; private set; }
+        /// <summary>The last edit: what it was, why it failed (null: saved) and when. One object, set in one go from the
+        /// background, so the window never reads half of one edit and half of another.</summary>
+        public EditNote? LastEdit { get; private set; }
+        public sealed record EditNote(string What, string? Error, DateTime At);
+
+        /// <summary>A small write of the page's own (no message, nothing read again), such as the Shopping List's checked
+        /// ticks; a failure is left for next time.</summary>
+        public void SaveQuietly(Func<DbConnection, Task> save)
+        {
+            var cs = connectionString();
+            if (cs == null) return;
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await using var conn = await OpenAsync(cs);
+                    await save(conn);
+                }
+                catch (Exception)
+                {
+                    // Tried again the next time the list is worked out.
+                }
+            });
+        }
 
         /// <summary>Saves an edit (FleetEdits): edit answers null when done, else why not. done is told the same, on a background thread.</summary>
         public void Edit(string what, Func<DbConnection, Task<string?>> edit, Action<string?>? done = null)
         {
             if (editing)
             {
-                LastEdit = (what, "Another change is still being saved. Try again in a moment.", DateTime.Now);
+                LastEdit = new EditNote(what, "Another change is still being saved. Try again in a moment.", DateTime.Now);
                 return;
             }
             var cs = connectionString();
             if (cs == null)
             {
-                LastEdit = (what, "The database isn't set up yet (Settings tab).", DateTime.Now);
+                LastEdit = new EditNote(what, "The database isn't set up yet (Settings tab).", DateTime.Now);
                 return;
             }
             editing = true;
             LastEdit = null;
             Task.Run(async () =>
             {
-                string? error;
+                string? error = null;
+                DbConnection? conn = null;
                 try
                 {
-                    await using var conn = await OpenAsync(cs);
-                    error = await edit(conn);
-                }
-                catch (PostgresException ex)
-                {
-                    error = ex.MessageText;
-                }
-                catch (Exception ex)
-                {
-                    error = ReachFailure(ex);
+                    // "Could not reach" only when the database (or file) couldn't be opened; once open, the reason itself.
+                    try
+                    {
+                        conn = await OpenAsync(cs);
+                    }
+                    catch (Exception ex)
+                    {
+                        error = ReachFailure(ex);
+                    }
+                    if (conn != null)
+                    {
+                        try
+                        {
+                            error = await edit(conn);
+                        }
+                        catch (PostgresException ex)
+                        {
+                            error = ex.MessageText;
+                        }
+                        catch (Exception ex)
+                        {
+                            error = ex.Message;
+                        }
+                    }
                 }
                 finally
                 {
+                    if (conn != null) await conn.DisposeAsync();
                     editing = false;
                 }
-                LastEdit = (what, error, DateTime.Now);
+                LastEdit = new EditNote(what, error, DateTime.Now);
                 if (error == null) ReadAgainSoon();
                 done?.Invoke(error);
             });
@@ -1048,7 +1134,7 @@ namespace XIVFleetCompanion
 
         public void ReadTrendsIfDue(bool force = false)
         {
-            if (!force && Trends.At.HasValue && DateTime.Now - Trends.At.Value < TrendsEvery) return;
+            if (!force && Fresh(Trends.At, TrendsEvery)) return;
             RunInventoryRead(async conn => Trends = await Read(conn, ReadTrendsMeta, Trends), text => Trends = Trends with { Error = text });
         }
 
@@ -1118,7 +1204,25 @@ namespace XIVFleetCompanion
                         {
                             error = ex.MessageText;
                         }
-                        lock (trendLock) Finished(job.Key, result, error);
+                        catch (System.Data.SQLite.SQLiteException ex) when (ex.Message.Contains("no such table") || ex.Message.Contains("no such view"))
+                        {
+                            error = "The fleet file has no recorded history yet.";
+                        }
+                        catch (Exception ex)
+                        {
+                            // Anything else (the file busy, the connection dropped): this chart says why, rather than
+                            // showing Loading for good and being read again and again.
+                            error = conn.State == System.Data.ConnectionState.Open ? ex.Message : ReachFailure(ex);
+                        }
+                        lock (trendLock)
+                        {
+                            Finished(job.Key, result, error);
+                            if (conn.State == System.Data.ConnectionState.Open) continue;
+                            // The connection is gone: the charts still waiting say so too (asked again they start afresh).
+                            foreach (var (key, _) in trendQueue) Finished(key, null, error);
+                            trendQueue.Clear();
+                        }
+                        break;
                     }
                 }
                 catch (Exception ex)
@@ -1221,7 +1325,7 @@ namespace XIVFleetCompanion
 
         public void ReadHeldItemsIfDue(bool force = false)
         {
-            if (!force && HeldItems.At.HasValue && DateTime.Now - HeldItems.At.Value < ListsEvery) return;
+            if (!force && Fresh(HeldItems.At, ListsEvery)) return;
             RunInventoryRead(async conn => HeldItems = await Read(conn, ReadHeldItems, HeldItems), text => HeldItems = HeldItems with { Error = text });
         }
 
@@ -1335,7 +1439,7 @@ namespace XIVFleetCompanion
 
         /// <summary>"12 (2 left out) (3 left to another setup)", as the PCs tab.</summary>
         public static string PcCharacters(int? synced, int? leftOut, int? elsewhere) =>
-            $"{(synced.HasValue ? synced.Value.ToString(CultureInfo.InvariantCulture) : "—")}{(leftOut > 0 ? $" ({leftOut} left out)" : "")}{(elsewhere > 0 ? $" ({elsewhere} left to another game)" : "")}";
+            $"{(synced.HasValue ? synced.Value.ToString(CultureInfo.InvariantCulture) : "—")}{(leftOut > 0 ? $" ({leftOut} left out)" : "")}{(elsewhere > 0 ? $" ({elsewhere} left to another PC or account)" : "")}";
 
         /// <summary>Compares "2.0.0.9"-style versions, part by part.</summary>
         public static int CompareVersions(string? a, string? b)
@@ -1395,7 +1499,8 @@ namespace XIVFleetCompanion
         public static string Ago(DateTime at, DateTime now)
         {
             var s = Math.Max(0, (now - at).TotalSeconds);
-            return s < 60 ? $"{(int)s}s ago" : s < 3600 ? $"{(int)(s / 60)}m ago" : $"{(int)(s / 3600)}h ago";
+            // Days after 48 hours, as the app ("3 days ago", not "72h ago").
+            return s < 60 ? $"{(int)s}s ago" : s < 3600 ? $"{(int)(s / 60)}m ago" : s < 48 * 3600 ? $"{(int)(s / 3600)}h ago" : $"{(int)(s / 86400)} days ago";
         }
     }
 }

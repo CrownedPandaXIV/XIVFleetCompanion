@@ -28,16 +28,26 @@ namespace XIVFleetCompanion
             return value;
         }
 
-        // Voyages that came back after `since` (Unix seconds) for each Free Company asked for (an FC
-        // missing from `since` gets all of its voyages), with the sub's current name. SubmarineTracker adds
-        // a voyage's sectors in the order they were visited, so that order is each sector's leg (1, 2, ...).
-        public static List<DetailsWriter.LootRow> ReadLoot(string path, IReadOnlyDictionary<ulong, long> since, IReadOnlyCollection<ulong> fcIds)
+        // How far before an FC's newest stored voyage a sub with nothing stored yet is still read from.
+        public static readonly long NewSubWindow = (long)TimeSpan.FromDays(7).TotalSeconds;
+
+        // Voyages not stored yet for each Free Company asked for, with the sub's current name. `since`: per sub
+        // (FC, register), the return time (Unix seconds) of its newest stored voyage. A sub's voyages come back one
+        // after another, so only later ones are new; but subs are collected in any order (and by more than one PC),
+        // so one sub's newest says nothing about another's. A sub with nothing stored is read from a week before its
+        // FC's newest; an FC with nothing stored, whole. SubmarineTracker adds a voyage's sectors in the order they
+        // were visited, so that order is each sector's leg (1, 2, ...).
+        public static List<DetailsWriter.LootRow> ReadLoot(string path, IReadOnlyDictionary<(ulong Fc, uint Register), long> since, IReadOnlyCollection<ulong> fcIds)
         {
             var rows = new List<DetailsWriter.LootRow>();
             if (!File.Exists(path) || fcIds.Count == 0) return rows;
             var wanted = new HashSet<ulong>(fcIds);
+            var fcNewest = new Dictionary<ulong, long>();
+            foreach (var (key, at) in since)
+                fcNewest[key.Fc] = Math.Max(at, fcNewest.TryGetValue(key.Fc, out var n) ? n : 0);
+            long From(ulong fc) => fcNewest.TryGetValue(fc, out var n) ? Math.Max(0, n - NewSubWindow) : 0;
             var oldest = long.MaxValue;
-            foreach (var fc in wanted) oldest = Math.Min(oldest, since.TryGetValue(fc, out var s) ? s : 0);
+            foreach (var fc in wanted) oldest = Math.Min(oldest, From(fc));
 
             var builder = new SQLiteConnectionStringBuilder { DataSource = path, ReadOnly = true, Pooling = false, DefaultTimeout = 5 };
             using var conn = new SQLiteConnection(builder.ToString());
@@ -67,8 +77,8 @@ namespace XIVFleetCompanion
                 {
                     if (DecodeId(reader.GetFieldValue<byte[]>(0)) is not ulong fc || !wanted.Contains(fc)) continue;
                     var returned = reader.GetInt64(2);
-                    if (since.TryGetValue(fc, out var after) && returned <= after) continue;
                     var register = reader.GetInt64(1);
+                    if (returned <= (since.TryGetValue((fc, (uint)register), out var after) ? after : From(fc))) continue;
                     var leg = legs.TryGetValue((fc, register, returned), out var before) ? before + 1 : 1;
                     legs[(fc, register, returned)] = leg;
                     rows.Add(new DetailsWriter.LootRow

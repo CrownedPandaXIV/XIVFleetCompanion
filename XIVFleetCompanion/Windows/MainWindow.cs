@@ -213,12 +213,12 @@ public partial class MainWindow : Window, IDisposable
         var alerts = reader.Alerts.Data;
         var low = alerts?.Where(a => a.Kind is "low_ceruleum" or "low_repair_kits").Select(a => a.Subject).Distinct().Count() ?? 0;
         var attention = back + (alerts?.Count ?? 0);
-        var statusProblem = plugin.SyncProblem != null || plugin.Keeper.Problem != null || plugin.Keeper.LastResult is { Newer: true } || (plugin.AutoRetainer != null && !SafeReady());
+        var statusProblem = plugin.SyncProblem != null || plugin.SyncWarning != null || plugin.SameLabelAsAnotherGame || plugin.Keeper.Problem != null || plugin.Keeper.LastResult is { Newer: true } || (plugin.AutoRetainer != null && !SafeReady());
         var notSynced = alerts?.Count(a => a.Kind == "not_synced") ?? 0;
         var venturesDone = reader.RetainerCounts.Data?.VenturesDone ?? 0;
         var housesAtRisk = alerts?.Count(a => a.Kind == "house") ?? 0;
         var setupsToCheck = alerts?.Count(a => a.Kind == "autoretainer") ?? 0;
-        var readyList = reader.Parts.Data is { } partsRead ? PartsPlanner.SubsReady(partsRead.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var readyList = SubsReadyNow();
         var readyForParts = readyList.Count;
         attention += readyForParts;
 
@@ -291,15 +291,15 @@ public partial class MainWindow : Window, IDisposable
 
         // This PC's sync, at the foot.
         var line = plugin.SyncProblem != null ? "Not syncing" :
-            config.LastSyncTimestamp.HasValue ? $"Synced {FleetReader.Ago(config.LastSyncTimestamp.Value, DateTime.Now)}" : "Not synced yet";
-        var lineColor = plugin.SyncProblem != null ? p.Warn : p.Dim;
+            config.LastSyncTimestamp.HasValue ? $"Synced {FleetReader.Ago(config.LastSyncTimestamp.Value, DateTime.Now)}{(plugin.SyncWarning != null ? ", partly" : "")}" : "Not synced yet";
+        var lineColor = plugin.SyncProblem != null || plugin.SyncWarning != null ? p.Warn : p.Dim;
         var height = ImGui.GetTextLineHeightWithSpacing();
         var y = ImGui.GetWindowHeight() - height - ImGui.GetStyle().WindowPadding.Y;
         if (y > ImGui.GetCursorPosY()) ImGui.SetCursorPosY(y);
         if (folded)
         {
             using (ImRaii.PushFont(UiBuilder.IconFont))
-            using (ImRaii.PushColor(ImGuiCol.Text, plugin.SyncProblem != null ? p.Warn : config.Enabled ? p.Good : p.Dim))
+            using (ImRaii.PushColor(ImGuiCol.Text, plugin.SyncProblem != null || plugin.SyncWarning != null ? p.Warn : config.Enabled ? p.Good : p.Dim))
                 Ui.Text(FontAwesomeIcon.Sync.ToIconString());
         }
         else
@@ -309,7 +309,10 @@ public partial class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(plugin.SyncProblem != null ? $"Not syncing ({plugin.SyncProblemAt:t}): {plugin.SyncProblem}" :
-                config.Enabled ? $"This PC syncs every {config.SyncIntervalMinutes} minute(s). {line}." : "Turn syncing on in Settings.");
+                !config.Enabled ? "Turn syncing on in Settings." :
+                $"This PC syncs every {config.SyncIntervalMinutes} minute(s). {line}."
+                + (plugin.SyncWarning != null ? $"\n{plugin.SyncWarning}" : "")
+                + (plugin.SyncedElsewhere > 0 ? $"\n{plugin.SyncedElsewhere} character(s) are synced by another PC or account, where they last logged in." : ""));
     }
 
     private bool SafeReady()
@@ -414,9 +417,9 @@ public partial class MainWindow : Window, IDisposable
             Ui.Text("Fleet Companion Status");
             ImGui.Spacing();
 
-            // Enabled toggle (mirrors Configuration.Enabled)
+            // The same switch as Settings' "Sync this game's fleet", with the same name.
             var enabled = plugin.Configuration.Enabled;
-            if (Ui.Checkbox("Enabled", ref enabled))
+            if (Ui.Checkbox("Sync this game's fleet##status", ref enabled))
             {
                 plugin.Configuration.Enabled = enabled;
                 plugin.Configuration.Save();
@@ -449,8 +452,16 @@ public partial class MainWindow : Window, IDisposable
                     Ui.Wrapped($"Not syncing ({plugin.SyncProblemAt:t}): {problem}");
             }
 
+            // Two games on this PC with the same label share one setup: their PCs-page row and logins overwrite each other.
+            if (plugin.SameLabelAsAnotherGame)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                    Ui.Wrapped(string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel)
+                        ? "Another game on this PC also syncs with no Account Label. Give each game its own Account Label in Settings (for example, the account's name), or they keep overwriting each other's status."
+                        : $"Another game on this PC also syncs as \"{plugin.Configuration.AccountLabel}\". Give each game its own Account Label in Settings, or they keep overwriting each other's status.");
+            }
             // Only once more than one setup syncs this fleet (the PCs page's list): then it's needed to tell them apart.
-            if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel) && reader.Pcs.Data is { Count: > 1 })
+            else if (string.IsNullOrWhiteSpace(plugin.Configuration.AccountLabel) && reader.Pcs.Data is { Count: > 1 })
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, Amber))
                     Ui.Wrapped("More than one game syncs this fleet: give this one an Account Label in Settings (for example, the account's name), so they can be told apart.");
@@ -600,7 +611,7 @@ public partial class MainWindow : Window, IDisposable
         var back = FleetReader.SubsBack(reader.Subs.Data, now);
         var alerts = reader.Alerts.Data;
         if (back > 0) Colored(Green, $"{back} sub{(back == 1 ? " is" : "s are")} back and waiting to be collected (Subs page)");
-        var ready = reader.Parts.Data is { } partsNow ? PartsPlanner.SubsReady(partsNow.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>();
+        var ready = SubsReadyNow();
         if (ready.Count > 0) Colored(Green, $"{PartsPlanner.ReadyText(ready)} (Parts page)");
         if (alerts != null)
         {
@@ -800,6 +811,15 @@ public partial class MainWindow : Window, IDisposable
         }, sub => sub.Character),
         new("account", "Account", sub => Ui.Text(sub.Account.Length > 0 ? sub.Account : "—"), sub => sub.Account, Hidden: true),
         new("sub", "Sub", sub => Ui.Text(sub.SubName), sub => sub.SubName, Locked: true),
+        // Status: back and waiting first, then the soonest back; in port last either way.
+        new("status", "Status", sub =>
+        {
+            var status = FleetReader.SubStatus(sub.ReturnTime, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            if (status == "Back") Colored(Green, status);
+            else if (status == "In port") Colored(Dim, status);
+            else Ui.Text(status);
+        }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
+        // The same columns in the same order as the app's Subs tab (the character first, as the plugin shows it once).
         // A thin bar for how far to the next rank, then the rank with its percent as the app shows it ("68.81"), right after it (both on the left, so stretching the column
         // doesn't pull them apart; the bar's fixed width lines the numbers up).
         new("rank", "Rank", sub =>
@@ -814,28 +834,19 @@ public partial class MainWindow : Window, IDisposable
             Ui.Text(FleetOrder.RankText(sub.Rank, sub.CurrentExp, sub.NextLevelExp));
             if (sub.NextLevelExp > 0) Hover($"{100.0 * sub.CurrentExp / sub.NextLevelExp:0}% of the way to rank {sub.Rank + 1}");
         }, sub => FleetOrder.RankSortKey(sub.Rank, sub.CurrentExp, sub.NextLevelExp)),
-        new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
-        // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
-        new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
-        // Status: back and waiting first, then the soonest back; in port last either way.
-        new("status", "Status", sub =>
-        {
-            var status = FleetReader.SubStatus(sub.ReturnTime, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            if (status == "Back") Colored(Green, status);
-            else if (status == "In port") Colored(Dim, status);
-            else Ui.Text(status);
-        }, sub => sub.ReturnTime, sub => sub.ReturnTime <= 0),
         // Routes stage: when it ranks up and changes build, its route and gil a day (Fight Club's, after repair kits).
         new("nextRank", "Next rank", sub => NextRankCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextRankAt == null),
         new("nextBuild", "Next build", sub => NextBuildCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At == null),
+        new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
         new("speed", "Speed", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Speed is double v) RightNumber((long)v); else Colored(Dim, "—"); },
-            sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1, Hidden: true),
+            sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1),
         new("range", "Range", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Range is double v) RightNumber((long)v); else Colored(Dim, "—"); },
-            sub => RouteOf(sub.Cid, sub.SubName)?.Range ?? -1, Hidden: true),
+            sub => RouteOf(sub.Cid, sub.SubName)?.Range ?? -1),
         new("route", "Current route", sub => { if (RouteOf(sub.Cid, sub.SubName) is { } r) RouteCell(r.CurrentRoute, r.CurrentMap); else Colored(Dim, "—"); },
-            sub => RouteOf(sub.Cid, sub.SubName)?.CurrentRoute ?? ""),
+            // By map, then route (as the app), so routes on different maps don't mix.
+            sub => RouteOf(sub.Cid, sub.SubName) is { CurrentRoute.Length: > 0 } r ? $"{r.CurrentMap?.Id ?? 0:D6}|{r.CurrentRoute}" : ""),
         new("gilDay", "Current gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay, NoCurrentGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.CurrentGilDay == null),
         // The best route for its rank, in amber when it isn't on it.
@@ -848,6 +859,8 @@ public partial class MainWindow : Window, IDisposable
         }, sub => RouteOf(sub.Cid, sub.SubName)?.TargetRoute ?? ""),
         new("targetGilDay", "Target gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),
+        // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
+        new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
 
     // "W-S-U-C" with the dashes softer, so the four parts stand out.
@@ -894,11 +907,11 @@ public partial class MainWindow : Window, IDisposable
         }, c => c.Character, Locked: true),
         new("account", "Account", c => Ui.Text(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
         new("ceruleum", "Ceruleum", c => RightNumber(c.Ceruleum, DaysColor(c.CeruleumDaysLeft) ?? (c.CeruleumPerDay != null ? Green : (Vector4?)null)), c => c.Ceruleum),
-        new("ceruleumPerDay", "A day##ceruleum", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
-        new("ceruleumDays", "Days left##ceruleum", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
+        new("ceruleumPerDay", "Ceruleum / day", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
+        new("ceruleumDays", "Ceruleum: days left", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
         new("kits", "Repair kits", c => RightNumber(c.RepairKits, DaysColor(c.RepairKitsDaysLeft) ?? (c.RepairKitsPerDay != null ? Green : (Vector4?)null)), c => c.RepairKits),
-        new("kitsPerDay", "A day##kits", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
-        new("kitsDays", "Days left##kits", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
+        new("kitsPerDay", "Repair kits / day", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
+        new("kitsDays", "Repair kits: days left", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
         new("buy", "To buy", c =>
         {
             var buy = new List<string>();
@@ -914,12 +927,109 @@ public partial class MainWindow : Window, IDisposable
         RefreshButton();
         ImGui.SameLine();
         SuppliesTable.DrawControls();
-        ImGui.SameLine();
-        ReadLine(reader.Supplies, FleetReader.SuppliesEvery);
+        ReadLine(reader.Supplies, FleetReader.SuppliesEvery); // on its own line, as on every other page
         var supplies = reader.Supplies.Data;
         if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
         if (supplies == null) return;
-        SuppliesTable.Draw(supplies);
+        SuppliesSummary(supplies);
+        SuppliesTable.Draw(supplies, fitRows: true);
+        if (reader.Credits.Data is { } credits) FcCreditsSection(supplies, credits);
+        else if (reader.Credits.Error != null) Colored(Amber, $"Ceruleum from FC Credits couldn't be read: {reader.Credits.Error}");
+    }
+
+    // The fleet's use a day, what to buy to last the chosen days, and who runs out first (as the app's cards).
+    private void SuppliesSummary(List<SupplyRow> rows)
+    {
+        if (rows.Count == 0) { Ui.Text("No characters with subs built yet."); return; }
+        var target = rows[0].TargetDays;
+        var credits = reader.Credits.Data;
+        Runs(("Fleet use per day: ", Dim), ($"{PerDay(rows.Sum(r => r.CeruleumPerDay ?? 0))} ceruleum · {PerDay(rows.Sum(r => r.RepairKitsPerDay ?? 0))} repair kits", null));
+        var kits = rows.Sum(r => (long)r.RepairKitsRestock);
+        Runs(($"To last {target} days, buy: ", Dim), ($"{Number(rows.Sum(r => (long)r.CeruleumRestock))} ceruleum · {Number(kits)} repair kits", null));
+        if (credits != null)
+        {
+            ImGui.SameLine();
+            var chest = credits.Chests.Values.Sum();
+            if (credits.RepairKitCost > 0) Runs(("  (repair kits ≈ ", Dim), ($"{Number((long)Math.Round(kits * credits.RepairKitCost))} gil", Palette.Gil), ($"; FC chests hold {Number(chest)} ceruleum)", Dim));
+            else Colored(Dim, $"  (FC chests hold {Number(chest)} ceruleum)");
+        }
+        var soonest = rows.SelectMany(r => new[] { (r.Character, What: "ceruleum", Days: r.CeruleumPerDay != null ? r.CeruleumDaysLeft : null),
+                                                    (r.Character, What: "repair kits", Days: r.RepairKitsPerDay != null ? r.RepairKitsDaysLeft : null) })
+            .Where(x => x.Days != null).OrderBy(x => x.Days).FirstOrDefault();
+        Runs(("Runs out first: ", Dim), (soonest.Days is double d ? $"{soonest.Character}: {soonest.What} in {FcCredits.DaysText(d).ToLowerInvariant()}" : "Nothing is running out", soonest.Days is double dd ? DaysColor(dd) : null));
+        ImGui.Spacing();
+    }
+
+    // ---- Ceruleum from FC credits (as the app's Supplies page) ----
+
+    private FleetTable<FcCredits.Total>? creditAccountsTable;
+    private FleetTable<FcCredits.FcLine>? creditFcsTable;
+    private int tankCostDraft = -1, tankCostShown = -1;
+    private readonly Memo<FcCredits.Plan> creditPlan = new();
+
+    private FleetTable<FcCredits.Total> CreditAccountsTable => creditAccountsTable ??= new FleetTable<FcCredits.Total>("fcCreditAccounts", plugin.Configuration, new List<FleetColumn<FcCredits.Total>>
+    {
+        new("account", "Account", a => Ui.Text(a.Label), a => a.Label, Locked: true),
+        new("fcs", "Free Companies", a => RightNumber(a.FcCount), a => a.FcCount),
+        new("credits", "Credits", a => RightNumber(a.Credits), a => a.Credits),
+        new("tanks", "Tanks they buy", a => RightNumber(a.Tanks), a => a.Tanks),
+        new("held", "Ceruleum held", a => RightNumber(a.Held), a => a.Held),
+        new("chest", "In FC chests", a => RightNumber(a.Chest), a => a.Chest),
+        new("perDay", "Use per day", a => TableCells.Right(PerDay(a.PerDay), a.PerDay == null ? Dim : (Vector4?)null), a => a.PerDay ?? -1),
+        new("days", "Tanks last", a => TableCells.Right(FcCredits.DaysText(a.Days), a.Days == null ? Dim : DaysColor(a.Days)), a => a.Days ?? -1),
+    });
+
+    private FleetTable<FcCredits.FcLine> CreditFcsTable => creditFcsTable ??= new FleetTable<FcCredits.FcLine>("fcCreditFcs", plugin.Configuration, new List<FleetColumn<FcCredits.FcLine>>
+    {
+        new("fc", "Free Company", f => Ui.Text(f.Name.Length > 0 ? f.Name : "—"), f => f.Name, Locked: true),
+        new("account", "Account", f => Ui.Text(f.Account), f => f.Account),
+        new("credits", "Credits", f => RightNumber(f.Credits), f => f.Credits),
+        new("tanks", "Tanks they buy", f => RightNumber(f.Tanks), f => f.Tanks),
+        new("chest", "In FC chest", f => RightNumber(f.Chest), f => f.Chest),
+        new("perDay", "Members' use per day", f => TableCells.Right(PerDay(f.PerDay), f.PerDay == null ? Dim : (Vector4?)null), f => f.PerDay ?? -1),
+        new("days", "Tanks last", f => TableCells.Right(FcCredits.DaysText(f.Days), f.Days == null ? Dim : DaysColor(f.Days)), f => f.Days ?? -1),
+    });
+
+    private void FcCreditsSection(List<SupplyRow> rows, CreditsRead credits)
+    {
+        Heading("Ceruleum from FC Credits");
+        var plan = creditPlan.Get(() => FcCredits.Work(credits.Fcs,
+            rows.Select(r => new FcCredits.Member(r.FcId, r.Account, r.CeruleumPerDay, r.Ceruleum)).ToList(), credits.Chests, credits.TankCost), rows, credits);
+
+        // The tank's price: follows a change made in the app or on another PC until it's changed here.
+        if (tankCostShown != plan.TankCost) { tankCostShown = plan.TankCost; tankCostDraft = plan.TankCost; }
+        ImGui.AlignTextToFramePadding();
+        Ui.Text("Company credits per ceruleum tank");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        Ui.InputInt("##tankCost", ref tankCostDraft, 0);
+        tankCostDraft = Math.Clamp(tankCostDraft, 1, FcCredits.MaxTankCost);
+        if (tankCostDraft != plan.TankCost)
+        {
+            ImGui.SameLine();
+            using (ImRaii.Disabled(reader.Editing))
+                if (ImGui.Button("Save##tankCost"))
+                {
+                    var cost = tankCostDraft;
+                    reader.Edit("the tank's price", c => FleetEdits.SaveTankCost(c, cost));
+                }
+        }
+        ImGui.SameLine();
+        Colored(Dim, "From the OIC Quartermaster at your Grand Company; check the price in game.");
+
+        var f = plan.Fleet;
+        Runs(("Fleet: FC credits buy ", Dim), ($"{Number(f.Tanks)} tanks", null),
+            ($" ({Number(f.Credits)} credits across {f.FcCount} Free Compan{(f.FcCount == 1 ? "y" : "ies")})", Dim));
+        Runs(("Fleet: those tanks last ", Dim), (FcCredits.DaysText(f.Days), f.Days == null ? Dim : DaysColor(f.Days)),
+            ($" at {PerDay(f.PerDay)} ceruleum a day, on top of the {Number(f.Held)} held and {Number(f.Chest)} in FC chests", Dim));
+        if (plan.Fcs.Count == 0) { Ui.Text("No Free Company credits recorded yet (they come from FC Tracker)."); return; }
+        if (plan.Accounts.Count > 0)
+        {
+            CreditAccountsTable.DrawControls();
+            CreditAccountsTable.Draw(plan.Accounts, fitRows: true);
+        }
+        CreditFcsTable.DrawControls();
+        CreditFcsTable.Draw(plan.Fcs, fitRows: true);
     }
 
     private void PerDayCell(double? perDay)
@@ -930,8 +1040,9 @@ public partial class MainWindow : Window, IDisposable
 
     private void DaysCell(double? daysLeft, double? perDay)
     {
-        // Red under 3 days, amber under 7, green otherwise (and when none are used); dim without enough history.
-        var days = Days(daysLeft, perDay);
+        // Red under 3 days, amber under 7, green otherwise (and when none are used); dim without enough history. Worded as
+        // the app: "6.2 days", "Under a day", "No use", "Not enough history".
+        var days = FcCredits.DaysText(perDay == null ? null : daysLeft ?? double.PositiveInfinity);
         TableCells.Right(days, perDay == null ? Dim : DaysColor(daysLeft) ?? Green);
     }
 }

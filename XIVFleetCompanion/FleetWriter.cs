@@ -32,6 +32,12 @@ namespace XIVFleetCompanion
             public int NumSubSlots;
         }
 
+        /// <summary>The game's own numbering of a high-quality item: its id + 1,000,000.</summary>
+        public const uint HqOffset = 1_000_000;
+
+        /// <summary>The id an item is stored under: a high-quality one at its id + 1,000,000, as the game numbers it.</summary>
+        public static uint StoredItemId(uint itemId, bool hq) => hq && itemId < HqOffset ? itemId + HqOffset : itemId;
+
         public class InventoryItem
         {
             public ulong RetainerId;
@@ -174,8 +180,8 @@ namespace XIVFleetCompanion
             if (logins.Count == 0) return true;
             const string sql = @"
                 INSERT INTO companion_character_login (cid, pc_name, account_label, logged_in_at)
-                SELECT t.cid, @pc, @label, t.at
-                FROM unnest(@cid::numeric[], @at::timestamptz[]) AS t(cid, at)
+                SELECT t.cid, @pc, @label, now() - make_interval(secs => t.ago)
+                FROM unnest(@cid::numeric[], @ago::float8[]) AS t(cid, ago)
                 ON CONFLICT (cid) DO UPDATE SET
                     pc_name = EXCLUDED.pc_name,
                     account_label = EXCLUDED.account_label,
@@ -187,7 +193,9 @@ namespace XIVFleetCompanion
                 cmd.Parameters.AddWithValue("pc", pcName);
                 cmd.Parameters.AddWithValue("label", accountLabel);
                 cmd.Parameters.AddWithValue("cid", logins.Select(l => (decimal)l.Key).ToArray());
-                cmd.Parameters.AddWithValue("at", logins.Select(l => DateTime.SpecifyKind(l.Value, DateTimeKind.Utc)).ToArray());
+                // How long ago, by this PC's clock; the time is the database's, so PCs whose clocks differ compare fairly.
+                var now = DateTime.UtcNow;
+                cmd.Parameters.AddWithValue("ago", logins.Select(l => Math.Max(0, (now - DateTime.SpecifyKind(l.Value, DateTimeKind.Utc)).TotalSeconds)).ToArray());
                 await cmd.ExecuteNonQueryAsync();
                 return true;
             }
@@ -517,6 +525,11 @@ namespace XIVFleetCompanion
         // nothing: it is more likely missing data than a character who dismissed every retainer.
         public static async Task WriteRetainersAsync(DbConnection db, ulong ownerCid, IReadOnlyList<RetainerRecord> retainers)
         {
+            // AutoRetainer lists a retainer with id 0 before it has loaded it: the list isn't known yet, so what's stored
+            // stays (written now, the retainers not in it would be removed). A retainer listed twice is written once (the
+            // last), as PostgreSQL refuses to change one row twice in one statement and the file would just overwrite it.
+            if (retainers.Any(r => r.RetainerId == 0)) return;
+            retainers = retainers.GroupBy(r => r.RetainerId).Select(g => g.Last()).ToList();
             if (Db.IsFile(db)) { if (retainers.Count > 0) await FileWriteRetainers(db, ownerCid, retainers); return; }
             var conn = (NpgsqlConnection)db;
             if (retainers.Count == 0) return;
@@ -575,16 +588,32 @@ namespace XIVFleetCompanion
             return await cmd.ExecuteNonQueryAsync();
         }
 
+        // The Free Companies with a character that has subs, from every PC's characters (as last synced). Read on both
+        // database types; an FC id is numeric in PostgreSQL and text in the file.
+        public static async Task<HashSet<ulong>> ReadFcsWithSubsAsync(DbConnection db)
+        {
+            var fcs = new HashSet<ulong>();
+            await using var cmd = Db.Command(db, "SELECT DISTINCT fc_id FROM companion_character_current WHERE submarine_count > 0 AND fc_id IS NOT NULL");
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                if (Db.Id(r, 0) is var id and not 0) fcs.Add(id);
+            return fcs;
+        }
+
         // Removes the chests of Free Companies that no tracked character belongs to any more (a
         // character left, or the FC was disbanded), going by companion_character_current, which
-        // holds every account's characters. Returns how many chest slots were removed.
+        // holds every account's characters. Only once the chest hasn't been written for a day: a
+        // character's FC can briefly read as none (AutoRetainer not knowing it yet, after an update or
+        // a re-registration), and a chest still in use is written again at least hourly. Returns how
+        // many chest slots were removed.
         public static async Task<int> RemoveOrphanFcChestsAsync(DbConnection db)
         {
             if (Db.IsFile(db)) { return await FileRemoveOrphanFcChests(db); }
             var conn = (NpgsqlConnection)db;
             const string sql = @"
                 DELETE FROM companion_fc_inventory_snapshot f
-                WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = f.fc_id)";
+                WHERE NOT EXISTS (SELECT 1 FROM companion_character_current c WHERE c.fc_id = f.fc_id)
+                  AND f.updated_at < localtimestamp - interval '1 day'";
             await using var cmd = new NpgsqlCommand(sql, conn);
             return await cmd.ExecuteNonQueryAsync();
         }
@@ -756,6 +785,8 @@ namespace XIVFleetCompanion
         private readonly Dictionary<string, string> lastWritten = new();
         private readonly TimeSpan refreshEvery;
         private DateTime startedAt;
+        private string? database;
+        private volatile bool forgetAll;
 
         public ChangeTracker(TimeSpan refreshEvery, DateTime now)
         {
@@ -763,15 +794,22 @@ namespace XIVFleetCompanion
             startedAt = now;
         }
 
-        // Call once at the start of each sync.
-        public void BeginSync(DateTime now)
+        // Call once at the start of each sync. database: which database this sync writes to (any text naming it);
+        // what was written to another one is forgotten, so a new, restored or moved database gets everything.
+        public void BeginSync(DateTime now, string? database = null)
         {
-            if (now - startedAt >= refreshEvery)
+            var changedDatabase = database != null && this.database != null && database != this.database;
+            if (database != null) this.database = database;
+            if (forgetAll || changedDatabase || now - startedAt >= refreshEvery)
             {
+                forgetAll = false;
                 lastWritten.Clear();
                 startedAt = now;
             }
         }
+
+        // From any thread (a restore or a move): the next sync writes everything again.
+        public void ForgetAll() => forgetAll = true;
 
         public bool IsUnchanged(string key, string fingerprint)
             => lastWritten.TryGetValue(key, out var previous) && previous == fingerprint;

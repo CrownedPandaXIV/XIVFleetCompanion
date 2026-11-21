@@ -62,6 +62,12 @@ public partial class MainWindow
                     : PartsPlanner.Plan(parts.Inputs, SubRoutes.Upcoming(routes.Subs, now, longest));
                 shoppingList = ShoppingMath.Make(needs, now, days, shop.Progress, game, shop.Held, buy,
                     shop.LivePrices ? new ShoppingUniversalis(universalis) : null, shop.Worlds, shop.Exclude, scope);
+                // The ticks checked against the list are saved back, as the app does, so old ticks don't count later.
+                if (shoppingList.ProgressToSave is { } checkedTicks)
+                {
+                    var from = shop.Progress;
+                    reader.SaveQuietly(c => FleetEdits.SaveCheckedShoppingProgress(c, from, checkedTicks));
+                }
             }
             catch (Exception ex)
             {

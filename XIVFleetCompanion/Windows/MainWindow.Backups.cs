@@ -6,7 +6,9 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace XIVFleetCompanion.Windows;
 
@@ -21,6 +23,42 @@ public partial class MainWindow
     private string? confirmRestore;
     private bool restoreAsked;
 
+    private readonly Every<(PgBackups.Settings Settings, PgBackups.LastResult? Last)> backupSettingsNow = new(TimeSpan.FromSeconds(3));
+
+    // The backup folder's list, read away from the game's thread (a folder on a NAS, OneDrive or a PC that's off can be
+    // slow or not answer): every 10 seconds, when the folder changes, and when a backup or restore ends. The last list
+    // read shows meanwhile.
+    private List<PgBackups.Backup> sharedBackupList = new();
+    private string sharedBackupListFolder = "";
+    private DateTime sharedBackupListAt = DateTime.MinValue;
+    private bool sharedBackupListing, sharedBackupListBusy;
+
+    private List<PgBackups.Backup> BackupList(string folder, bool busy)
+    {
+        var due = folder != sharedBackupListFolder || DateTime.UtcNow - sharedBackupListAt > TimeSpan.FromSeconds(10) || (sharedBackupListBusy && !busy);
+        sharedBackupListBusy = busy;
+        if (due && !sharedBackupListing)
+        {
+            if (folder != sharedBackupListFolder) sharedBackupList = new();
+            sharedBackupListing = true;
+            sharedBackupListFolder = folder;
+            sharedBackupListAt = DateTime.UtcNow;
+            Task.Run(() =>
+            {
+                try { sharedBackupList = PgBackups.List(folder); }
+                catch (Exception) { /* listed again next time */ }
+                finally { sharedBackupListing = false; }
+            });
+        }
+        return sharedBackupList;
+    }
+
+    private void BackupsChanged()
+    {
+        backupSettingsNow.Forget();
+        sharedBackupListAt = DateTime.MinValue;
+    }
+
     private void DrawSharedBackups()
     {
         if (plugin.Configuration.FleetStore != FleetStoreChoice.SharedDatabase) return;
@@ -29,7 +67,8 @@ public partial class MainWindow
         backupDialog.Draw();
         if (!b.ToolsLooked) b.FindTools();
         b.LookForAppTask();
-        var (saved, last) = b.Load();
+        // The settings file at most every few seconds (and straight after Save, Back up now or Restore), not every frame.
+        var (saved, last) = backupSettingsNow.Get(b.Load);
         var d = backupDraft ??= saved;
         var scale = ImGuiHelpers.GlobalScale;
 
@@ -89,6 +128,7 @@ public partial class MainWindow
             if (ImGui.Button("Save backup settings"))
             {
                 backupDraftError = b.Save(d) ?? "";
+                BackupsChanged();
                 if (backupDraftError.Length == 0) backupDraft = null;
             }
         }
@@ -104,7 +144,7 @@ public partial class MainWindow
         ImGui.Spacing();
         using (ImRaii.Disabled(b.Busy || saved.Folder.Length == 0))
         {
-            if (ImGui.Button("Back up now")) b.BackUpNow();
+            if (ImGui.Button("Back up now")) { b.BackUpNow(); BackupsChanged(); }
         }
         if (saved.Folder.Length > 0)
         {
@@ -128,7 +168,7 @@ public partial class MainWindow
                 Ui.Wrapped(string.Join(" · ", rows.Where(r => r.Live != null).Select(r => $"{r.Table.Replace("companion_", "")}: {r.Restored?.ToString("N0", CultureInfo.CurrentCulture) ?? "missing"} of {r.Live:N0}")));
 
         // The backups there are.
-        var list = PgBackups.List(saved.Folder);
+        var list = BackupList(saved.Folder, b.Busy);
         if (saved.Folder.Length > 0 && list.Count == 0) Colored(Dim, "No backups in that folder yet.");
         if (list.Count > 0)
         {
@@ -177,7 +217,7 @@ public partial class MainWindow
         Ui.Wrapped("The whole database goes back to how it was then, for every PC and the app. The database as it is now is backed up first, so this can be undone the same way.");
         if (ImGui.Button("Restore"))
         {
-            if (confirmRestore != null) b.Restore(confirmRestore);
+            if (confirmRestore != null) { b.Restore(confirmRestore); BackupsChanged(); }
             confirmRestore = null;
             ImGui.CloseCurrentPopup();
         }

@@ -13,7 +13,7 @@ namespace XIVFleetCompanion
     public static class TableExport
     {
         private static readonly Regex FormulaStart = new("^[=+\\-@]");
-        private static readonly Regex PlainNumber = new("^[+-]?[\\d,.]+%?$");
+        private static readonly Regex PlainNumber = new("^[+-]?[0-9,.]+%?$");
         private static readonly Regex Unsafe = new("[\\\\/:*?\"<>|]+");
         private static readonly Regex Spaces = new("\\s+");
 
@@ -40,7 +40,7 @@ namespace XIVFleetCompanion
             var safe = Spaces.Replace(Unsafe.Replace(title ?? "Table", " "), " ").Trim();
             if (safe.Length > 100) safe = safe[..100];
             if (safe.Length == 0) safe = "Table";
-            return $"{safe} {date:yyyy-MM-dd}.csv";
+            return $"{safe} {date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)}.csv"; // as the app: Gregorian, ASCII digits
         }
     }
 

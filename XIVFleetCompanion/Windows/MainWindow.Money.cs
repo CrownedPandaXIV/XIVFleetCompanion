@@ -114,6 +114,13 @@ public partial class MainWindow
             if (e.Value.Unmatched > 0)
                 Hover($"{e.Value.Unmatched} of {c.Subs} sub{(c.Subs == 1 ? " is" : "s are")} on a route Fight Club doesn't list, so {(e.Value.Unmatched == 1 ? "it is" : "they are")} left out of expected.");
         }, c => ExpectedOf(c.Cid)?.Expected ?? double.MinValue, c => ExpectedOf(c.Cid)?.Expected == null),
+        // Real net less expected, signed, coloured as Of expected (as the app's Difference / day).
+        new("difference", "Difference / day", c =>
+        {
+            if (Difference(c) is not double d) { if (c.Enough) Colored(Dim, "—"); return; }
+            var text = $"{(d > 0 ? "+" : d < 0 ? "−" : "")}{Gil(Math.Abs(d))}";
+            if (Share(c) is double sh && sh < 0.75) TableCells.Right(text, Red); else if (Share(c) is double sh2 && sh2 < 0.9) TableCells.Right(text, Amber); else TableCells.Right(text);
+        }, c => Difference(c) ?? double.MinValue, c => Difference(c) == null),
         new("share", "Of expected", c =>
         {
             if (Share(c) is not double sh) return;
@@ -121,6 +128,9 @@ public partial class MainWindow
             if (sh < 0.75) TableCells.Right(text, Red); else if (sh < 0.9) TableCells.Right(text, Amber); else TableCells.Right(text);
         }, c => Share(c) ?? double.MinValue, c => Share(c) == null),
     }, c => c.Account, "characters");
+
+    // Real net a day less expected (null without enough history or nothing expected).
+    private double? Difference(IncomeRow c) => c.Enough && ExpectedOf(c.Cid)?.Expected is double e ? c.PerDay - e : null;
 
     // Real net a day against expected (null without enough history or nothing expected).
     private double? Share(IncomeRow c) => c.Enough && ExpectedOf(c.Cid)?.Expected is double e && e > 0 ? c.PerDay / e : null;
@@ -137,7 +147,7 @@ public partial class MainWindow
             new("rewards", "Rewards", v => RightNumber(v.Rewards), v => v.Rewards),
             new("perDay", "Vendor value / day", v => TableCells.Right(Gil(v.PerDay), Green), v => v.PerDay),
             new("top", "Most valuable", v => Ui.Text(string.Join(", ", v.Top.Select(t => $"{ItemName(t.ItemId, false)} ×{Number(t.Quantity)}")))),
-        }.Concat(live ? Universalis.Scopes.Select(s => new FleetColumn<FleetReader.VentureSummary>($"market{s}", $"Market / day ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})",
+        }.Concat(live ? Universalis.Scopes.Select(s => new FleetColumn<FleetReader.VentureSummary>($"market{s}", $"{(s == "world" ? "World" : s == "dc" ? "DC" : "Region")} market / day",
             v => { if (VentureMarketOf(v.Cid, s) is double g) TableCells.Right(Gil(g), Green); else Colored(Dim, "—"); },
             v => VentureMarketOf(v.Cid, s) ?? 0)) : Enumerable.Empty<FleetColumn<FleetReader.VentureSummary>>()).ToList();
 
@@ -254,7 +264,7 @@ public partial class MainWindow
             new("perDay", "Vendor value / day", s => TableCells.Right(Gil(s.PerDay), Green), s => s.PerDay),
             new("expected", "Expected / day", s => GilDayCell(s.ExpectedPerDay, "No sub of this name on its character's Subs page matches Fight Club's routes."),
                 s => s.ExpectedPerDay ?? double.MinValue, s => s.ExpectedPerDay == null),
-        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootSub>($"market{scope}", $"Market / day ({ScopeLabel(scope)})",
+        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootSub>($"market{scope}", $"{ScopeLabel(scope)} market / day",
             s => { if (LootSubMarket(s, scope) is { } m) TableCells.Right(Gil(m.PerDay), Green); else Colored(Dim, "—"); },
             s => LootSubMarket(s, scope)?.PerDay ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootSub>>()).ToList();
 
@@ -264,7 +274,7 @@ public partial class MainWindow
             new("subs", "Subs", r => RightNumber(r.Subs), r => r.Subs),
             new("voyages", "Voyages", r => RightNumber(r.Voyages), r => r.Voyages),
             new("perVoyage", "Vendor gil / voyage", r => GilCell((long)SubRoutes.Round(r.PerVoyage)), r => r.PerVoyage),
-        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootRoute>($"market{scope}", $"Market / voyage ({ScopeLabel(scope)})",
+        }.Concat(live ? Universalis.Scopes.Select(scope => new FleetColumn<LootRoute>($"market{scope}", $"{ScopeLabel(scope)} market / voyage",
             r => { if (LootRouteMarket(r, scope) is { } m) GilCell((long)SubRoutes.Round(m.PerVoyage)); else Colored(Dim, "—"); },
             r => LootRouteMarket(r, scope)?.PerVoyage ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootRoute>>()).ToList();
 
@@ -293,13 +303,14 @@ public partial class MainWindow
         subTable.DrawControls();
         var subs = loot.Subs.Where(s => Matches(incomeFilter, s.Character, s.World, s.Account, s.SubName, s.Route)).ToList();
         if (subs.Count == 0) Ui.Text("Nothing matches.");
-        else subTable.Draw(FleetOrder.Roster(subs, s => s.SortIndex ?? int.MaxValue, s => s.Character ?? ""));
+        // Both tables as tall as their rows, the page scrolling (else the first takes all the height and By route can't be seen).
+        else subTable.Draw(FleetOrder.Roster(subs, s => s.SortIndex ?? int.MaxValue, s => s.Character ?? ""), fitRows: true);
         Heading("By route");
         Colored(Dim, "Each route's voyages, best gil a voyage first.");
         var routeTable = live ? lootRoutesLiveTable ??= new FleetTable<LootRoute>("lootRoutesLive", plugin.Configuration, LootRouteColumns(true))
                               : lootRoutesTable ??= new FleetTable<LootRoute>("lootRoutes", plugin.Configuration, LootRouteColumns(false));
         routeTable.DrawControls();
-        routeTable.Draw(loot.Routes.Where(r => Matches(incomeFilter, r.Route)).ToList());
+        routeTable.Draw(loot.Routes.Where(r => Matches(incomeFilter, r.Route)).ToList(), fitRows: true);
     }
 
     private void DrawVentureIncome(IncomeRead income)

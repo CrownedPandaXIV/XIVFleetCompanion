@@ -28,6 +28,29 @@ internal static partial class Program
             Check(again.Settings.Keep == 9 && again.Last?.At == 1794000000000, "backups: saving the settings keeps the last result (and the app reads the same names back)");
             Check(PgBackups.Load(Path.Combine(folder, "none.json")).Settings == PgBackups.Settings.Defaults, "backups: no file yet gives the app's defaults (off, keep 14, 03:30)");
 
+            // Tools at least the database's version are taken (as the app's): an older PostgreSQL here is passed over.
+            if (!OperatingSystem.IsWindows())
+            {
+                string Fake(string dir, string version)
+                {
+                    Directory.CreateDirectory(dir);
+                    foreach (var name in new[] { "pg_dump", "pg_restore" })
+                    {
+                        var f = Path.Combine(dir, name);
+                        File.WriteAllText(f, $"#!/bin/sh\necho \"{name} (PostgreSQL) {version}\"\n");
+                        File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    }
+                    return dir;
+                }
+                var old14 = Fake(Path.Combine(folder, "pg14"), "14.12");
+                var app17 = Fake(Path.Combine(folder, "tools17"), "17.4");
+                var for14 = await PgBackups.FindTools(old14, app17, 14);
+                var chosenOld = await PgBackups.FindTools(old14, app17, 16);
+                Check(PgBackups.ToolsMajor("pg_dump (PostgreSQL) 16.4") == 16 && for14.Tools?.Bin == old14 && chosenOld.Tools == null
+                      && chosenOld.Error!.Contains("PostgreSQL 14, older than the database's PostgreSQL 16"),
+                    $"backups: the tools must be at least the database's version, else it says they're too old: {chosenOld.Error}");
+            }
+
             // The app's answers for the same settings (backups/settings.js validateBackupSettings).
             var d = PgBackups.Settings.Defaults;
             var cases = new (PgBackups.Settings In, string? Error)[]
@@ -122,6 +145,54 @@ internal static partial class Program
                 var counts = (string)(await count.ExecuteScalarAsync())!;
                 Check(restore.Ok && counts == "2/50" && restore.Safety?.File is { } safety && File.Exists(safety) && restore.Message.Contains(Path.GetFileName(safety)),
                     $"backups: Restore puts the database back as it was, after backing up how it was first: {restore.Message} ({counts})");
+            }
+            // A view added after the backup was made (as a later views.sql would) doesn't stop the restore: the fleet views
+            // are set aside first, and the next database check makes them again.
+            await using (var db = new NpgsqlConnection(b.ConnectionString))
+            {
+                await db.OpenAsync();
+                await Exec(db, "CREATE VIEW fleet_newer_view AS SELECT cid, name FROM companion_character_current; " +
+                               "CREATE VIEW fleet_a_view AS SELECT cid FROM fleet_newer_view; " +
+                               "CREATE TABLE companion_views (id int PRIMARY KEY, checksum text, app_version text, applied_at timestamptz); " +
+                               "INSERT INTO companion_views VALUES (1, 'abc', '9.9.9', now())");
+            }
+            var past = await PgBackups.Restore(tools, login, settings, kept[0].File, new DateTime(2026, 11, 13, 7, 0, 0));
+            await using (var db = new NpgsqlConnection(b.ConnectionString))
+            {
+                await db.OpenAsync();
+                await using var look = new NpgsqlCommand("SELECT (to_regclass('fleet_newer_view') IS NULL) || '/' || (SELECT count(*) FROM companion_views)", db);
+                var after = (string)(await look.ExecuteScalarAsync())!;
+                Check(past.Ok && after == "true/0", $"backups: a backup made before a view was added still restores, with the views set aside to be made again: {past.Message} ({after})");
+            }
+            // A restore pauses the plugins on other PCs first (as the app's): it waits for one still syncing, gives up
+            // after a while, takes its note down, and leaves a note saying the database moved away alone.
+            await using (var db = new NpgsqlConnection(b.ConnectionString))
+            {
+                await db.OpenAsync();
+                await Exec(db, @"CREATE TABLE companion_database_move (id int PRIMARY KEY DEFAULT 1, state text NOT NULL, host text NOT NULL, port int NOT NULL,
+                    from_host text, started_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), moved_at timestamptz)");
+                await using var plugin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(b.ConnectionString) { ApplicationName = DatabaseMove.ApplicationName }.ConnectionString);
+                await plugin.OpenAsync();
+                var syncing = Exec(plugin, "SELECT pg_sleep(2)");
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var paused = await PgBackups.PausePlugins(login, 100, 300);
+                var waited = clock.ElapsedMilliseconds;
+                await using (var look = new NpgsqlCommand("SELECT state || '/' || from_host FROM companion_database_move", db))
+                    Check(paused.Problem == null && waited >= 1500 && (string?)await look.ExecuteScalarAsync() == "pausing/restore",
+                        $"backups: a restore tells the plugins on other PCs to wait, and waits for one still syncing ({waited} ms)");
+                await paused.DisposeAsync();
+                await syncing;
+                var longSync = Exec(plugin, "SELECT pg_sleep(3)");
+                var gaveUp = await PgBackups.PausePlugins(login, 3, 200);
+                await longSync;
+                await using (var count = new NpgsqlCommand("SELECT count(*) FROM companion_database_move", db))
+                    Check(gaveUp.Problem != null && gaveUp.Problem.Contains("still syncing") && Convert.ToInt64(await count.ExecuteScalarAsync()) == 0,
+                        "backups: ...gives up when one keeps syncing, and the note is taken down either way");
+                await Exec(db, "INSERT INTO companion_database_move (state, host, port) VALUES ('moved', '100.64.0.9', 5432)");
+                await using (var away = await PgBackups.PausePlugins(login, 3, 100)) { }
+                await using (var state = new NpgsqlCommand("SELECT state FROM companion_database_move", db))
+                    Check((string?)await state.ExecuteScalarAsync() == "moved", "backups: a note saying the database moved away is left alone");
+                await Exec(db, "DROP TABLE companion_database_move");
             }
             var missing = await PgBackups.Restore(tools, login, settings, Path.Combine(folder, "gone.dump"), DateTime.Now);
             Check(!missing.Ok && missing.Message.Contains("is not there"), "backups: a backup that's gone is said so, and nothing is done");

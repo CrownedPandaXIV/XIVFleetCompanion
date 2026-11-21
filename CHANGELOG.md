@@ -3,6 +3,133 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.5.0 - 2026-11-21
+
+Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 is released.
+
+- **Restoring a shared-database backup works after an update that added fleet views.** Before, any backup made
+  before such an update failed to restore with a PostgreSQL message about CASCADE. The fleet views are now set aside
+  first and made again straight after, whether the restore worked or not.
+- **After a restore or a move, every game writes all of its data again at its next sync.** Before, data that hadn't
+  changed since the plugin last wrote it was skipped for up to an hour, so a new, restored or moved database could
+  show characters without their subs, retainers or bags until then. This also covers other games on the same PC
+  and other PCs.
+- **Moving the fleet or restoring a backup waits for a running sync to finish**, however long it takes. Before, it
+  went ahead after a minute, while a big fleet's sync could still be writing.
+- **Voyage loot is no longer missed when subs are collected out of order.** A sub that came back earlier but was
+  collected after another sub's voyage was stored had its loot skipped for good. The plugin now keeps track per sub.
+- **A problem reading Submarine Tracker's file only affects the voyage loot.** Before, it also stopped this PC's
+  status (the app's PCs page) and venture rewards from saving. It's now listed as a problem on the PCs page.
+- **An FC chest is kept for a day when no character seems to be in that Free Company.** AutoRetainer can briefly
+  not know a character's Free Company, which used to remove the chest until the next hourly rewrite.
+- Setup's administrator step reads its instructions as UTF-8 (a safeguard for Windows user names with accents).
+- **Two PCs with characters in one Free Company no longer swap its chest back and forth.** Only the game whose
+  character has the FC's subs writes the chest (any game does when nobody has subs there), so an old copy on another
+  PC can't put back last month's chest, and the FC's salvage charts stop jumping.
+- **Allagan Tools is asked on the game's thread**, as AutoRetainer is, so a sync can't catch it mid-change and report
+  "open retainer X at a summoning bell" for no reason. If an Allagan Tools update changes how it answers, the plugin
+  keeps the stored items (instead of reading them wrongly) and the PCs page says to update.
+- **FC Tracker's file that can't be read is now said** on the PCs page (and logged once). Before, the house's last
+  visit silently stopped updating until the 45-day demolition warning came up. An entry that looks blank (FC Tracker
+  renamed something) is skipped, so a house isn't wiped from the app.
+- **A sync that only partly saved says so:** the main window shows "Synced ... ago, partly" and, on hover, what wasn't
+  saved. "Last sync" also updates when every character here is synced by another game.
+- **Plainer messages** when the database is still starting up, has too many connections, is out of disk space, or the
+  login isn't allowed to write; these are logged once, not every sync. An AutoRetainer update the plugin doesn't
+  understand yet says to update XIV Fleet Companion, instead of showing an error.
+- **Two games on one PC with the same Account Label (or none) are told so**, and to give each its own label: they
+  share one row on the PCs page and overwrite each other's status.
+- Which game a character last logged in on is now timed by the database's clock, so a PC whose clock is off can't
+  lose (or win) a character wrongly.
+- A renamed retainer's venture rewards aren't stored a second time under its new name.
+- A retainer list AutoRetainer hasn't loaded yet (retainers with no id) is skipped rather than refused by the shared
+  database every sync. A saved database login that can't be read is logged once and Settings says to enter it again.
+- Updating or unloading the plugin mid-sync stops the sync and waits a moment for it, and settings are always saved
+  on the game's thread.
+- **Restoring a shared-database backup pauses the plugins on your other PCs first**, as moving the database does, so
+  their syncs can't block it or write over it straight after.
+- **Backups use tools new enough for the database:** an older PostgreSQL installed on the PC for something else is
+  passed over for the downloaded tools, and when none are new enough it says so plainly.
+- **A failed daily backup tries again after 30 minutes, then longer**, instead of every minute (each try started a
+  process and wrote to the log). It's also made by the plugin when the app's daily task hasn't made one for two days.
+- "Let other PCs connect" fixes a firewall rule left on another port (after setting PostgreSQL up again).
+- Database updates have no time limit, but give way after 10 seconds when another PC is using a table, so they can't
+  hold every other PC up.
+- Moving the fleet from the shared database to this PC brings the shared database up to date first (an older one
+  failed with a raw SQL error), and a move the other way can't end half-recorded.
+- Moving or backing up works when the Windows user name or the database password has letters outside English: the
+  copy goes to a folder the tools can open, and a refused password with such letters is said so.
+- Removing a copy a move left behind names the PCs that may still need it to find the new address.
+- The move window says to close the app on your other PCs first (a change made there during the move isn't copied).
+  A damaged fleet file's advice also says to delete fleet.db-wal and fleet.db-shm.
+- **Income is much faster for a big fleet:** on 80 characters with two months of history it took over two minutes;
+  now about two seconds (the same answers).
+- **The shared database and the fleet file sort the same way:** names and account labels go letter by letter whatever
+  language the database PC's PostgreSQL was set up in, and missing names sort last on both.
+- Windows of a number of days are exactly that many 24-hour days on both, so they don't shift by an hour after a
+  daylight-saving change. The fleet file gets two more indexes (Trends for the whole fleet, the rank-up forecasts).
+- A house warning now says "the game can demolish it in 3 more days" instead of "demolished after 3 more".
+- **Current gil/day picks the Fight Club row for the sub's own build** (or, failing that, the fastest one its rank
+  clears), not whichever row comes first in the spreadsheet, as the app now does.
+- **The Shopping List saves its checked ticks back**, as the app does, so ticks for parts already crafted and held
+  don't count again later when a new part is needed. A tick saved on two PCs at the same moment isn't lost.
+- **Not synced, with no account labels:** characters are grouped by the PC they last logged in on, so closing one
+  game no longer marks another game's characters as not synced. A character whose supplies aren't known yet isn't
+  counted as low on them.
+- Free Companies: an FC short on both rank and days says both ("Rank 2/6, and 25 more days").
+- Market prices: the Shadow data centre is known, and Universalis's own list is asked again later if it couldn't be
+  read at first.
+- Route Optimization: with no sub off its Target route, it says why (no sub at rank 85 yet, or no Fight Club Data
+  imported) instead of always "all on target", as the app now does.
+- **A chart that can't be read says why**, instead of showing Loading for good and being read again and again (the
+  fleet file busy, a dropped connection, no history yet).
+- **"Remove everything from this PC" keeps its result on screen** (what was removed, or why it stopped), and the check
+  of this PC no longer wipes other tools' results or restarts on its own.
+- **A Made number typed on the Shopping List is always saved**, also when the list is worked out again under it.
+  Unticking "all made" puts back the count from before, not 0.
+- **Saving a change says what went wrong**: "Could not reach the database" only when it couldn't be reached.
+- Test Database Connection connects the way syncing does (following a database that moved) and says a problem in
+  plain words.
+- Fight Club Data: a spreadsheet that can't be read says so, and merged cells are read right when the sheet doesn't
+  start at A1 (in the app too).
+- The Subs page's forecast line says when it couldn't be read. A passing database error no longer stops this PC's
+  check-ins for the PCs page until the game restarts.
+- Gil & Market: a fleet file without the loot view still shows the page (without loot prices).
+- After the clocks go back, Inventory, Where Is It?, the Shopping List and Trends still refresh as usual.
+- The unsold-days box follows a change made in the app or on another PC. Change order no longer flickers a row
+  twice. Route Optimization shows a renamed character's new name. The "Choose characters" list is the right height at
+  any UI scale. "Copied" on the Check page shows on the button, keeping the check's result. Supplies' "Updated" line
+  sits on its own line. Database tools gives the last sync in local time with its offset, not marked UTC. Exported
+  files are dated the same way as the app's on any calendar.
+- **Less work each frame on big fleets:** Inventory (Characters, Fleet totals, Where Is It?), Retainers, Route
+  Optimization, the sidebar and Summary work out their lists once per read, search or setting instead of every frame,
+  and the colours are worked out once per look. Database tools reads the saved login and network adapters every few
+  seconds, not every frame. Backups reads its settings every few seconds and lists the backup folder away from the
+  game (a folder on a PC that's off no longer holds the game up), and looks for the app's backup task once at a time.
+  The routes reuse the Parts read instead of reading the same views again.
+- **The same names as the app:** Roster Name and Submarines, Venture type, FC name, Character override, the Parts
+  Summary tab with Class needed and Still needed, Inventory's Character / FC / Fleet / Where Is It? tabs, and
+  "World market / day". The Subs table has the app's columns in the app's order (Speed and Range shown), and sorts
+  Current route by map first. "Another PC or account" instead of "another game"; Status's switch is called "Sync this
+  game's fleet", as in Settings.
+- Choosing a shared database puts the form for its details at the top of Settings, without the shared settings' read
+  error above it.
+- Loot per voyage: By route can be seen below a long subs table. "Ago" says days after 48 hours. Rank percent rounds
+  exactly as the app. Sub Rules' All tick can be unticked (slot 1 stays). Market tables are the right height at any UI
+  scale. The speed test's wording is up to date, and gives no frame time if the page wasn't open while it ran.
+- **Supplies has the app's "Ceruleum from FC Credits" section** (the tanks each Free Company's credits buy and how
+  long they last, per account and per FC, with the tank's price), and the app's summary: the fleet's use a day, what
+  to buy to last the chosen days (with the repair kits' gil) and who runs out first. Days are worded as in the app
+  ("6.2 days", "Under a day", "No use", "Not enough history").
+- **Income has the app's Difference / day column** (real net less expected).
+- **High-quality items say "(HQ)".** A high-quality stack is now stored as the game numbers it, so Inventory, Where Is
+  It? and the Shopping List tell it apart (in the app too). Worn high-quality gear still counts for item level.
+- **Trends' history no longer grows for ever.** Every change is kept; the hourly "still the same" repeats are thinned to
+  one a day once they're over 30 days old, a week at a time in the background. No chart or figure changes.
+- **A database move that fails after every PC was sent to the new database keeps it** (nothing is lost, and syncing
+  carries on); only this PC's own saved details failing is reported.
+- Releases are published only after the full tests pass.
+
 ## 2.4.8 - 2026-11-20
 
 - **Supplies: the table stays below its controls.** After any change was saved in the plugin, the table moved up

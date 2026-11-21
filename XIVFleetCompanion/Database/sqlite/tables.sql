@@ -62,6 +62,8 @@ CREATE TABLE companion_metric_history (
     label        TEXT
 );
 CREATE INDEX companion_metric_history_subject_idx ON companion_metric_history (subject_type, subject_id, metric, recorded_at);
+-- Every subject's values of one metric over time (Trends for the whole fleet, cleaning up by date), as PostgreSQL's.
+CREATE INDEX companion_metric_history_metric_idx ON companion_metric_history (metric, recorded_at);
 
 -- The newest value of each metric for each subject (the Trends page's list of what can be charted).
 CREATE TABLE companion_metric_latest (
@@ -211,6 +213,8 @@ CREATE TABLE companion_rankup_forecast (
     sub_name     TEXT,
     PRIMARY KEY (cid, slot, rank, made_at)
 );
+-- The forecasts of the last 30 days (fleet_rankup_forecast_view), as PostgreSQL's.
+CREATE INDEX companion_rankup_forecast_made_at ON companion_rankup_forecast (made_at);
 
 CREATE TABLE companion_venture_result (
     owner_cid     INTEGER NOT NULL,

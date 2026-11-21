@@ -262,6 +262,19 @@ namespace XIVFleetCompanion
 
         public sealed record RunResult(bool Ok, int Code, string Stdout, string Stderr);
 
+        public const string PasswordHint = " PostgreSQL's backup tools can't send a password with letters outside English on this PC: change the database's password to one with only English letters, numbers and symbols.";
+
+        public static bool IsAscii(string text) => text.All(c => c < 128);
+
+        /// <summary>A temporary folder whose path PostgreSQL's tools can open: the user's own, unless its path has letters
+        /// outside English (a user name such as José), then one under ProgramData. As the app's toolTempDir.</summary>
+        public static string ToolTempDir(string? temp = null, string? programData = null)
+        {
+            temp ??= Path.GetTempPath();
+            return IsAscii(temp) ? temp
+                : Path.Combine(programData ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "XIV Fleet Companion", "temp");
+        }
+
         public static string Exe(string name) => OperatingSystem.IsWindows() ? name + ".exe" : name;
 
         public static async Task<RunResult> Run(string file, IEnumerable<string> args, PgLogin? login = null)
@@ -283,7 +296,11 @@ namespace XIVFleetCompanion
                 var stdout = p.StandardOutput.ReadToEndAsync();
                 var stderr = p.StandardError.ReadToEndAsync();
                 await p.WaitForExitAsync();
-                return new RunResult(p.ExitCode == 0, p.ExitCode, await stdout, await stderr);
+                var err = await stderr;
+                // The tools take the password through Windows' older text encoding (as the app's backups/tools.js says).
+                if (p.ExitCode != 0 && login != null && !IsAscii(login.Password) && err.Contains("authentication", StringComparison.OrdinalIgnoreCase))
+                    err += PasswordHint;
+                return new RunResult(p.ExitCode == 0, p.ExitCode, await stdout, err);
             }
             catch (Exception e)
             {
@@ -332,17 +349,55 @@ namespace XIVFleetCompanion
 
         /// <summary>Finds pg_dump and pg_restore: the folder chosen, else a PostgreSQL service's, else Program Files, else
         /// the app's (or this plugin's) downloaded copy, else the PATH. The tools, or why not.</summary>
-        public static async Task<(Tools? Tools, string? Error)> FindTools(string chosen, string appToolsDir)
+        /// <summary>The tools to use. serverMajor (the database's version, when known): pg_dump refuses a newer server, so
+        /// the first tools at least that version are taken (an older PostgreSQL installed here for something else is passed
+        /// over for the downloaded ones), and when none are, it says so. The same as the app's backups/tools.js.</summary>
+        public static async Task<(Tools? Tools, string? Error)> FindTools(string chosen, string appToolsDir, int? serverMajor = null)
         {
             var candidates = chosen.Length > 0 ? new List<string> { chosen } : (await ServiceFolders()).Concat(ProgramFilesFolders()).Append(appToolsDir).ToList();
-            var bin = candidates.FirstOrDefault(f => f.Length > 0 && File.Exists(Path.Combine(f, Exe("pg_dump"))) && File.Exists(Path.Combine(f, Exe("pg_restore"))));
-            if (chosen.Length > 0 && bin == null) return (null, $"pg_dump was not found in {chosen}. Choose PostgreSQL's \"bin\" folder.");
-            var dump = bin != null ? Path.Combine(bin, Exe("pg_dump")) : Exe("pg_dump");
-            var restore = bin != null ? Path.Combine(bin, Exe("pg_restore")) : Exe("pg_restore");
-            var v = await Run(dump, new[] { "--version" });
-            if (!v.Ok)
-                return (null, "PostgreSQL's backup tools (pg_dump) are not on this PC. Get them with Get the backup tools, or make the backups on the PC that has the database.");
-            return (new Tools(bin ?? "", dump, restore, v.Stdout.Trim(), bin != null && bin == appToolsDir), null);
+            var folders = candidates.Where(f => f.Length > 0 && File.Exists(Path.Combine(f, Exe("pg_dump"))) && File.Exists(Path.Combine(f, Exe("pg_restore")))).ToList();
+            if (chosen.Length > 0 && folders.Count == 0) return (null, $"pg_dump was not found in {chosen}. Choose PostgreSQL's \"bin\" folder.");
+            var tried = new List<int>();
+            // The folders in order, then the PATH ("").
+            foreach (var bin in chosen.Length > 0 ? folders : folders.Append(""))
+            {
+                var dump = bin.Length > 0 ? Path.Combine(bin, Exe("pg_dump")) : Exe("pg_dump");
+                var restore = bin.Length > 0 ? Path.Combine(bin, Exe("pg_restore")) : Exe("pg_restore");
+                var v = await Run(dump, new[] { "--version" });
+                if (!v.Ok) continue;
+                var major = ToolsMajor(v.Stdout);
+                if (serverMajor == null || major == null || major >= serverMajor)
+                    return (new Tools(bin, dump, restore, v.Stdout.Trim(), bin.Length > 0 && bin == appToolsDir), null);
+                tried.Add(major.Value);
+            }
+            if (tried.Count > 0)
+                return (null, $"The backup tools on this PC are PostgreSQL {tried.Max()}, older than the database's PostgreSQL {serverMajor}, which they can't back up. " +
+                              $"Get the right ones with Get the backup tools{(chosen.Length > 0 ? ", or choose a newer PostgreSQL's \"bin\" folder" : "")}.");
+            return (null, "PostgreSQL's backup tools (pg_dump) are not on this PC. Get them with Get the backup tools, or make the backups on the PC that has the database.");
+        }
+
+        /// <summary>The major version in pg_dump --version's answer ("pg_dump (PostgreSQL) 16.4" is 16), or null.</summary>
+        public static int? ToolsMajor(string text)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(text, @"\(PostgreSQL\)\s+(\d+)");
+            if (!m.Success) m = System.Text.RegularExpressions.Regex.Match(text, @"(\d+)(\.\d+)+");
+            return m.Success ? int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+        }
+
+        /// <summary>The database's PostgreSQL major version (16 for 16.4), or null when it can't be asked.</summary>
+        public static async Task<int?> ServerMajor(PgLogin login)
+        {
+            try
+            {
+                await using var conn = new NpgsqlConnection(ConnectionString(login));
+                await conn.OpenAsync();
+                await using var cmd = new NpgsqlCommand("SHOW server_version_num", conn);
+                return int.Parse((string)(await cmd.ExecuteScalarAsync())!, CultureInfo.InvariantCulture) / 10000;
+            }
+            catch (Exception e) when (e is NpgsqlException or InvalidOperationException or System.Net.Sockets.SocketException or TimeoutException or FormatException)
+            {
+                return null;
+            }
         }
 
         private static string[] ConnectionArgs(PgLogin l) => new[] { "-h", l.Host, "-p", l.Port.ToString(CultureInfo.InvariantCulture), "-U", l.User };
@@ -548,18 +603,140 @@ namespace XIVFleetCompanion
             return null;
         }
 
+        /// <summary>Run just before a restore, in one transaction: drops every fleet view and their function, and forgets
+        /// which views.sql made them. pg_restore --clean drops only what is in the backup, and without CASCADE, so a view
+        /// added by a later version would stop the restore. The views are made again by the next database check
+        /// (DatabaseKeeper.CheckSoon), whether the restore worked or not. The same as the app's backups/run.js.</summary>
+        public const string SetViewsAsideSql = @"DO $$
+DECLARE v record;
+BEGIN
+  FOR v IN SELECT n.nspname AS schema, c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE c.relkind = 'v' AND n.nspname = current_schema() AND c.relname LIKE 'fleet\_%\_view' LOOP
+    EXECUTE format('DROP VIEW IF EXISTS %I.%I CASCADE', v.schema, v.name);  -- by name: one dropped already, with a view it's built on, is skipped
+  END LOOP;
+  DROP FUNCTION IF EXISTS fleet_part_letter(int) CASCADE;
+  IF to_regclass('companion_views') IS NOT NULL THEN DELETE FROM companion_views; END IF;
+END $$;";
+
+        /// <summary>A pause of the plugins on every PC (PausePlugins): disposing it takes the note down. Problem: why it
+        /// couldn't pause them (nothing was paused).</summary>
+        public sealed class Paused : IAsyncDisposable
+        {
+            internal NpgsqlConnection? Conn;
+            internal System.Threading.CancellationTokenSource? Beat;
+            public string? Problem { get; internal set; }
+
+            public async ValueTask DisposeAsync()
+            {
+                Beat?.Cancel();
+                if (Conn == null) return;
+                try
+                {
+                    await using var cmd = new NpgsqlCommand("DELETE FROM companion_database_move WHERE id = 1 AND state = 'pausing'", Conn);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                catch (NpgsqlException) { /* the note goes stale in 5 minutes anyway */ }
+                await Conn.DisposeAsync();
+                Conn = null;
+            }
+        }
+
+        /// <summary>Pauses the plugins on every PC while the database is restored, as a move does (the app's
+        /// backups/run.js pausePlugins): the move note says "pausing" (refreshed every 30 seconds; plugins wait while it's
+        /// fresh), then this waits until no plugin has been busy for 15 seconds, up to 3 minutes. A database without the
+        /// note's table has nothing to pause; a note saying the database moved away is left alone.</summary>
+        public static async Task<Paused> PausePlugins(PgLogin login, int tries = 60, int everyMs = 3000)
+        {
+            var conn = new NpgsqlConnection(ConnectionString(login));
+            await conn.OpenAsync();
+            async Task<object?> One(string sql, params object[] args)
+            {
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                foreach (var a in args) cmd.Parameters.Add(new NpgsqlParameter { Value = a });
+                return await cmd.ExecuteScalarAsync();
+            }
+            if (await One("SELECT to_regclass('companion_database_move') IS NOT NULL") is not true) { await conn.DisposeAsync(); return new Paused(); }
+            await using (var set = new NpgsqlCommand(@"INSERT INTO companion_database_move (id, state, host, port, from_host, started_at, updated_at, moved_at)
+                VALUES (1, 'pausing', $1, $2, 'restore', now(), now(), NULL)
+                ON CONFLICT (id) DO UPDATE SET state = 'pausing', from_host = 'restore', started_at = now(), updated_at = now(), moved_at = NULL
+                WHERE companion_database_move.state <> 'moved'", conn))
+            {
+                set.Parameters.Add(new NpgsqlParameter { Value = login.Host });
+                set.Parameters.Add(new NpgsqlParameter { Value = login.Port });
+                if (await set.ExecuteNonQueryAsync() == 0) { await conn.DisposeAsync(); return new Paused(); }
+            }
+            var paused = new Paused { Conn = conn, Beat = new System.Threading.CancellationTokenSource() };
+            var token = paused.Beat.Token;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var hb = new NpgsqlConnection(ConnectionString(login));
+                    await hb.OpenAsync(token);
+                    while (!token.IsCancellationRequested)
+                    {
+                        await Task.Delay(30000, token);
+                        await using var cmd = new NpgsqlCommand("UPDATE companion_database_move SET updated_at = now() WHERE id = 1 AND state = 'pausing'", hb);
+                        await cmd.ExecuteNonQueryAsync(token);
+                    }
+                }
+                catch (Exception) { /* stopped, or the connection went: the note goes stale */ }
+            });
+            var quiet = 0;
+            for (var i = 0; i < tries && quiet < 2; i++)
+            {
+                var busy = Convert.ToInt64(await One(@"SELECT count(*) FROM pg_stat_activity
+                    WHERE datname = current_database() AND application_name = $1 AND pid <> pg_backend_pid()
+                      AND (state <> 'idle' OR state_change > now() - interval '15 seconds')", DatabaseMove.ApplicationName), CultureInfo.InvariantCulture);
+                quiet = busy == 0 ? quiet + 1 : 0;
+                if (quiet < 2) await Task.Delay(everyMs);
+            }
+            if (quiet < 2)
+            {
+                await paused.DisposeAsync();
+                return new Paused { Problem = "A plugin on another PC was still syncing after 3 minutes, so nothing was restored. Try again in a few minutes." };
+            }
+            return paused;
+        }
+
         /// <summary>Puts the database back as it was in a backup: first a backup of how it is now (so this can be undone),
-        /// then pg_restore --clean in one transaction, so a failure part way changes nothing.</summary>
+        /// then pg_restore --clean in one transaction, so a failure part way changes nothing. The fleet views are set
+        /// aside first (SetViewsAsideSql); call DatabaseKeeper.CheckSoon afterwards, whatever the result.</summary>
         public static async Task<(bool Ok, BackupResult? Safety, string Message)> Restore(Tools tools, PgLogin login, Settings s, string file, DateTime now)
         {
             if (!File.Exists(file)) return (false, null, $"{file} is not there any more.");
             // Removes no old backups: the one being restored may be the oldest. The next daily backup tidies up.
             var safety = await BackupNow(tools, login, s with { CopyFolder = "", Keep = int.MaxValue }, now);
             if (!safety.Ok) return (false, safety, $"Nothing was restored: first backing up the database as it is now failed. {safety.Message}");
-            var r = await Run(tools.Restore, ConnectionArgs(login).Concat(new[]
+            Paused paused;
+            try
             {
-                "-d", login.Database, "--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges", file,
-            }), login);
+                paused = await PausePlugins(login);
+            }
+            catch (Exception e) when (e is NpgsqlException or InvalidOperationException)
+            {
+                return (false, safety, $"Nothing was restored: the other PCs couldn't be paused first. {e.Message}");
+            }
+            if (paused.Problem != null) return (false, safety, paused.Problem);
+            RunResult r;
+            await using (paused)
+            {
+                try
+                {
+                    await using var conn = new NpgsqlConnection(ConnectionString(login));
+                    await conn.OpenAsync();
+                    await using var drop = new NpgsqlCommand(SetViewsAsideSql, conn);
+                    await drop.ExecuteNonQueryAsync();
+                }
+                catch (Exception e) when (e is NpgsqlException or InvalidOperationException)
+                {
+                    return (false, safety, $"Nothing was restored: the fleet views couldn't be set aside first. {e.Message}");
+                }
+                r = await Run(tools.Restore, ConnectionArgs(login).Concat(new[]
+                {
+                    "-d", login.Database, "--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges", file,
+                }), login);
+            }
             WriteLog(s.Folder, new[]
             {
                 r.Ok ? $"Restored {Path.GetFileName(file)} (the database before it is {Path.GetFileName(safety.File)})"

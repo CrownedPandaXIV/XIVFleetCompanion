@@ -82,7 +82,7 @@ public partial class MainWindow
 
     private FleetTable<RosterRow> RosterTable => rosterTable ??= new FleetTable<RosterRow>("roster", plugin.Configuration, new List<FleetColumn<RosterRow>>
     {
-        new("character", "Character", c =>
+        new("character", "Name", c =>
         {
             CharacterCell(c.Character, c.World);
             Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}");
@@ -116,7 +116,7 @@ public partial class MainWindow
         }, c => c.RepairKits ?? 0),
         new("retainers", "Retainers", c => RightNumber(c.Retainers), c => c.Retainers),
         // Subs as dots out of the slots unlocked: green when every slot has one, amber with a slot free.
-        new("subs", "Subs", c =>
+        new("subs", "Submarines", c =>
         {
             if (c.SubSlots is int slots && slots > 0)
             {
@@ -172,6 +172,7 @@ public partial class MainWindow
 
     // ---- Retainers ----
 
+    private readonly Memo<List<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>> retainerRowsShown = new();
     private FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)> RetainersTable => retainersTable ??=
         new FleetTable<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>("retainers", plugin.Configuration, new List<FleetColumn<(RetainerRow R, string Job, string Venture, double? Ilvl, string? Check)>>
     {
@@ -201,7 +202,7 @@ public partial class MainWindow
             if (x.Check != null) Hover(x.Check == "meets" ? "Every slot meets the gear target." : "Short of the gear target" + (WithApp ? ": the app's Retainers tab shows which slots (hover Avg ilvl there)." : "."));
             if (!x.R.ItemsSeen) Hover("Allagan Tools hasn't seen this retainer's items yet: open it at a summoning bell on a PC running the plugin.");
         }, x => x.Ilvl ?? 0, x => x.Ilvl == null),
-        new("venture", "Venture", x => Ui.Text(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
+        new("venture", "Venture type", x => Ui.Text(x.Venture.Length > 0 ? x.Venture : "—"), x => x.Venture, x => x.Venture.Length == 0),
         // Status: done first, then the soonest done; idle last either way.
         new("status", "Status", x =>
         {
@@ -252,7 +253,8 @@ public partial class MainWindow
             Hover("Allagan Tools only knows a retainer's items once it has been opened at a summoning bell on a PC running the plugin.");
         }
         // In the Roster's order (each owner's place in it), then hiring order, as the app.
-        var rows = read.Retainers
+        // Worked out again only when a new read comes or the search changes (800 retainers' gear is a lot to look up every frame).
+        var rows = retainerRowsShown.Get(() => read.Retainers
             .Select(r =>
             {
                 var job = GameNames.Job(r.Job);
@@ -263,7 +265,7 @@ public partial class MainWindow
                     Check: FleetReader.GearCheck(job, r.TargetMode, r.TargetValue, pieces));
             })
             .Where(x => Matches(retainersFilter, x.R.Owner, x.R.Name, x.R.Account, x.Job, x.Venture))
-            .ToList();
+            .ToList(), read, retainersFilter);
         RetainersTable.Draw(rows);
     }
 
@@ -298,7 +300,7 @@ public partial class MainWindow
         new("characters", "Characters", p =>
         {
             Ui.Text(FleetReader.PcCharacters(p.Characters, p.LeftOut, p.Elsewhere));
-            if (p.Elsewhere > 0) Hover($"{p.Elsewhere} of this game's characters last played in another game, so that game syncs them (the Character Roster's Synced by column says which).");
+            if (p.Elsewhere > 0) Hover($"{p.Elsewhere} of the characters its AutoRetainer knows last played on another PC or account, so that one syncs them (the Character Roster's Synced by column says which).");
         }, p => p.Characters ?? 0, p => p.Characters == null),
         new("autoretainer", "AutoRetainer", p =>
         {
@@ -368,7 +370,7 @@ public partial class MainWindow
     private FleetTable<FcRow> FcsTable => fcsTable ??= new FleetTable<FcRow>("fcs", plugin.Configuration, new List<FleetColumn<FcRow>>
     {
         // The FC's name, then its world softer (its members and leader are all on it).
-        new("name", "FC", f =>
+        new("name", "FC name", f =>
         {
             if (f.Name.Length > 0) Tinted(Palette.Fc, f.Name); else Colored(Dim, "—");
             if (GameNames.World(f.HomeWorld) is { Length: > 0 } world)

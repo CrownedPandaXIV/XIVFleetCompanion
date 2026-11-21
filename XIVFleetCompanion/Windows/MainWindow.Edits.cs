@@ -122,7 +122,7 @@ public partial class MainWindow
         {
             using var table = Ui.Table("##subRules", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
             if (!table) return;
-            foreach (var h in new[] { "Rank", "Applies to", "Hull", "Stern", "Bow", "Bridge", "Character", "", "" }) Ui.SetupColumn(h);
+            foreach (var h in new[] { "Rank", "Applies to", "Hull", "Stern", "Bow", "Bridge", "Character override", "", "" }) Ui.SetupColumn(h);
             Ui.HeadersRow();
             var scale = ImGuiHelpers.GlobalScale;
             foreach (var d in rules)
@@ -134,7 +134,8 @@ public partial class MainWindow
                 Ui.InputInt("##rank", ref d.Rank, 0);
                 Ui.NextColumn();
                 var (all, slots) = FilterSlots(d.Filter);
-                if (Ui.Checkbox("All##slots", ref all) && all) d.Filter = "";
+                // Unticking All leaves slot 1 ticked (a rule applies to at least one slot), as the app.
+                if (Ui.Checkbox("All##slots", ref all)) d.Filter = all ? "" : SlotsFilter(false, new[] { 1 });
                 for (var s = 1; s <= 4; s++)
                 {
                     ImGui.SameLine();
@@ -296,9 +297,12 @@ public partial class MainWindow
         Ui.SetupColumn("Character");
         Ui.SetupColumn("Move");
         Ui.HeadersRow();
+        // A move is applied after the list is drawn, so no row is drawn twice (or skipped) in the frame it's clicked.
+        Action? move = null;
         for (var i = 0; i < draft.Count; i++)
         {
             var c = draft[i];
+            var at = i;
             using var id = ImRaii.PushId($"order{c.Cid}");
             Ui.NextRow();
             Ui.NextColumn();
@@ -313,25 +317,28 @@ public partial class MainWindow
             Ui.NextColumn();
             using (ImRaii.Disabled(i == 0))
             {
-                if (ImGui.SmallButton("Up")) (draft[i - 1], draft[i]) = (draft[i], draft[i - 1]);
+                if (ImGui.SmallButton("Up")) move = () => (draft[at - 1], draft[at]) = (draft[at], draft[at - 1]);
                 ImGui.SameLine();
-                if (ImGui.SmallButton("To top")) { draft.RemoveAt(i); draft.Insert(0, c); }
+                if (ImGui.SmallButton("To top")) move = () => { draft.RemoveAt(at); draft.Insert(0, c); };
             }
             ImGui.SameLine();
             using (ImRaii.Disabled(i == draft.Count - 1))
             {
-                if (ImGui.SmallButton("Down")) (draft[i + 1], draft[i]) = (draft[i], draft[i + 1]);
+                if (ImGui.SmallButton("Down")) move = () => (draft[at + 1], draft[at]) = (draft[at], draft[at + 1]);
             }
         }
+        move?.Invoke();
     }
 
     // ---- Gil & Market's unsold days, the Income window ----
 
     private int staleDaysDraft;
+    private int staleDaysShown = -1;
 
     private void StaleDaysEditor(int current)
     {
-        if (staleDaysDraft == 0) staleDaysDraft = current;
+        // Follows a change made in the app or on another PC (as SupplyDaysEditor), so Save doesn't put the old one back.
+        if (staleDaysShown != current) { staleDaysShown = current; staleDaysDraft = current; }
         ImGui.SetNextItemWidth(90 * ImGuiHelpers.GlobalScale);
         Ui.InputInt("days counts as unsold for a while##staleDays", ref staleDaysDraft, 1);
         staleDaysDraft = Math.Clamp(staleDaysDraft, 1, FleetEdits.MaxStaleDays);
@@ -471,6 +478,8 @@ public partial class MainWindow
 
     private readonly Dictionary<int, (long Made, DateTime At)> madePending = new();
     private readonly Dictionary<int, int> madeTyping = new();
+    // The count before "all made" was ticked, so unticking it puts that back rather than 0 (until the next read).
+    private readonly Dictionary<int, long> madeBeforeAll = new();
 
     private long MadeOf(ShopRow p) =>
         madePending.TryGetValue(p.ItemId, out var m) && !(reader.Shopping.At > m.At) ? m.Made : p.Made;
@@ -481,7 +490,9 @@ public partial class MainWindow
         var made = madeTyping.TryGetValue(p.ItemId, out var typing) ? typing : (int)MadeOf(p);
         ImGui.SetNextItemWidth(60 * ImGuiHelpers.GlobalScale);
         if (Ui.InputInt($"##made{p.ItemId}", ref made, 0)) madeTyping[p.ItemId] = made;
-        if (ImGui.IsItemDeactivatedAfterEdit())
+        // Saved when the box is left, and also when it stopped being the box being typed in without being left (the
+        // list was worked out again or re-sorted under it): what was typed is never just shown and not saved.
+        if (ImGui.IsItemDeactivatedAfterEdit() || (madeTyping.ContainsKey(p.ItemId) && !ImGui.IsItemActive()))
         {
             madeTyping.Remove(p.ItemId);
             SaveMade(p, made);
@@ -490,7 +501,13 @@ public partial class MainWindow
         Ui.Text($"of {Number(p.Crafts)}");
         ImGui.SameLine();
         var all = MadeOf(p) >= p.Crafts;
-        if (Ui.Checkbox($"all made##allMade{p.ItemId}", ref all)) SaveMade(p, all ? (int)p.Crafts : 0);
+        if (Ui.Checkbox($"all made##allMade{p.ItemId}", ref all))
+        {
+            if (all) madeBeforeAll[p.ItemId] = MadeOf(p);
+            var before = madeBeforeAll.TryGetValue(p.ItemId, out var b) && b < p.Crafts ? b : 0;
+            if (!all) madeBeforeAll.Remove(p.ItemId);
+            SaveMade(p, all ? (int)p.Crafts : (int)before);
+        }
         Hover("Tick parts off as you craft them; " + (WithApp ? "every PC sees it (in the app too)." : "every game on this PC sees it.") + " Once the plugin sees a crafted part in bags, a retainer or the FC chest, it leaves the list by itself.");
     }
 

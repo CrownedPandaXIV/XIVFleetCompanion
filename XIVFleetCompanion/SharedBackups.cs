@@ -24,15 +24,21 @@ namespace XIVFleetCompanion
         private readonly Func<PgLogin?> login;
         private readonly Func<bool> isShared;
         private readonly Action<string> log;
+        private readonly Action restored;
         private DateTime nextDailyLook;
+        // Daily backups that failed in a row (each waits longer before trying again), and the last failure logged.
+        private int dailyFailures;
+        private string? loggedDailyFailure;
         private bool? appTask;
         private DateTime appTaskLookedAt;
 
-        public SharedBackups(Func<PgLogin?> login, Func<bool> isShared, Action<string> log)
+        /// <param name="restored">Called after every restore attempt, whatever came of it.</param>
+        public SharedBackups(Func<PgLogin?> login, Func<bool> isShared, Action<string> log, Action? restored = null)
         {
             this.login = login;
             this.isShared = isShared;
             this.log = log;
+            this.restored = restored ?? (() => { });
         }
 
         public bool Busy { get; private set; }
@@ -89,7 +95,7 @@ namespace XIVFleetCompanion
                 {
                     var l = login();
                     if (l == null) throw new InvalidOperationException("The database connection isn't set up yet (Settings, Database).");
-                    var (tools, error) = await PgBackups.FindTools(Load().Settings.PgBin, ToolsDir);
+                    var (tools, error) = await PgBackups.FindTools(Load().Settings.PgBin, ToolsDir, await PgBackups.ServerMajor(l));
                     Tools = tools;
                     ToolsError = error;
                     ToolsLooked = true;
@@ -135,8 +141,15 @@ namespace XIVFleetCompanion
         {
             var check = await PgBackups.CheckFile(tools, file);
             if (check != null) return (false, check);
-            var r = await PgBackups.Restore(tools, l, Load().Settings, file, DateTime.Now);
-            return (r.Ok, r.Message);
+            try
+            {
+                var r = await PgBackups.Restore(tools, l, Load().Settings, file, DateTime.Now);
+                return (r.Ok, r.Message);
+            }
+            finally
+            {
+                restored();
+            }
         });
 
         /// <summary>Get the backup tools: PostgreSQL's zip for the database's version, only the tools kept.</summary>
@@ -192,9 +205,13 @@ namespace XIVFleetCompanion
             Busy = true;
             Task.Run(async () =>
             {
+                var ok = true;
+                string? failure = null;
                 try
                 {
-                    if (await AppTaskInstalled()) return;
+                    // The app's task makes it, unless the task hasn't for a day past due (the PC asleep at that time,
+                    // or the app removed but its task left behind).
+                    if (await AppTaskInstalled() && !Overdue(PgBackups.List(settings.Folder), DateTime.Now)) return;
                     // Only one game at a time: the others find it's done once they get the folder.
                     Directory.CreateDirectory(settings.Folder);
                     FileStream gate;
@@ -205,28 +222,47 @@ namespace XIVFleetCompanion
                         if (!PgBackups.Due(settings, PgBackups.List(settings.Folder), DateTime.Now)) return;
                         var l = login();
                         if (l == null) return;
-                        var (tools, error) = await PgBackups.FindTools(settings.PgBin, ToolsDir);
+                        var (tools, error) = await PgBackups.FindTools(settings.PgBin, ToolsDir, await PgBackups.ServerMajor(l));
                         if (tools == null)
                         {
                             PgBackups.SaveLast(SettingsFile, new PgBackups.LastResult(false, DateTimeOffset.Now.ToUnixTimeMilliseconds(), error ?? "", null));
+                            ok = false;
+                            failure = error ?? "the backup tools weren't found";
                             return;
                         }
-                        var (ok, message) = await MakeBackup(tools, l);
-                        log($"Daily backup: {message}");
+                        var (made, message) = await MakeBackup(tools, l);
+                        ok = made;
+                        if (!made) failure = message;
+                        if (made || message != loggedDailyFailure) log($"Daily backup: {message}");
                         Status = $"Daily backup: {message}";
-                        StatusOk = ok;
+                        StatusOk = made;
                     }
                 }
                 catch (Exception e)
                 {
-                    log($"Daily backup failed: {e.Message}");
+                    ok = false;
+                    failure = e.Message;
+                    if (e.Message != loggedDailyFailure) log($"Daily backup failed: {e.Message}");
                 }
                 finally
                 {
+                    // A failure (the database PC asleep, the tools missing) is tried again after 30 minutes, then an hour,
+                    // two, four at most, not every minute; and logged once until it changes.
+                    if (ok) { dailyFailures = 0; loggedDailyFailure = null; }
+                    else
+                    {
+                        dailyFailures++;
+                        loggedDailyFailure = failure;
+                        nextDailyLook = DateTime.Now.AddMinutes(Math.Min(240, 30 * Math.Pow(2, Math.Min(dailyFailures - 1, 3))));
+                    }
                     Busy = false;
                 }
             });
         }
+
+        /// <summary>No backup for more than a day past when one was due: the app's task isn't making them.</summary>
+        public static bool Overdue(IEnumerable<PgBackups.Backup> backups, DateTime now)
+            => !backups.Any(b => b.TakenAt >= now.AddHours(-48));
 
         // Whether the app's daily scheduled task is set up on this PC (looked at once an hour).
         private async Task<bool> AppTaskInstalled()
@@ -240,15 +276,33 @@ namespace XIVFleetCompanion
         }
 
         /// <summary>Looks whether the app's task is set up, for the window to say which makes the daily backup.</summary>
+        /// Called every frame while Backups is open: one look at a time (not one schtasks.exe a frame until it answers),
+        /// then once an hour, keeping the last answer meanwhile.
         public void LookForAppTask()
         {
-            if (appTask != null && DateTime.Now - appTaskLookedAt < TimeSpan.FromHours(1)) return;
-            appTaskLookedAt = DateTime.Now;
+            if (lookingForAppTask) return;
+            var again = appTask != null ? TimeSpan.FromHours(1) : TimeSpan.FromMinutes(1); // a failed look: tried again in a minute
+            if (DateTime.Now - appTaskLookedAt < again && DateTime.Now >= appTaskLookedAt) return;
+            lookingForAppTask = true;
             Task.Run(async () =>
             {
-                appTask = null;
-                await AppTaskInstalled();
+                try
+                {
+                    if (!OperatingSystem.IsWindows()) { appTask = false; return; }
+                    var r = await PgBackups.Run("schtasks.exe", new[] { "/Query", "/TN", AppTaskName });
+                    appTask = r.Ok;
+                }
+                catch (Exception)
+                {
+                    // looked at again next time
+                }
+                finally
+                {
+                    appTaskLookedAt = DateTime.Now;
+                    lookingForAppTask = false;
+                }
             });
         }
+        private volatile bool lookingForAppTask;
     }
 }

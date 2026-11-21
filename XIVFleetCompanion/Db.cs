@@ -75,6 +75,10 @@ public static class Db
         var v => Convert.ToUInt64(v, CultureInfo.InvariantCulture),
     };
 
+    /// <summary>After a text column in ORDER BY: letter by letter on both database types (PostgreSQL otherwise sorts by its
+    /// language setting, so "alpha" and "Beta" would come in another order than in the fleet file).</summary>
+    public static string C(DbConnection conn) => IsFile(conn) ? "" : " COLLATE \"C\"";
+
     /// <summary>A command, in the order NpgsqlCommand takes them (the readers were written for it).</summary>
     public static DbCommand Cmd(string sql, DbConnection conn, DbTransaction? tx = null) => Command(conn, sql, tx);
 
@@ -99,7 +103,9 @@ public static class Db
             bool b when IsFileCommand(cmd) => b ? 1L : 0L,
             // The file keeps whole numbers as INTEGER (System.Data.SQLite would store a decimal as text). Both branches are
             // object: as `? (long)d : (double)d` the whole number became a double, rounding ids past 2^53 (2.4.7).
-            decimal d when IsFileCommand(cmd) => d == decimal.Truncate(d) && d >= long.MinValue && d <= long.MaxValue ? (object)(long)d : (double)d,
+            // A whole number past a long (only a Free Company id, which the file keeps as text) goes as its exact text.
+            decimal d when IsFileCommand(cmd) => d != decimal.Truncate(d) ? (double)d
+                : d >= long.MinValue && d <= long.MaxValue ? (object)(long)d : d.ToString(CultureInfo.InvariantCulture),
             DateTime t when IsFileCommand(cmd) => Unix(t),
             _ => value,
         };

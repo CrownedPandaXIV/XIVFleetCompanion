@@ -1,6 +1,6 @@
 {
  "about": "Written by XIVFleetCompanion-App tests/db/plugin-database-fixture.js: the database after the app updates it each way.",
- "appVersion": "1.10.6",
+ "appVersion": "1.11.0",
  "signature": {
   "columns": "SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '') AS v\n            FROM information_schema.columns WHERE table_schema = 'public'\n              AND table_name NOT IN (SELECT table_name FROM information_schema.views WHERE table_schema = 'public') ORDER BY 1",
   "indexes": "SELECT indexdef AS v FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1",
@@ -299,47 +299,47 @@
        "CREATE UNIQUE INDEX tier3_settings_pkey ON public.tier3_settings USING btree (setting_key)"
       ],
       "views": [
-       "fleet_alerts_view 99f5f81f2066a46a215f95e5c203276e",
-       "fleet_fcs_view 9e18fb3904c1e6e077260377fcf3dd82",
+       "fleet_alerts_view 5e55028d01b5669f30c76bce07c8a472",
+       "fleet_fcs_view 8ddfedc292fc68986fa1ab4cf143ee18",
        "fleet_holdings_view 959c97882999560e1b1d3b3e0c81061e",
-       "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
+       "fleet_income_view 2569d3ab181f58bbc5d677f5d3ee070b",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
        "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
-       "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
+       "fleet_not_synced_view 1e2584a71ddb06bc338deaae1ddf0a6c",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
        "fleet_parts_fight_club_view 61ba0f0b99a2e262f13a0a7ddc75e8a4",
        "fleet_parts_rules_view 3328dda5ee2a5e227b845ac9f10a8d2a",
        "fleet_parts_spares_view 5d7ddc4a3974ebb4b0bf60addb01335d",
        "fleet_parts_subs_view c9f24b606f5cacf7b97401495ca2f17d",
        "fleet_pcs_view c3359e680053e60f2c9c4fc90ce2193d",
-       "fleet_rankup_forecast_view 8638aab1c19fdb4bf98a784a72b740b1",
-       "fleet_rankup_history_view 254c4e4c9103caa6a28c5ef8a3b26fc1",
+       "fleet_rankup_forecast_view f8a8ea38e780dda3f04c4bc3f7af4ca7",
+       "fleet_rankup_history_view f18baddc639607c2a5b70fdf3a5001f3",
        "fleet_retainer_counts_view cacc318151e524e07f2de7c22e6b6809",
-       "fleet_retainer_gear_view 378c3cd6e16e75afe792b0c23a6a04f6",
+       "fleet_retainer_gear_view d3d6b5cc8864ca4646f1dcc114c2bc82",
        "fleet_retainers_view 80781b39f034a9ae5773b476098e8e80",
-       "fleet_roster_view 723c8431de36af9f239ae811d4c4703a",
+       "fleet_roster_view 13db58bcc5dedc07bea81f4ca0a5740d",
        "fleet_route_fight_club_view f9f045ef0c4a34f69b129c328bf23ba2",
        "fleet_route_subs_view 85cca94fb2561177fbe8f0480badb920",
        "fleet_salvage_view dd44b76775f0eb44919f41e8baa54a4f",
        "fleet_settings_view b4c4368bc697fec979080b14d8d9687a",
        "fleet_shopping_held_view 4b17bc85aba8128efae1c562534233dd",
        "fleet_shopping_progress_view 7126f270a31f8f4ad7c68479d9397f8d",
-       "fleet_sub_history_view 2e6a4aa5da533ef85e312e6a3bfceffd",
+       "fleet_sub_history_view 5a42cd28359f2c6fe2bda7245bd60d33",
        "fleet_subs_view a5bdb63b1316bdbfb1cc53b0e6896ba0",
        "fleet_summary_view 7ae6e73d1ed2a3f8634b5d82861c2769",
-       "fleet_supplies_view 0b3851bcb19d609dc9920b86f94485eb",
-       "fleet_venture_income_view be0b056df6b3aef0c22c392b4ddb1b22",
-       "fleet_voyage_loot_view 04ddf198b8c228913fb65b601a819841",
-       "fleet_voyage_returns_view cb44191e8a3a5b494bcc3839a4f6226a",
-       "fleet_voyage_sectors_view eaf9b2b279550115c2028014361ac894"
+       "fleet_supplies_view 31c7ccd855c245aef1207de1f797c841",
+       "fleet_venture_income_view b6e3741a33a8bd61eb0d05562dc35c87",
+       "fleet_voyage_loot_view dcef02ba9ec650be7c2d9773b1802497",
+       "fleet_voyage_returns_view 729ee8a9e77f813763dea870594c7346",
+       "fleet_voyage_sectors_view 56721cb1f808e3ae0b842f0fa5338248"
       ],
       "versions": [
        "16 new database"
       ],
       "viewsChecksum": [
-       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
+       "e1ef6adcc5f4e259508ebba5c176d73bdbbbd8575ca58718e7b2449ed9205668"
       ]
      }
     },
@@ -631,47 +631,47 @@
        "CREATE UNIQUE INDEX tier3_settings_pkey ON public.tier3_settings USING btree (setting_key)"
       ],
       "views": [
-       "fleet_alerts_view 99f5f81f2066a46a215f95e5c203276e",
-       "fleet_fcs_view 9e18fb3904c1e6e077260377fcf3dd82",
+       "fleet_alerts_view 5e55028d01b5669f30c76bce07c8a472",
+       "fleet_fcs_view 8ddfedc292fc68986fa1ab4cf143ee18",
        "fleet_holdings_view 959c97882999560e1b1d3b3e0c81061e",
-       "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
+       "fleet_income_view 2569d3ab181f58bbc5d677f5d3ee070b",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
        "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
-       "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
+       "fleet_not_synced_view 1e2584a71ddb06bc338deaae1ddf0a6c",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
        "fleet_parts_fight_club_view 61ba0f0b99a2e262f13a0a7ddc75e8a4",
        "fleet_parts_rules_view 3328dda5ee2a5e227b845ac9f10a8d2a",
        "fleet_parts_spares_view 5d7ddc4a3974ebb4b0bf60addb01335d",
        "fleet_parts_subs_view c9f24b606f5cacf7b97401495ca2f17d",
        "fleet_pcs_view c3359e680053e60f2c9c4fc90ce2193d",
-       "fleet_rankup_forecast_view 8638aab1c19fdb4bf98a784a72b740b1",
-       "fleet_rankup_history_view 254c4e4c9103caa6a28c5ef8a3b26fc1",
+       "fleet_rankup_forecast_view f8a8ea38e780dda3f04c4bc3f7af4ca7",
+       "fleet_rankup_history_view f18baddc639607c2a5b70fdf3a5001f3",
        "fleet_retainer_counts_view cacc318151e524e07f2de7c22e6b6809",
-       "fleet_retainer_gear_view 378c3cd6e16e75afe792b0c23a6a04f6",
+       "fleet_retainer_gear_view d3d6b5cc8864ca4646f1dcc114c2bc82",
        "fleet_retainers_view 80781b39f034a9ae5773b476098e8e80",
-       "fleet_roster_view 723c8431de36af9f239ae811d4c4703a",
+       "fleet_roster_view 13db58bcc5dedc07bea81f4ca0a5740d",
        "fleet_route_fight_club_view f9f045ef0c4a34f69b129c328bf23ba2",
        "fleet_route_subs_view 85cca94fb2561177fbe8f0480badb920",
        "fleet_salvage_view dd44b76775f0eb44919f41e8baa54a4f",
        "fleet_settings_view b4c4368bc697fec979080b14d8d9687a",
        "fleet_shopping_held_view 4b17bc85aba8128efae1c562534233dd",
        "fleet_shopping_progress_view 7126f270a31f8f4ad7c68479d9397f8d",
-       "fleet_sub_history_view 2e6a4aa5da533ef85e312e6a3bfceffd",
+       "fleet_sub_history_view 5a42cd28359f2c6fe2bda7245bd60d33",
        "fleet_subs_view a5bdb63b1316bdbfb1cc53b0e6896ba0",
        "fleet_summary_view 7ae6e73d1ed2a3f8634b5d82861c2769",
-       "fleet_supplies_view 0b3851bcb19d609dc9920b86f94485eb",
-       "fleet_venture_income_view be0b056df6b3aef0c22c392b4ddb1b22",
-       "fleet_voyage_loot_view 04ddf198b8c228913fb65b601a819841",
-       "fleet_voyage_returns_view cb44191e8a3a5b494bcc3839a4f6226a",
-       "fleet_voyage_sectors_view eaf9b2b279550115c2028014361ac894"
+       "fleet_supplies_view 31c7ccd855c245aef1207de1f797c841",
+       "fleet_venture_income_view b6e3741a33a8bd61eb0d05562dc35c87",
+       "fleet_voyage_loot_view dcef02ba9ec650be7c2d9773b1802497",
+       "fleet_voyage_returns_view 729ee8a9e77f813763dea870594c7346",
+       "fleet_voyage_sectors_view 56721cb1f808e3ae0b842f0fa5338248"
       ],
       "versions": [
        "16 new database"
       ],
       "viewsChecksum": [
-       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
+       "e1ef6adcc5f4e259508ebba5c176d73bdbbbd8575ca58718e7b2449ed9205668"
       ]
      }
     }
@@ -967,41 +967,41 @@
        "CREATE UNIQUE INDEX tier3_settings_pkey ON public.tier3_settings USING btree (setting_key)"
       ],
       "views": [
-       "fleet_alerts_view 99f5f81f2066a46a215f95e5c203276e",
-       "fleet_fcs_view 9e18fb3904c1e6e077260377fcf3dd82",
+       "fleet_alerts_view 5e55028d01b5669f30c76bce07c8a472",
+       "fleet_fcs_view 8ddfedc292fc68986fa1ab4cf143ee18",
        "fleet_holdings_view 959c97882999560e1b1d3b3e0c81061e",
-       "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
+       "fleet_income_view 2569d3ab181f58bbc5d677f5d3ee070b",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
        "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
-       "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
+       "fleet_not_synced_view 1e2584a71ddb06bc338deaae1ddf0a6c",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
        "fleet_parts_fight_club_view 61ba0f0b99a2e262f13a0a7ddc75e8a4",
        "fleet_parts_rules_view 3328dda5ee2a5e227b845ac9f10a8d2a",
        "fleet_parts_spares_view 5d7ddc4a3974ebb4b0bf60addb01335d",
        "fleet_parts_subs_view c9f24b606f5cacf7b97401495ca2f17d",
        "fleet_pcs_view c3359e680053e60f2c9c4fc90ce2193d",
-       "fleet_rankup_forecast_view 8638aab1c19fdb4bf98a784a72b740b1",
-       "fleet_rankup_history_view 254c4e4c9103caa6a28c5ef8a3b26fc1",
+       "fleet_rankup_forecast_view f8a8ea38e780dda3f04c4bc3f7af4ca7",
+       "fleet_rankup_history_view f18baddc639607c2a5b70fdf3a5001f3",
        "fleet_retainer_counts_view cacc318151e524e07f2de7c22e6b6809",
-       "fleet_retainer_gear_view 378c3cd6e16e75afe792b0c23a6a04f6",
+       "fleet_retainer_gear_view d3d6b5cc8864ca4646f1dcc114c2bc82",
        "fleet_retainers_view 80781b39f034a9ae5773b476098e8e80",
-       "fleet_roster_view 723c8431de36af9f239ae811d4c4703a",
+       "fleet_roster_view 13db58bcc5dedc07bea81f4ca0a5740d",
        "fleet_route_fight_club_view f9f045ef0c4a34f69b129c328bf23ba2",
        "fleet_route_subs_view 85cca94fb2561177fbe8f0480badb920",
        "fleet_salvage_view dd44b76775f0eb44919f41e8baa54a4f",
        "fleet_settings_view b4c4368bc697fec979080b14d8d9687a",
        "fleet_shopping_held_view 4b17bc85aba8128efae1c562534233dd",
        "fleet_shopping_progress_view 7126f270a31f8f4ad7c68479d9397f8d",
-       "fleet_sub_history_view 2e6a4aa5da533ef85e312e6a3bfceffd",
+       "fleet_sub_history_view 5a42cd28359f2c6fe2bda7245bd60d33",
        "fleet_subs_view a5bdb63b1316bdbfb1cc53b0e6896ba0",
        "fleet_summary_view 7ae6e73d1ed2a3f8634b5d82861c2769",
-       "fleet_supplies_view 0b3851bcb19d609dc9920b86f94485eb",
-       "fleet_venture_income_view be0b056df6b3aef0c22c392b4ddb1b22",
-       "fleet_voyage_loot_view 04ddf198b8c228913fb65b601a819841",
-       "fleet_voyage_returns_view cb44191e8a3a5b494bcc3839a4f6226a",
-       "fleet_voyage_sectors_view eaf9b2b279550115c2028014361ac894"
+       "fleet_supplies_view 31c7ccd855c245aef1207de1f797c841",
+       "fleet_venture_income_view b6e3741a33a8bd61eb0d05562dc35c87",
+       "fleet_voyage_loot_view dcef02ba9ec650be7c2d9773b1802497",
+       "fleet_voyage_returns_view 729ee8a9e77f813763dea870594c7346",
+       "fleet_voyage_sectors_view 56721cb1f808e3ae0b842f0fa5338248"
       ],
       "versions": [
        "9 catch-up",
@@ -1014,7 +1014,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
+       "e1ef6adcc5f4e259508ebba5c176d73bdbbbd8575ca58718e7b2449ed9205668"
       ]
      }
     },
@@ -1306,41 +1306,41 @@
        "CREATE UNIQUE INDEX tier3_settings_pkey ON public.tier3_settings USING btree (setting_key)"
       ],
       "views": [
-       "fleet_alerts_view 99f5f81f2066a46a215f95e5c203276e",
-       "fleet_fcs_view 9e18fb3904c1e6e077260377fcf3dd82",
+       "fleet_alerts_view 5e55028d01b5669f30c76bce07c8a472",
+       "fleet_fcs_view 8ddfedc292fc68986fa1ab4cf143ee18",
        "fleet_holdings_view 959c97882999560e1b1d3b3e0c81061e",
-       "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
+       "fleet_income_view 2569d3ab181f58bbc5d677f5d3ee070b",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
        "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
-       "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
+       "fleet_not_synced_view 1e2584a71ddb06bc338deaae1ddf0a6c",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
        "fleet_parts_fight_club_view 61ba0f0b99a2e262f13a0a7ddc75e8a4",
        "fleet_parts_rules_view 3328dda5ee2a5e227b845ac9f10a8d2a",
        "fleet_parts_spares_view 5d7ddc4a3974ebb4b0bf60addb01335d",
        "fleet_parts_subs_view c9f24b606f5cacf7b97401495ca2f17d",
        "fleet_pcs_view c3359e680053e60f2c9c4fc90ce2193d",
-       "fleet_rankup_forecast_view 8638aab1c19fdb4bf98a784a72b740b1",
-       "fleet_rankup_history_view 254c4e4c9103caa6a28c5ef8a3b26fc1",
+       "fleet_rankup_forecast_view f8a8ea38e780dda3f04c4bc3f7af4ca7",
+       "fleet_rankup_history_view f18baddc639607c2a5b70fdf3a5001f3",
        "fleet_retainer_counts_view cacc318151e524e07f2de7c22e6b6809",
-       "fleet_retainer_gear_view 378c3cd6e16e75afe792b0c23a6a04f6",
+       "fleet_retainer_gear_view d3d6b5cc8864ca4646f1dcc114c2bc82",
        "fleet_retainers_view 80781b39f034a9ae5773b476098e8e80",
-       "fleet_roster_view 723c8431de36af9f239ae811d4c4703a",
+       "fleet_roster_view 13db58bcc5dedc07bea81f4ca0a5740d",
        "fleet_route_fight_club_view f9f045ef0c4a34f69b129c328bf23ba2",
        "fleet_route_subs_view 85cca94fb2561177fbe8f0480badb920",
        "fleet_salvage_view dd44b76775f0eb44919f41e8baa54a4f",
        "fleet_settings_view b4c4368bc697fec979080b14d8d9687a",
        "fleet_shopping_held_view 4b17bc85aba8128efae1c562534233dd",
        "fleet_shopping_progress_view 7126f270a31f8f4ad7c68479d9397f8d",
-       "fleet_sub_history_view 2e6a4aa5da533ef85e312e6a3bfceffd",
+       "fleet_sub_history_view 5a42cd28359f2c6fe2bda7245bd60d33",
        "fleet_subs_view a5bdb63b1316bdbfb1cc53b0e6896ba0",
        "fleet_summary_view 7ae6e73d1ed2a3f8634b5d82861c2769",
-       "fleet_supplies_view 0b3851bcb19d609dc9920b86f94485eb",
-       "fleet_venture_income_view be0b056df6b3aef0c22c392b4ddb1b22",
-       "fleet_voyage_loot_view 04ddf198b8c228913fb65b601a819841",
-       "fleet_voyage_returns_view cb44191e8a3a5b494bcc3839a4f6226a",
-       "fleet_voyage_sectors_view eaf9b2b279550115c2028014361ac894"
+       "fleet_supplies_view 31c7ccd855c245aef1207de1f797c841",
+       "fleet_venture_income_view b6e3741a33a8bd61eb0d05562dc35c87",
+       "fleet_voyage_loot_view dcef02ba9ec650be7c2d9773b1802497",
+       "fleet_voyage_returns_view 729ee8a9e77f813763dea870594c7346",
+       "fleet_voyage_sectors_view 56721cb1f808e3ae0b842f0fa5338248"
       ],
       "versions": [
        "9 catch-up",
@@ -1353,7 +1353,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
+       "e1ef6adcc5f4e259508ebba5c176d73bdbbbd8575ca58718e7b2449ed9205668"
       ]
      }
     }
@@ -1941,41 +1941,41 @@
        "CREATE UNIQUE INDEX tier3_settings_pkey ON public.tier3_settings USING btree (setting_key)"
       ],
       "views": [
-       "fleet_alerts_view 99f5f81f2066a46a215f95e5c203276e",
-       "fleet_fcs_view 9e18fb3904c1e6e077260377fcf3dd82",
+       "fleet_alerts_view 5e55028d01b5669f30c76bce07c8a472",
+       "fleet_fcs_view 8ddfedc292fc68986fa1ab4cf143ee18",
        "fleet_holdings_view 959c97882999560e1b1d3b3e0c81061e",
-       "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
+       "fleet_income_view 2569d3ab181f58bbc5d677f5d3ee070b",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
        "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
-       "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
+       "fleet_not_synced_view 1e2584a71ddb06bc338deaae1ddf0a6c",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
        "fleet_parts_fight_club_view 61ba0f0b99a2e262f13a0a7ddc75e8a4",
        "fleet_parts_rules_view 3328dda5ee2a5e227b845ac9f10a8d2a",
        "fleet_parts_spares_view 5d7ddc4a3974ebb4b0bf60addb01335d",
        "fleet_parts_subs_view c9f24b606f5cacf7b97401495ca2f17d",
        "fleet_pcs_view c3359e680053e60f2c9c4fc90ce2193d",
-       "fleet_rankup_forecast_view 8638aab1c19fdb4bf98a784a72b740b1",
-       "fleet_rankup_history_view 254c4e4c9103caa6a28c5ef8a3b26fc1",
+       "fleet_rankup_forecast_view f8a8ea38e780dda3f04c4bc3f7af4ca7",
+       "fleet_rankup_history_view f18baddc639607c2a5b70fdf3a5001f3",
        "fleet_retainer_counts_view cacc318151e524e07f2de7c22e6b6809",
-       "fleet_retainer_gear_view 378c3cd6e16e75afe792b0c23a6a04f6",
+       "fleet_retainer_gear_view d3d6b5cc8864ca4646f1dcc114c2bc82",
        "fleet_retainers_view 80781b39f034a9ae5773b476098e8e80",
-       "fleet_roster_view 723c8431de36af9f239ae811d4c4703a",
+       "fleet_roster_view 13db58bcc5dedc07bea81f4ca0a5740d",
        "fleet_route_fight_club_view f9f045ef0c4a34f69b129c328bf23ba2",
        "fleet_route_subs_view 85cca94fb2561177fbe8f0480badb920",
        "fleet_salvage_view dd44b76775f0eb44919f41e8baa54a4f",
        "fleet_settings_view b4c4368bc697fec979080b14d8d9687a",
        "fleet_shopping_held_view 4b17bc85aba8128efae1c562534233dd",
        "fleet_shopping_progress_view 7126f270a31f8f4ad7c68479d9397f8d",
-       "fleet_sub_history_view 2e6a4aa5da533ef85e312e6a3bfceffd",
+       "fleet_sub_history_view 5a42cd28359f2c6fe2bda7245bd60d33",
        "fleet_subs_view a5bdb63b1316bdbfb1cc53b0e6896ba0",
        "fleet_summary_view 7ae6e73d1ed2a3f8634b5d82861c2769",
-       "fleet_supplies_view 0b3851bcb19d609dc9920b86f94485eb",
-       "fleet_venture_income_view be0b056df6b3aef0c22c392b4ddb1b22",
-       "fleet_voyage_loot_view 04ddf198b8c228913fb65b601a819841",
-       "fleet_voyage_returns_view cb44191e8a3a5b494bcc3839a4f6226a",
-       "fleet_voyage_sectors_view eaf9b2b279550115c2028014361ac894"
+       "fleet_supplies_view 31c7ccd855c245aef1207de1f797c841",
+       "fleet_venture_income_view b6e3741a33a8bd61eb0d05562dc35c87",
+       "fleet_voyage_loot_view dcef02ba9ec650be7c2d9773b1802497",
+       "fleet_voyage_returns_view 729ee8a9e77f813763dea870594c7346",
+       "fleet_voyage_sectors_view 56721cb1f808e3ae0b842f0fa5338248"
       ],
       "versions": [
        "9 catch-up",
@@ -1988,7 +1988,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
+       "e1ef6adcc5f4e259508ebba5c176d73bdbbbd8575ca58718e7b2449ed9205668"
       ]
      }
     },
@@ -2280,41 +2280,41 @@
        "CREATE UNIQUE INDEX tier3_settings_pkey ON public.tier3_settings USING btree (setting_key)"
       ],
       "views": [
-       "fleet_alerts_view 99f5f81f2066a46a215f95e5c203276e",
-       "fleet_fcs_view 9e18fb3904c1e6e077260377fcf3dd82",
+       "fleet_alerts_view 5e55028d01b5669f30c76bce07c8a472",
+       "fleet_fcs_view 8ddfedc292fc68986fa1ab4cf143ee18",
        "fleet_holdings_view 959c97882999560e1b1d3b3e0c81061e",
-       "fleet_income_view b0ce2a58960d1ff63b52624881de4311",
+       "fleet_income_view 2569d3ab181f58bbc5d677f5d3ee070b",
        "fleet_item_totals_view aedce1ab8c65dedab238767aed4f2bdb",
        "fleet_market_accounts_view ff47968d8d531f92ed34b5c56332cbb5",
        "fleet_market_listings_view 4798fb086ae93861ce208f74c3058ba7",
        "fleet_market_settings_view 6af57a310054a021093597161f14ed73",
-       "fleet_not_synced_view a0dcbc281d9619e25a710e92fe48adc8",
+       "fleet_not_synced_view 1e2584a71ddb06bc338deaae1ddf0a6c",
        "fleet_parts_characters_view c58f79705bb2ec43e015e6ef54826a32",
        "fleet_parts_fight_club_view 61ba0f0b99a2e262f13a0a7ddc75e8a4",
        "fleet_parts_rules_view 3328dda5ee2a5e227b845ac9f10a8d2a",
        "fleet_parts_spares_view 5d7ddc4a3974ebb4b0bf60addb01335d",
        "fleet_parts_subs_view c9f24b606f5cacf7b97401495ca2f17d",
        "fleet_pcs_view c3359e680053e60f2c9c4fc90ce2193d",
-       "fleet_rankup_forecast_view 8638aab1c19fdb4bf98a784a72b740b1",
-       "fleet_rankup_history_view 254c4e4c9103caa6a28c5ef8a3b26fc1",
+       "fleet_rankup_forecast_view f8a8ea38e780dda3f04c4bc3f7af4ca7",
+       "fleet_rankup_history_view f18baddc639607c2a5b70fdf3a5001f3",
        "fleet_retainer_counts_view cacc318151e524e07f2de7c22e6b6809",
-       "fleet_retainer_gear_view 378c3cd6e16e75afe792b0c23a6a04f6",
+       "fleet_retainer_gear_view d3d6b5cc8864ca4646f1dcc114c2bc82",
        "fleet_retainers_view 80781b39f034a9ae5773b476098e8e80",
-       "fleet_roster_view 723c8431de36af9f239ae811d4c4703a",
+       "fleet_roster_view 13db58bcc5dedc07bea81f4ca0a5740d",
        "fleet_route_fight_club_view f9f045ef0c4a34f69b129c328bf23ba2",
        "fleet_route_subs_view 85cca94fb2561177fbe8f0480badb920",
        "fleet_salvage_view dd44b76775f0eb44919f41e8baa54a4f",
        "fleet_settings_view b4c4368bc697fec979080b14d8d9687a",
        "fleet_shopping_held_view 4b17bc85aba8128efae1c562534233dd",
        "fleet_shopping_progress_view 7126f270a31f8f4ad7c68479d9397f8d",
-       "fleet_sub_history_view 2e6a4aa5da533ef85e312e6a3bfceffd",
+       "fleet_sub_history_view 5a42cd28359f2c6fe2bda7245bd60d33",
        "fleet_subs_view a5bdb63b1316bdbfb1cc53b0e6896ba0",
        "fleet_summary_view 7ae6e73d1ed2a3f8634b5d82861c2769",
-       "fleet_supplies_view 0b3851bcb19d609dc9920b86f94485eb",
-       "fleet_venture_income_view be0b056df6b3aef0c22c392b4ddb1b22",
-       "fleet_voyage_loot_view 04ddf198b8c228913fb65b601a819841",
-       "fleet_voyage_returns_view cb44191e8a3a5b494bcc3839a4f6226a",
-       "fleet_voyage_sectors_view eaf9b2b279550115c2028014361ac894"
+       "fleet_supplies_view 31c7ccd855c245aef1207de1f797c841",
+       "fleet_venture_income_view b6e3741a33a8bd61eb0d05562dc35c87",
+       "fleet_voyage_loot_view dcef02ba9ec650be7c2d9773b1802497",
+       "fleet_voyage_returns_view 729ee8a9e77f813763dea870594c7346",
+       "fleet_voyage_sectors_view 56721cb1f808e3ae0b842f0fa5338248"
       ],
       "versions": [
        "9 catch-up",
@@ -2327,7 +2327,7 @@
        "16 pc_last_read"
       ],
       "viewsChecksum": [
-       "20547e68760c3bfad88d95af12104ba791aea1cea96ddf494290e479823811cd"
+       "e1ef6adcc5f4e259508ebba5c176d73bdbbbd8575ca58718e7b2449ed9205668"
       ]
      }
     }

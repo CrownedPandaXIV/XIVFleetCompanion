@@ -185,37 +185,49 @@ You need XIVLauncher, the game, Dalamud and the .NET SDK.
 
 ### Tests
 
-The database-writing code has its own tests in [tests/FleetWriterTests](tests/FleetWriterTests/README.md). They run on
-GitHub for every pull request, along with a full build.
+The database code has its own tests in [tests/FleetWriterTests](tests/FleetWriterTests/README.md), and the release
+scripts theirs in `tests/scripts/release-scripts.sh`. They run on GitHub for every pull request, along with a full build.
 
 ### Releasing a new version
 
 1. Raise `<Version>` in `XIVFleetCompanion/XIVFleetCompanion.csproj`.
-2. Add a section for it at the top of `CHANGELOG.md`.
-3. Merge to `master`.
+2. Add a section for it at the top of `CHANGELOG.md` (`## x.y.z - YYYY-MM-DD`). The pull request's build fails without
+   one.
+3. If the app changed its database files or its answers, refresh the plugin's copies first (see
+   [Database changes](#database-changes)). The pull request's tests fail while they're out of date.
+4. Merge to `master`.
 
 GitHub then tags the release, builds the plugin and publishes it to the plugin list in
 [XIVFleetCompanion-Releases](https://github.com/CrownedPandaXIV/XIVFleetCompanion-Releases), where Dalamud picks it up.
 It also keeps that page's text the same as `.github/releases-readme.md`. Both need the `RELEASES_TOKEN` secret: a
 token that can write to that repository.
 
-**A test build first:** push the branch to `testing` (`git push origin dev:testing --force`). GitHub builds it as
+**A test build first:** push the branch to `testing` (`git push origin v2:testing --force`). GitHub builds it as
 `<version>.<run>` (1.0.2.7) and adds it to `repo.json` as the plugin's testing version, so only players who opted in to
 its testing builds in Dalamud get it (`.github/workflows/test-release.yml`). The next normal release of that version is
 numbered above the last test build, so they get that too. `tests/scripts/release-scripts.sh` checks the scripts.
 
 Version numbers follow [Semantic Versioning](https://semver.org):
 
-- **0.1.0 → 0.1.1** for fixes,
-- **0.1.0 → 0.2.0** for new data or features,
-- **1.0** for the first stable release.
+- **2.4.7 → 2.4.8** for fixes,
+- **2.4.8 → 2.5.0** for new data or features,
+- **2.x → 3.0** for a change that needs the app or the database updated first.
 
 The plugin and the app have separate version numbers. The changelog says when one needs a newer version of the other.
 
 ### Database changes
 
-The app owns the database layout. A new table or column goes in the app's `db/updates/` folder, and the app applies it
-everywhere.
+The app owns the database layout. A new table or column goes in the app's `db/updates/` folder, a view in its
+`db/views.sql` (and `db/sqlite/` for the fleet file). The plugin applies the same files itself, from its own copy in
+`XIVFleetCompanion/Database/`, so after a change in the app, copy them across from the app's folder:
+
+```
+node tests/db/plugin-database-fixture.js ../XIVFleetCompanion
+```
+
+That also refreshes `tests/FleetWriterTests/database-fixture.json`, which the plugin's tests check its own updating
+against. The other answers the tests compare with the app's are refreshed the same way
+([tests/FleetWriterTests](tests/FleetWriterTests/README.md#the-apps-answers-fixturejson-and-xivfleetcompaniondatabase)).
 
 ### Adding a chart value
 

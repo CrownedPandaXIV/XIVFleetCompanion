@@ -153,6 +153,17 @@ namespace XIVFleetCompanion
 
     public static class SubRoutes
     {
+        /// <summary>The Route Optimization heading when no sub is off its Target route: why, so "all on target" isn't said
+        /// when there was nothing to compare (as the app's routesNothingText).</summary>
+        public static string NothingToSwitch(IReadOnlyCollection<SubRoute> subs)
+        {
+            var from85 = subs.Where(s => s.Rank >= 85).ToList();
+            if (from85.Count == 0) return "No sub is rank 85 yet: Target routes start at rank 85, as in Fight Club.";
+            if (!from85.Any(s => s.TargetRoute.Length > 0))
+                return "No sub from rank 85 has a Target route: Fight Club Data isn't imported (Settings, Fight Club Data), or lists nothing for their ranks.";
+            return "Every sub from rank 85 is on its Target route.";
+        }
+
         private const double Hour = 3600 * 1000;
         private const double Day = 24 * Hour;
         private const double MeasureWindowDays = 7;
@@ -243,20 +254,27 @@ namespace XIVFleetCompanion
             return null;
         }
 
-        /// <summary>Current gil/day: the sub's route and parts against Fight Club's rows for that route (the first whose
-        /// build ranks it clears), after repair kits; null when none matches.</summary>
+        /// <summary>Current gil/day: the sub's route and parts against Fight Club's rows for that route, after repair kits;
+        /// null when none matches. Among the rows whose rank it clears, the one whose build is the sub's own parts; failing
+        /// that, the one needing the highest rank it clears (as the app's computeCurrentGilPerDay).</summary>
         public static double? CurrentGilPerDay(int rank, string currentRoute, string[] parts, List<FightClubRow> rows)
         {
             if (currentRoute.Length == 0) return null;
             var name = currentRoute.Replace("-", "");
-            foreach (var row in rows.Where(r => r.Route == name))
+            var qualifying = rows.Where(r => r.Route == name)
+                .Select(r => (Row: r, Builds: new[] { PartsPlanner.ParseRankBuild(r.UnmodMinRank), PartsPlanner.ParseRankBuild(r.MinRankBuild) }
+                    .Where(b => b != null && rank >= b.Value.Rank).Select(b => b!.Value).ToList()))
+                .Where(q => q.Builds.Count > 0).ToList();
+            if (qualifying.Count == 0) return null;
+            bool Own((int Rank, string[] Parts) b) => b.Parts.Length == parts.Length && b.Parts.Zip(parts).All(p => p.First == p.Second);
+            int Highest((FightClubRow Row, List<(int Rank, string[] Parts)> Builds) q) => q.Builds.Max(b => b.Rank);
+            var pick = qualifying.FirstOrDefault(q => q.Builds.Any(Own));
+            if (pick.Row == null)
             {
-                var unmod = PartsPlanner.ParseRankBuild(row.UnmodMinRank);
-                var modded = PartsPlanner.ParseRankBuild(row.MinRankBuild);
-                if ((unmod != null && rank >= unmod.Value.Rank) || (modded != null && rank >= modded.Value.Rank))
-                    return Round(PartsPlanner.NetGilPerDay(row.AsParts, parts));
+                pick = qualifying[0];
+                foreach (var q in qualifying.Skip(1)) if (Highest(q) > Highest(pick)) pick = q;
             }
-            return null;
+            return Round(PartsPlanner.NetGilPerDay(pick.Row.AsParts, parts));
         }
 
         /// <summary>A sub's speed or range: its rank's plus each part's; null when the rank or a part isn't known.</summary>
@@ -466,7 +484,6 @@ namespace XIVFleetCompanion
             var fightClub = input.FightClub.OrderBy(f => f.Id).ToList();
             var rules = input.Rules.OrderBy(r => r.Id).ToList();
             var partsRoutes = fightClub.Select(f => f.AsParts).ToList();
-            var kitCost = fightClub.Count > 0 ? fightClub[0].RepairKitCost : 0;
 
             // Game data, as the app reads its copy: sector letters (a sector with none is left out), maps, ranks, parts.
             var letterOf = new Dictionary<int, string>();

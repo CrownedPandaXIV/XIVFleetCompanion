@@ -162,6 +162,15 @@ namespace XIVFleetCompanion
             return null;
         }
 
+        /// <summary>Company credits per ceruleum tank (Supplies' FC credits section), as the app's.</summary>
+        public static async Task<string?> SaveTankCost(DbConnection conn, double cost)
+        {
+            if (cost != Math.Floor(cost) || cost < 1 || cost > FcCredits.MaxTankCost)
+                return $"Company credits per tank: 1 to {FcCredits.MaxTankCost.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)}.";
+            await SaveEconomics(conn, FcCredits.TankCostKey, (decimal)cost);
+            return null;
+        }
+
         public const int DemolitionDays = 45;
         public const int MinNotSyncedMinutes = 10, MaxNotSyncedMinutes = 1440;
         public const int MaxLowSupply = 99999;
@@ -322,6 +331,28 @@ namespace XIVFleetCompanion
             return text.Append('}').ToString();
         }
 
+        /// <summary>The Shopping List's ticks as checked against the list (ShoppingResult.ProgressToSave), saved only if
+        /// they're still what the list was worked out from (`from`): a tick made meanwhile, here or on another PC, wins.</summary>
+        public static async Task<string?> SaveCheckedShoppingProgress(DbConnection conn, string? from, string progress)
+        {
+            await using var tx = await conn.BeginTransactionAsync();
+            string? stored;
+            await using (var read = Command(conn, "SELECT setting_value FROM tier3_settings WHERE setting_key = $1" + (Db.IsFile(conn) ? "" : " FOR UPDATE"), "shopping_progress"))
+            {
+                read.Transaction = tx;
+                stored = await read.ExecuteScalarAsync() as string;
+            }
+            if ((stored ?? "") != (from ?? "")) return null;
+            await using (var write = Command(conn, @"INSERT INTO tier3_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, now())
+                ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = now()", "shopping_progress", progress))
+            {
+                write.Transaction = tx;
+                await write.ExecuteNonQueryAsync();
+            }
+            await tx.CommitAsync();
+            return null;
+        }
+
         /// <summary>How many of a part on the Shopping List (looking `aheadDays` ahead) have been made, saved for every PC.</summary>
         public static async Task<string?> SaveShoppingProgress(DbConnection conn, double itemId, double made, double crafts, int aheadDays)
         {
@@ -329,7 +360,8 @@ namespace XIVFleetCompanion
                 return "Not a part on the list.";
             await using var tx = await conn.BeginTransactionAsync();
             string? stored = null;
-            await using (var read = Command(conn, "SELECT setting_value FROM tier3_settings WHERE setting_key = $1", "shopping_progress"))
+            // Locked while it's changed (PostgreSQL), so a tick saved at the same moment on another PC isn't lost.
+            await using (var read = Command(conn, "SELECT setting_value FROM tier3_settings WHERE setting_key = $1" + (Db.IsFile(conn) ? "" : " FOR UPDATE"), "shopping_progress"))
             {
                 read.Transaction = tx;
                 stored = await read.ExecuteScalarAsync() as string;

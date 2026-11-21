@@ -145,7 +145,7 @@ public sealed class FleetTable<T>
         "ventureIncome" or "ventureIncomeLive" => "Retainer ventures",
         "lootSubs" or "lootSubsLive" => "Loot per voyage, subs",
         "lootRoutes" or "lootRoutesLive" => "Loot per voyage, routes",
-        "partsCraft" => "To craft",
+        "partsCraft" => "Summary",
         "shoppingBuy" => "Shopping List, to buy",
         _ when id.StartsWith("shopping", StringComparison.Ordinal) => "Shopping List",
         _ => "",

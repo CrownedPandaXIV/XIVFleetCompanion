@@ -163,6 +163,10 @@ namespace XIVFleetCompanion
         public List<ShopRow> Crystals { get; init; } = new();
         public List<ShopRow> Buy { get; init; } = new();
         public double BuyCost { get; init; }
+        /// <summary>The ticks as they should be saved now (taken back off for parts since seen held, dropped for parts no
+        /// longer on the list, all cleared when nothing is left to craft), when that differs from what's saved; else null.
+        /// As the app's get-shopping-list writes back.</summary>
+        public string? ProgressToSave { get; init; }
         public ShoppingMarketInfo Market { get; set; } = new(false, null, null, null, null, null, null);
         public ShoppingTotals? Totals { get; set; }
         public bool Priced => Market.Scope != null && Market.Error == null;
@@ -318,6 +322,23 @@ namespace XIVFleetCompanion
             {
                 return new();
             }
+        }
+
+        /// <summary>The saved ticks after checking them against each Look ahead's list (reconcileByAhead), as JSON the way
+        /// the app writes it; null when that's what's saved already.</summary>
+        public static string? Reconciled(List<(string Key, JsonElement Entry)> stored, List<(int Ahead, List<(int ItemId, long Crafts)> Parts)> lists)
+        {
+            var made = new SortedDictionary<long, string>();
+            foreach (var (ahead, parts) in lists)
+            {
+                var one = Made(stored, new() { (ahead, parts) });
+                foreach (var (itemId, crafts) in parts)
+                    if (one.TryGetValue(itemId, out var n))
+                        made[itemId] = $"{{\"made\":{n},\"outOf\":{crafts}{(ahead != 0 ? $",\"ahead\":{ahead}" : "")}}}";
+            }
+            var next = "{" + string.Join(",", made.Select(kv => $"\"{kv.Key}\":{kv.Value}")) + "}";
+            var now = "{" + string.Join(",", stored.Select(e => $"{JsonSerializer.Serialize(e.Key)}:{JsonSerializer.Serialize(e.Entry)}")) + "}";
+            return next == now ? null : next;
         }
 
         /// <summary>How many of each part on the list have been made (reconcileByAhead): ticks made with each Look ahead
@@ -540,7 +561,7 @@ namespace XIVFleetCompanion
             var byAhead = aheads.ToDictionary(d => d, PartsWithin);
             var parts = byAhead[ahead];
             var longest = byAhead[aheads.Max()];
-            if (longest.Counts.Count == 0) return new ShoppingResult { Empty = true };
+            if (longest.Counts.Count == 0) return new ShoppingResult { Empty = true, ProgressToSave = stored.Count > 0 ? "{}" : null };
             if (!game.HasWorkshop(longest.Order))
                 return new ShoppingResult { Error = "The game's crafting data isn't there for these parts." };
             var workshop = game.Workshop(longest.Order);
@@ -572,8 +593,10 @@ namespace XIVFleetCompanion
             var lists = byAhead.ToDictionary(kv => kv.Key, kv => Build(kv.Value.Counts, kv.Value.Order, RecipeOf, heldTotal, buy));
             var built = lists[ahead];
 
-            var made = Made(stored, aheads.Select(d => (d, lists[d].Parts.Select(p => (p.ItemId, p.Crafts)).ToList())).ToList());
-            if (parts.Counts.Count == 0) return new ShoppingResult { Empty = true };
+            var byList = aheads.Select(d => (d, lists[d].Parts.Select(p => (p.ItemId, p.Crafts)).ToList())).ToList();
+            var made = Made(stored, byList);
+            var toSave = Reconciled(stored, byList);
+            if (parts.Counts.Count == 0) return new ShoppingResult { Empty = true, ProgressToSave = toSave };
             void Describe(ShopRow r)
             {
                 r.Name = game.NameOf(r.ItemId);
@@ -588,6 +611,7 @@ namespace XIVFleetCompanion
                 VendorsLoaded = vendorsLoaded, BuyFromVendors = buyFromVendors && vendorsLoaded,
                 Parts = built.Parts, Craft = built.Craft, Gather = built.Gather, Crystals = built.Crystals, Buy = built.Buy,
                 BuyCost = built.Buy.Sum(b => b.Cost),
+                ProgressToSave = toSave,
             };
             if (market == null) return result;
 

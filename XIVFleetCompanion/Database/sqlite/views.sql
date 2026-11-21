@@ -15,8 +15,9 @@
 --     what it's matched with is written +x: that keeps SQLite from converting either side, which would stop it using
 --     the history's index (a check of the supplies took seconds instead of milliseconds)
 --   booleans are 0 or 1
---   text sorts letter by letter here, but by the database's language setting in PostgreSQL: any order that reaches the
---     game (fleet_alerts_view's, and the plugin's own ORDER BY when it reads) sorts text with COLLATE "C" there
+--   text sorts letter by letter here, but by the database's language setting in PostgreSQL: any order or min() that reaches
+--     the game (fleet_alerts_view's order, fleet_fcs_view's account label, the plugin's own ORDER BY when it reads) uses
+--     COLLATE "C" there
 
 DROP VIEW IF EXISTS fleet_settings_view;
 DROP VIEW IF EXISTS fleet_shopping_held_view;
@@ -178,13 +179,20 @@ WITH setting AS (
                    WHERE setting_key = 'not_synced_after_minutes' AND setting_value = round(setting_value)
                      AND setting_value BETWEEN 10 AND 1440), 30) AS minutes
 ),
+-- A character with no account label counts with the others of the PC it last logged in on, where that's known
+-- (characters/not-synced.js).
+characters AS (
+  SELECT c.cid, c.name, c.world, c.account_label, c.last_synced_at,
+         coalesce(nullif(c.account_label, ''), 'pc:' || l.pc_name, 'Ungrouped') AS account
+  FROM companion_character_current c LEFT JOIN companion_character_login l ON l.cid = c.cid
+),
 accounts AS (
-  SELECT coalesce(nullif(account_label, ''), 'Ungrouped') AS account, max(last_synced_at) AS newest
-  FROM companion_character_current GROUP BY 1
+  SELECT account, max(last_synced_at) AS newest
+  FROM characters GROUP BY 1
 )
 SELECT c.cid, c.name, c.world, c.account_label, a.newest - c.last_synced_at AS behind
-FROM companion_character_current c
-JOIN accounts a ON a.account = coalesce(nullif(c.account_label, ''), 'Ungrouped')
+FROM characters c
+JOIN accounts a ON a.account = c.account
 CROSS JOIN setting st
 WHERE a.newest - c.last_synced_at >= st.minutes * 60;
 
@@ -257,7 +265,7 @@ house_ages AS (
   WHERE h.has_house
 ),
 supplies AS (
-  SELECT c.cid, c.name || ' (' || c.world || ')' AS who, coalesce(c.ceruleum, 0) AS ceruleum, coalesce(c.repair_kits, 0) AS repair_kits
+  SELECT c.cid, coalesce(c.name, 'Character ' || c.cid) || ' (' || coalesce(c.world, '?') || ')' AS who, coalesce(c.ceruleum, 0) AS ceruleum, coalesce(c.repair_kits, 0) AS repair_kits
   FROM companion_character_current c
   WHERE EXISTS (SELECT 1 FROM companion_submarine_snapshot s WHERE s.cid = c.cid AND s.level > 0)
     AND c.cid NOT IN (SELECT cid FROM fleet_not_synced_view)
@@ -266,7 +274,7 @@ SELECT CASE WHEN days IS NULL OR days < 30 THEN 'warn' ELSE 'danger' END AS leve
        CASE WHEN days IS NULL THEN 'house: no date yet for when it was last entered'
             WHEN days >= 45 THEN 'house not entered for ' || days || ' days: past 45, the game can demolish it any time'
             ELSE 'house not entered for ' || days || ' day' || CASE WHEN days = 1 THEN '' ELSE 's' END
-                 || '; demolished after ' || (45 - days) || ' more' END AS detail,
+                 || '; the game can demolish it in ' || (45 - days) || ' more day' || CASE WHEN 45 - days = 1 THEN '' ELSE 's' END END AS detail,
        coalesce(days, 0) AS weight
 FROM house_ages, settings st WHERE days IS NULL OR days >= st.house_days
 UNION ALL
@@ -276,14 +284,14 @@ UNION ALL
 SELECT 'warn', 'low_repair_kits', s.who, s.repair_kits || ' repair kits (warning below ' || CAST(round(st.repair_kits) AS INTEGER) || ')', 0
 FROM supplies s, settings st WHERE st.repair_kits > 0 AND s.repair_kits < st.repair_kits
 UNION ALL
-SELECT 'warn', 'not_synced', name || ' (' || world || ')',
+SELECT 'warn', 'not_synced', coalesce(name, 'Character ' || cid) || ' (' || coalesce(world, '?') || ')',
        'no longer synced (' || CAST(behind / 3600 AS INTEGER) || ' h behind its account): unticked in the plugin, or its AutoRetainer no longer has it', 0
 FROM fleet_not_synced_view
 UNION ALL
 SELECT 'warn', 'autoretainer', pc_name || CASE WHEN account_label <> '' THEN ' (' || account_label || ')' ELSE '' END,
        'AutoRetainer was not running at its last sync, so nothing syncs from there', 0
 FROM companion_pc_status WHERE autoretainer_ready = 0 AND last_sync_at > ((julianday('now') - 2440587.5) * 86400.0) - 86400
-ORDER BY 1, 2, 5 DESC, 3;
+ORDER BY 1, 2, 5 DESC, 3 NULLS LAST;
 
 CREATE VIEW fleet_roster_view AS
 WITH thresholds AS (
@@ -301,8 +309,8 @@ SELECT c.cid, c.name, c.world, c.account_label, so.sort_index,
        l.pc_name AS login_pc, l.account_label AS login_label, l.logged_in_at,
        CAST(coalesce(b.subs_built, 0) AS INTEGER) AS subs_built,
        CAST(ns.behind / 60 AS INTEGER) AS behind_minutes,
-       (coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND coalesce(c.ceruleum, 0) < t.ceruleum) AS low_ceruleum,
-       (coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND coalesce(c.repair_kits, 0) < t.repair_kits) AS low_repair_kits,
+       coalesce(coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND c.ceruleum < t.ceruleum, 0) AS low_ceruleum,  -- not known yet: not low
+       coalesce(coalesce(b.subs_built, 0) > 0 AND ns.cid IS NULL AND c.repair_kits < t.repair_kits, 0) AS low_repair_kits,
        c.num_sub_slots, t.ceruleum AS ceruleum_warning, t.repair_kits AS repair_kit_warning
 FROM companion_character_current c
 CROSS JOIN thresholds t
@@ -325,7 +333,9 @@ LEFT JOIN retainer_gear_targets t ON t.retainer_id = rl.retainer_id
 LEFT JOIN character_sort_order so ON so.cid = rl.owner_cid;
 
 CREATE VIEW fleet_retainer_gear_view AS
-SELECT retainer_id, item_id FROM companion_inventory_snapshot WHERE sorted_container = 11000 AND item_id IS NOT NULL;
+-- A high-quality piece is stored at its id + 1,000,000 (the game's numbering): given as the item itself, whose level is the same.
+SELECT retainer_id, CASE WHEN item_id >= 1000000 AND item_id < 2000000 THEN item_id - 1000000 ELSE item_id END AS item_id
+FROM companion_inventory_snapshot WHERE sorted_container = 11000 AND item_id IS NOT NULL;
 
 CREATE VIEW fleet_pcs_view AS
 SELECT pc_name, account_label, plugin_version, last_sync_at, autoretainer_ready, allagantools_ready, fctracker_found,
@@ -388,6 +398,10 @@ SELECT a.fc_id, a.fc_name, a.fc_master, a.fc_points, a.fc_rank, a.total_members,
        CASE WHEN NOT coalesce(a.has_house, 0) AND a.reference IS NOT NULL THEN a.reference + 30 * 86400 END AS eligible_at,
        CASE WHEN coalesce(a.has_house, 0) OR a.reference IS NULL THEN NULL
             WHEN a.rank_number >= 6 AND a.days_since_founding >= 30 THEN 'Eligible'
+            -- Both still to come: say both, so nobody plans to bid on a day the rank still won't allow.
+            WHEN a.days_since_founding < 30 AND NOT coalesce(a.rank_number >= 6, 0)
+              THEN 'Rank ' || coalesce(CAST(a.rank_number AS TEXT), '?') || '/6, and ' || (CAST(30 - a.days_since_founding AS INTEGER) + (30 - a.days_since_founding > CAST(30 - a.days_since_founding AS INTEGER))) || ' more day'
+                 || CASE WHEN (CAST(30 - a.days_since_founding AS INTEGER) + (30 - a.days_since_founding > CAST(30 - a.days_since_founding AS INTEGER))) = 1 THEN '' ELSE 's' END
             WHEN a.days_since_founding < 30 THEN 'Eligible in ' || (CAST(30 - a.days_since_founding AS INTEGER) + (30 - a.days_since_founding > CAST(30 - a.days_since_founding AS INTEGER))) || ' day'
                  || CASE WHEN CAST(30 - a.days_since_founding AS INTEGER) + (30 - a.days_since_founding > CAST(30 - a.days_since_founding AS INTEGER)) = 1 THEN '' ELSE 's' END
             ELSE 'Rank too low (' || coalesce(CAST(a.rank_number AS TEXT), '?') || '/6)' END AS eligibility,
@@ -413,7 +427,7 @@ holders AS (
     SELECT c.fc_id, c.cid,
            row_number() OVER (PARTITION BY c.fc_id
              ORDER BY CASE WHEN h.fc_master IS NOT NULL AND c.name IS NOT NULL AND lower(c.name) = lower(h.fc_master) THEN 0 ELSE 1 END,
-                      so.sort_index NULLS LAST, c.name, CAST(c.cid AS TEXT)) AS rn
+                      so.sort_index NULLS LAST, c.name NULLS LAST, CAST(c.cid AS TEXT)) AS rn
     FROM companion_character_current c
     LEFT JOIN character_sort_order so ON so.cid = c.cid
     LEFT JOIN companion_character_housing h ON h.cid = c.cid AND h.fc_id = c.fc_id
@@ -547,14 +561,15 @@ points AS (
   JOIN companion_metric_history h ON h.subject_type = s.subject_type AND h.subject_id = +s.subject_id
   WHERE h.recorded_at > st.window_start AND h.metric IN (SELECT metric FROM metrics)
   UNION ALL
+  -- One row (the newest; of two at the same moment, the last written), as PostgreSQL's LIMIT 1: matching on the time
+  -- alone would take both, and the series would see a change between them.
   SELECT h.subject_type, h.subject_id, h.metric, h.recorded_at, h.value
-  FROM (SELECT s.subject_type, s.subject_id, m.metric,
-               (SELECT max(b.recorded_at) FROM companion_metric_history b
+  FROM (SELECT (SELECT b.rowid FROM companion_metric_history b
                 WHERE b.subject_type = s.subject_type AND b.subject_id = +s.subject_id AND b.metric = m.metric
-                  AND b.recorded_at <= st.window_start) AS at
+                  AND b.recorded_at <= st.window_start
+                ORDER BY b.recorded_at DESC, b.rowid DESC LIMIT 1) AS rid
         FROM subjects s CROSS JOIN metrics m CROSS JOIN settings st) base
-  JOIN companion_metric_history h ON h.subject_type = base.subject_type AND h.subject_id = +base.subject_id
-   AND h.metric = base.metric AND h.recorded_at = base.at
+  JOIN companion_metric_history h ON h.rowid = base.rid
 ),
 series AS (
   SELECT subject_type, subject_id, metric, recorded_at AS at, value,
@@ -580,23 +595,35 @@ windows AS (
   SELECT cid, fc_id, kits_total_first, end_at, from_at, (end_at - from_at) / 86400.0 AS span_days
   FROM (SELECT e.*, CASE WHEN salvage_first IS NOT NULL THEN max(window_start, salvage_first) ELSE end_at END AS from_at FROM ends e)
 ),
-new_sources AS (
-  SELECT DISTINCT subject_id AS cid, at FROM series
-  WHERE subject_type = 'character' AND metric = 'inventory_sources' AND value > prev
+-- Each salvage rise in the window, with what else happened at that moment for that character and item: items stored
+-- for a new source (not income), and that salvage leaving its FC chest (moved, not earned). Matched in one sorted pass
+-- over all of them (a window per character, item and moment) rather than by joining them: with a big fleet's history
+-- those joins took minutes. Matched on the exact time: the plugin writes every value of one sync with one time
+-- (MetricWriter: one statement with now() on PostgreSQL, one Db.Now() in the file).
+fc_members AS (
+  SELECT fc_id, cid FROM windows WHERE fc_id IS NOT NULL
 ),
-chest_drops AS (
-  SELECT subject_id AS fc_id, metric, at, max(prev - value) AS fell FROM series
-  WHERE subject_type = 'fc' AND prev > value
-  GROUP BY subject_id, metric, at
-),
-rises AS (
-  SELECT w.cid, CAST(substr(se.metric, 10) AS INTEGER) AS item_id, se.value - se.prev AS amount,
-         ns.cid IS NOT NULL AS first_stored, coalesce(cd.fell, 0) AS chest_drop
+marks AS (
+  SELECT w.cid, se.metric, se.at, 'rise' AS kind, se.value - se.prev AS amount, 0 AS fell
   FROM windows w
   JOIN series se ON se.subject_type = 'character' AND se.subject_id = w.cid AND se.metric LIKE 'item_qty:225%'
-  LEFT JOIN new_sources ns ON ns.cid = w.cid AND ns.at = se.at
-  LEFT JOIN chest_drops cd ON cd.fc_id = w.fc_id AND cd.metric = se.metric AND cd.at = se.at
   WHERE se.at > w.from_at AND se.value > se.prev
+  UNION ALL
+  SELECT se.subject_id, m.metric, se.at, 'new', 0, 0
+  FROM series se CROSS JOIN metrics m
+  WHERE se.subject_type = 'character' AND se.metric = 'inventory_sources' AND se.value > se.prev AND m.metric LIKE 'item_qty:225%'
+  UNION ALL
+  SELECT f.cid, se.metric, se.at, 'chest', 0, se.prev - se.value
+  FROM series se JOIN fc_members f ON f.fc_id = se.subject_id
+  WHERE se.subject_type = 'fc' AND se.prev > se.value
+),
+rises AS (
+  SELECT cid, CAST(substr(metric, 10) AS INTEGER) AS item_id, amount, first_stored = 1 AS first_stored, chest_drop
+  FROM (SELECT cid, metric, kind, amount,
+               max(CASE WHEN kind = 'new' THEN 1 ELSE 0 END) OVER (PARTITION BY cid, metric, at) AS first_stored,
+               max(fell) OVER (PARTITION BY cid, metric, at) AS chest_drop
+        FROM marks) x
+  WHERE kind = 'rise'
 ),
 salvage AS (
   SELECT r.cid,

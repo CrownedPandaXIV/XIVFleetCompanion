@@ -103,7 +103,7 @@ internal static partial class Program
 
         // The administrator script's edits of PostgreSQL's files, the same as the app's for the same files (run with
         // PowerShell where there is one: GitHub's test machines have it).
-        var pwsh = new[] { Environment.GetEnvironmentVariable("FLEET_PWSH"), "/usr/bin/pwsh" }.FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p));
+        var pwsh = new[] { Environment.GetEnvironmentVariable("FLEET_PWSH"), "/usr/bin/pwsh", "/usr/local/bin/pwsh", "/opt/microsoft/powershell/7/pwsh" }.FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p));
         if (pwsh != null)
         {
             var script = Path.Combine(Path.GetTempPath(), $"elevated-{Guid.NewGuid():N}.ps1");
@@ -203,10 +203,13 @@ internal static partial class Program
             };
             DatabaseAdmin.Connection? saved = null;
             var steps = DatabaseAdmin.MoveSteps(false);
-            var (ok, error, to) = await DatabaseAdmin.MoveToThisPc(config, "100.80.1.2", here.Port, here.Username!, here.Password ?? "", false, deps, steps, () => { }, c => saved = c);
+            // This PC's saved details fail to save after everyone was sent here: the move still stands, and says so.
+            var (ok, error, to) = await DatabaseAdmin.MoveToThisPc(config, "100.80.1.2", here.Port, here.Username!, here.Password ?? "", false, deps, steps, () => { },
+                c => { saved = c; throw new InvalidOperationException("the credential store is locked"); });
             Check(ok && to == $"100.80.1.2:{here.Port}" && steps.All(s => s.State == "done") && elevatedAsked.SequenceEqual(new[] { $"openConnections:{here.Port}" })
-                  && saved == config with { Host = here.Host!, Port = here.Port },
-                $"move to this PC: every step done, other PCs let in (one permission prompt), and this PC switched: {error ?? to} [{string.Join(", ", steps.Select(s => $"{s.Id}={s.State}"))}]");
+                  && saved == config with { Host = here.Host!, Port = here.Port }
+                  && steps.First(s => s.Id == "switch").Detail.Contains("couldn't be updated (the credential store is locked)", StringComparison.Ordinal),
+                $"move to this PC: every step done, other PCs let in (one permission prompt), and this PC switched (kept even when its own details can't be saved): {error ?? to} [{string.Join(", ", steps.Select(s => $"{s.Id}={s.State}"))}]");
             await using (var moved = new NpgsqlConnection(DatabaseAdmin.ConnectionString(here.Host!, here.Port, "move_old", "move_user", "move-password")))
             await using (var old = new NpgsqlConnection(DatabaseAdmin.ConnectionString(config.Host, config.Port, config.Database, config.User, config.Password)))
             {

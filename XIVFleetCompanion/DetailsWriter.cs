@@ -211,20 +211,20 @@ namespace XIVFleetCompanion
         // The newest voyage already stored per FC (Unix seconds), so only newer ones are read. With database version 9,
         // only voyages whose sector order is stored count, so the first sync after it fills in the order of
         // those already stored.
-        public static async Task<Dictionary<ulong, long>?> ReadNewestVoyagesAsync(DbConnection db, IReadOnlyCollection<ulong> fcIds)
+        public static async Task<Dictionary<(ulong Fc, uint Register), long>?> ReadNewestVoyagesAsync(DbConnection db, IReadOnlyCollection<ulong> fcIds)
         {
             if (Db.IsFile(db)) { return await FileReadNewestVoyages(db, fcIds); }
             var conn = (NpgsqlConnection)db;
-            var newest = new Dictionary<ulong, long>();
+            var newest = new Dictionary<(ulong, uint), long>();
             var ok = await IfTableExists(async () =>
             {
                 var hasLeg = await HasLegAsync(conn);
                 await using var cmd = new NpgsqlCommand($@"
-                    SELECT fc_id, extract(epoch FROM max(returned_at))::bigint FROM companion_voyage_loot
-                    WHERE fc_id = ANY(@ids::numeric[]){(hasLeg ? " AND leg IS NOT NULL" : "")} GROUP BY fc_id", conn);
+                    SELECT fc_id, sub_register, extract(epoch FROM max(returned_at))::bigint FROM companion_voyage_loot
+                    WHERE fc_id = ANY(@ids::numeric[]){(hasLeg ? " AND leg IS NOT NULL" : "")} GROUP BY fc_id, sub_register", conn);
                 cmd.Parameters.AddWithValue("ids", fcIds.Select(f => (decimal)f).ToArray());
                 await using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync()) newest[(ulong)reader.GetDecimal(0)] = reader.GetInt64(1);
+                while (await reader.ReadAsync()) newest[((ulong)reader.GetDecimal(0), (uint)reader.GetInt64(1))] = reader.GetInt64(2);
             });
             return ok ? newest : null;
         }
@@ -242,6 +242,8 @@ namespace XIVFleetCompanion
         // its sector order is filled in when missing (database version 9; without it, voyages are stored without it).
         public static async Task<bool> WriteVoyageLootAsync(DbConnection db, IReadOnlyList<LootRow> rows)
         {
+            // One row per sector of a voyage (a repeat would make PostgreSQL refuse the whole statement).
+            rows = rows.GroupBy(r => (r.FcId, r.Register, r.Return, r.Sector)).Select(g => g.First()).ToList();
             if (Db.IsFile(db)) { if (rows.Count > 0) await FileWriteVoyageLoot(db, rows); return true; }
             var conn = (NpgsqlConnection)db;
             if (rows.Count == 0) return true;

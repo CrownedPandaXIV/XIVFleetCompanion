@@ -52,10 +52,20 @@ public partial class MainWindow
     private bool removeTailscale = true;
     private string removeConfirm = "";
     private DatabaseAdmin.RemovalPlan? removalPlan;
+    // The plan is worked out on its own (not as a tool job, which would wipe another job's steps and result), once per
+    // opening or "Check again"; why it couldn't be, if it couldn't.
+    private bool removalPlanning;
+    private string? removalPlanError;
     private readonly FileDialogManager toolDialog = new();
 
-    private DatabaseAdmin.Connection? SavedConnection() =>
-        PostgresCredentialStore.Load(plugin.Configuration.UseRemoteConnection) is { } c ? new DatabaseAdmin.Connection(c.Host, c.Port, c.Database, c.Username, c.Password) : null;
+    // The saved login (Windows Credential Manager) and this PC's addresses (its network adapters): read at most every 3
+    // seconds while Database tools is open, not every frame (as the Status page does), and again after each tool job.
+    private readonly Every<DatabaseAdmin.Connection?> savedConnectionNow = new(TimeSpan.FromSeconds(3));
+    private readonly Every<List<WindowsSetup.Address>> addressesNow = new(TimeSpan.FromSeconds(3));
+
+    private DatabaseAdmin.Connection? SavedConnection() => savedConnectionNow.Get(() =>
+        PostgresCredentialStore.Load(plugin.Configuration.UseRemoteConnection) is { } c ? new DatabaseAdmin.Connection(c.Host, c.Port, c.Database, c.Username, c.Password) : null);
+    private List<WindowsSetup.Address> Addresses() => addressesNow.Get(WindowsSetup.Addresses);
 
     private void StartTool(string job, Func<Task<(bool Ok, string? Message)>> work)
     {
@@ -81,6 +91,8 @@ public partial class MainWindow
             {
                 toolBusy = false;
                 detected = null;
+                savedConnectionNow.Forget();
+                addressesNow.Forget();
             }
         });
     }
@@ -221,11 +233,12 @@ public partial class MainWindow
 
         // ---- Move the database to this PC ----
         var saved = SavedConnection();
-        if (plugin.Configuration.FleetStore == FleetStoreChoice.SharedDatabase && saved != null && !WindowsSetup.IsThisPc(saved.Host, WindowsSetup.Addresses())
+        if (plugin.Configuration.FleetStore == FleetStoreChoice.SharedDatabase && saved != null && !WindowsSetup.IsThisPc(saved.Host, Addresses())
             && ImGui.TreeNode("Move the database to this PC"))
         {
-            Ui.Wrapped($"Copies the database from {saved.Host} to this PC, checks every table, then sends every PC and app here. Until that last step, anything that goes wrong puts everything back; the old database is never deleted.");
-            var (ts, home) = WindowsSetup.PcAddresses(WindowsSetup.Addresses());
+            Ui.Wrapped($"Copies the database from {saved.Host} to this PC, checks every table, then sends every PC and app here. Until that last step, anything that goes wrong puts everything back; the old database is never deleted. " +
+                       "The plugins pause on their own, but close the app on your other PCs first: a change made in it during the move isn't copied.");
+            var (ts, home) = WindowsSetup.PcAddresses(Addresses());
             var choices = (WindowsSetup.IsTailscaleAddress(saved.Host) || home.Count == 0 ? ts.Concat(home) : home.Concat(ts)).ToList();
             if (moveAddress.Length == 0 && choices.Count > 0) moveAddress = choices[0];
             ImGui.SetNextItemWidth(200 * scale);
@@ -240,7 +253,7 @@ public partial class MainWindow
             if (ImGui.Button("Check first"))
                 StartTool("move", async () =>
                 {
-                    moveChecked = await DatabaseAdmin.CheckOld(saved, new DatabaseAdmin.MoveDeps { IsThisPc = h => WindowsSetup.IsThisPc(h, WindowsSetup.Addresses()) });
+                    moveChecked = await DatabaseAdmin.CheckOld(saved, new DatabaseAdmin.MoveDeps { IsThisPc = h => WindowsSetup.IsThisPc(h, Addresses()) });
                     return (moveChecked.Value.Ok, moveChecked.Value.Ok ? "Everything is ready to move." : moveChecked.Value.Error);
                 });
             ImGui.SameLine();
@@ -252,7 +265,7 @@ public partial class MainWindow
                     if (DatabaseAdmin.PortProblem(port) is { } badPort) return (false, badPort);
                     var deps = new DatabaseAdmin.MoveDeps
                     {
-                        IsThisPc = h => WindowsSetup.IsThisPc(h, WindowsSetup.Addresses()),
+                        IsThisPc = h => WindowsSetup.IsThisPc(h, Addresses()),
                         FindTools = () => PgBackups.FindTools(plugin.Backups.Load().Settings.PgBin, SharedBackups.ToolsDir),
                         DownloadPostgres = p => WindowsSetup.DownloadOnce(WindowsSetup.Postgres, WindowsSetup.DownloadFolder, p),
                         RecordInstalled = p => WindowsSetup.RecordInstalled(SharedBackups.Folder, p, false),
@@ -275,7 +288,7 @@ public partial class MainWindow
         // ---- Let other PCs connect ----
         if (!fileOnly && pgHere && ImGui.TreeNode("Let other PCs connect"))
         {
-            var ranges = WindowsSetup.RangesToAllow(WindowsSetup.Addresses());
+            var ranges = WindowsSetup.RangesToAllow(Addresses());
             Ui.Wrapped($"Sets this PC's PostgreSQL to let in your Tailscale PCs and this PC's home network ({string.Join(", ", ranges)}), with the password, and opens Windows Firewall for its port to those only. Copies of PostgreSQL's settings are kept first.");
             ImGui.SetNextItemWidth(100 * scale); Ui.InputInt("Port##connectPort", ref localPort, 0);
             if (ImGui.Button("Let other PCs connect (Windows asks for permission)"))
@@ -299,7 +312,7 @@ public partial class MainWindow
             Ui.Wrapped("What a move leaves in this PC's PostgreSQL: the copy that was here under the same name, or the copy left when the database moved away. The database in use is never one.");
             Password("PostgreSQL's master password##leftMaster", ref adminPassword, 220 * scale);
             ImGui.SetNextItemWidth(100 * scale); Ui.InputInt("Port##leftPort", ref localPort, 0);
-            var current = saved != null && WindowsSetup.IsThisPc(saved.Host, WindowsSetup.Addresses()) ? saved.Database : null;
+            var current = saved != null && WindowsSetup.IsThisPc(saved.Host, Addresses()) ? saved.Database : null;
             Func<string, Task<Npgsql.NpgsqlConnection>> connectTo = name => DatabaseAdmin.Open("localhost", localPort, name, "postgres", adminPassword, 5);
             if (ImGui.Button("Find them"))
             {
@@ -317,6 +330,10 @@ public partial class MainWindow
             foreach (var l in leftovers ?? new List<DatabaseAdmin.Leftover>())
             {
                 Ui.Text($"{l.Name}: {(l.Kind == "kept" ? "the copy that was here before a move" : $"left here when it moved to {l.MovedTo}")}, {l.Bytes / 1048576.0:0} MB");
+                if (l.Kind == "moved-away" && ImGui.IsItemHovered())
+                    ImGui.SetTooltip("A PC that was off during the move finds the new address through this copy. Remove it only once every PC" +
+                                     (l.Pcs is { Count: > 0 } pcs ? $" that used it ({string.Join(", ", pcs)})" : "") +
+                                     " has synced since the move: the PCs page shows when each last did.");
                 ImGui.SameLine();
                 if (ImGui.SmallButton($"Remove##left{l.Name}"))
                 {
@@ -351,7 +368,7 @@ public partial class MainWindow
         // ---- What another PC needs ----
         if (!fileOnly && saved != null && ImGui.TreeNode("What another PC needs"))
         {
-            var addresses = WindowsSetup.Addresses();
+            var addresses = Addresses();
             var (ts, home) = WindowsSetup.PcAddresses(addresses);
             var local = WindowsSetup.IsThisPc(saved.Host, addresses);
             var choices = local ? ts.Select(a => $"{a} (Tailscale)").Concat(home.Select(a => $"{a} (home network)")).ToList() : new List<string> { $"{saved.Host} (same as this PC)" };
@@ -370,8 +387,9 @@ public partial class MainWindow
                 $"Fleet data: {plugin.Configuration.FleetStore}",
                 $"Database: {(saved == null ? "none saved" : $"{saved.Host}:{saved.Port}/{saved.Database} as {saved.User}")}",
                 $"PostgreSQL here: {pgHere}, Tailscale here: {tsHere}",
-                $"Last sync: {plugin.Configuration.LastSyncTimestamp?.ToString("u") ?? "never"}",
-                $"Sync problem: {plugin.SyncProblem ?? "none"}",
+                // The time is this PC's own (local), so it's given with its offset from UTC, not labelled UTC.
+                $"Last sync: {(plugin.Configuration.LastSyncTimestamp is DateTime last ? LocalWithOffset(last) : "never")}",
+                $"Sync problem: {plugin.SyncProblem ?? "none"}", $"Sync warning: {plugin.SyncWarning ?? "none"}",
                 $"Database version: {plugin.Keeper.StatusText}",
             });
             if (ImGui.Button("Copy the details")) ImGui.SetClipboardText(details);
@@ -385,20 +403,39 @@ public partial class MainWindow
         // ---- Remove everything ----
         if (ImGui.TreeNode("Remove everything from this PC"))
         {
-            if (removalPlan == null && !toolBusy)
+            if (removalPlan == null && !removalPlanning && removalPlanError == null)
             {
                 var c = saved;
-                StartTool("remove-plan", async () =>
+                removalPlanning = true;
+                Task.Run(async () =>
                 {
-                    var addresses = WindowsSetup.Addresses();
-                    var installed = WindowsSetup.ReadInstalled(SharedBackups.Folder);
-                    var dbHere = c != null && WindowsSetup.IsThisPc(c.Host, addresses);
-                    var (pg, tsh) = await WindowsSetup.Detect();
-                    removalPlan = DatabaseAdmin.Plan(new DatabaseAdmin.RemovalFacts(installed, c, dbHere, pg, tsh, new List<string>(), null));
-                    return (true, null);
+                    try
+                    {
+                        var addresses = Addresses();
+                        var installed = WindowsSetup.ReadInstalled(SharedBackups.Folder);
+                        var dbHere = c != null && WindowsSetup.IsThisPc(c.Host, addresses);
+                        var (pg, tsh) = await WindowsSetup.Detect();
+                        removalPlan = DatabaseAdmin.Plan(new DatabaseAdmin.RemovalFacts(installed, c, dbHere, pg, tsh, new List<string>(), null));
+                    }
+                    catch (Exception e)
+                    {
+                        removalPlanError = e.Message;
+                    }
+                    finally
+                    {
+                        removalPlanning = false;
+                    }
                 });
             }
-            if (removalPlan is { } plan)
+            if (removalPlanning) Colored(Dim, "Checking this PC...");
+            if (removalPlanError != null)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Amber)) Ui.Wrapped($"Couldn't check this PC: {removalPlanError}");
+                if (ImGui.SmallButton("Check again##removePlanAgain")) removalPlanError = null;
+            }
+            // Once everything is removed, only the result shows (the list of what it removes no longer applies).
+            var removedAll = toolJob == "remove" && !toolBusy && toolOk && toolResult != null;
+            if (removalPlan is { } plan && !removedAll)
             {
                 Ui.Text("Removes:");
                 foreach (var r in plan.Removes) Ui.Bullet(r);
@@ -448,14 +485,28 @@ public partial class MainWindow
                                     var s = b.Load().Settings;
                                     b.Save(s with { Enabled = false });
                                 });
-                            removalPlan = null;
                             return (r.Ok, r.Ok ? "Everything is removed. Remove the plugin in the game's plugin list if you're done with it." : r.Error);
                         });
                     }
                 }
             }
             ToolProgress("remove");
+            // After a run that didn't finish, what's left on this PC can be looked at again.
+            if (toolJob == "remove" && !toolBusy && !toolOk && toolResult != null && ImGui.SmallButton("Check this PC again##removeRecheck"))
+            {
+                removalPlan = null;
+                toolResult = null;
+            }
             ImGui.TreePop();
         }
+    }
+
+    // "2026-11-21 14:05:00 UTC+01:00": a local time as it is, with how far it is from UTC.
+    private static string LocalWithOffset(DateTime local)
+    {
+        var offset = TimeZoneInfo.Local.GetUtcOffset(local);
+        var sign = offset < TimeSpan.Zero ? "-" : "+";
+        return local.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)
+            + $" UTC{sign}{Math.Abs(offset.Hours):00}:{Math.Abs(offset.Minutes):00}";
     }
 }

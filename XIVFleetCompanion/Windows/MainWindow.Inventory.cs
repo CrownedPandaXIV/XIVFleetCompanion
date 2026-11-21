@@ -17,6 +17,12 @@ public partial class MainWindow
     private readonly HashSet<long> inventoryCharacters = new();
     private readonly HashSet<decimal> inventoryFcs = new();
     private string inventoryFilter = "";
+    // The lists these tabs show, worked out again only when what was read, the search or Hide equipped gear changes
+    // (not every frame: "All" characters can be tens of thousands of stacks).
+    private readonly Memo<List<HoldingRow>> characterHoldingsShown = new(), fcHoldingsShown = new();
+    private readonly Memo<List<ItemTotalRow>> fleetTotalsShown = new();
+    private readonly Memo<List<(int Id, string Name)>> whereMatches = new();
+    private readonly Memo<(List<ItemPlaces> All, List<ItemPlaces> Items, float[] Widths)> whereShown = new();
     private string whereIsItSearch = "";
     private bool whereByAccount = true;
     private FleetTable<HoldingRow>? characterInventoryTable;
@@ -60,19 +66,19 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // the characters and FCs to choose from
         using var tabs = ImRaii.TabBar("##inventoryTabs");
         if (!tabs) return;
-        using (var tab = ImRaii.TabItem("Characters"))
+        using (var tab = ImRaii.TabItem("Character"))
         {
             if (tab) DrawCharacterInventory();
         }
-        using (var tab = ImRaii.TabItem("Free Companies"))
+        using (var tab = ImRaii.TabItem("FC"))
         {
             if (tab) DrawFcInventory();
         }
-        using (var tab = ImRaii.TabItem("Fleet totals"))
+        using (var tab = ImRaii.TabItem("Fleet"))
         {
             if (tab) DrawFleetTotals();
         }
-        using (var tab = ImRaii.TabItem("Where is it?"))
+        using (var tab = ImRaii.TabItem("Where Is It?"))
         {
             if (tab) DrawWhereIsIt();
         }
@@ -87,7 +93,8 @@ public partial class MainWindow
         if (ImGui.Button("All")) foreach (var o in options) chosen.Add(key(o));
         ImGui.SameLine();
         if (ImGui.Button("None")) chosen.Clear();
-        using var list = ImRaii.Child($"##chooseList{id}", new System.Numerics.Vector2(320 * ImGuiHelpers.GlobalScale, Math.Min(400, options.Count * ImGui.GetFrameHeightWithSpacing() + 8) * ImGuiHelpers.GlobalScale), false);
+        // At most 400 (scaled) tall; the rows' own height is already scaled.
+        using var list = ImRaii.Child($"##chooseList{id}", new System.Numerics.Vector2(320 * ImGuiHelpers.GlobalScale, Math.Min(400 * ImGuiHelpers.GlobalScale, options.Count * ImGui.GetFrameHeightWithSpacing() + 8)), false);
         if (!list) return;
         foreach (var o in options)
         {
@@ -131,7 +138,7 @@ public partial class MainWindow
         var ids = inventoryCharacters.ToArray();
         var key = "characters:" + Ids(ids);
         reader.ReadHoldingsIfDue(key, "kind <> 'fc' AND container <> 2000", "owner_cid", ids.Cast<object>().ToList());
-        DrawHoldings(key, CharacterInventoryTable, rows => rows
+        DrawHoldings(key, CharacterInventoryTable, characterHoldingsShown, rows => rows
             .Where(h => !(plugin.Configuration.HideEquippedGear && h.Equipped))
             .OrderBy(h => h.SortIndex).ThenBy(h => h.Who).ThenBy(h => h.Kind == "retainer" ? 1 : 0).ThenBy(h => h.HireOrder)
             .ThenBy(h => FleetOrder.CharacterLocation(h)).ThenBy(h => ItemName(h.ItemId, h.Hq)).ToList());
@@ -152,11 +159,11 @@ public partial class MainWindow
         var ids = inventoryFcs.ToArray();
         var key = "fcs:" + Ids(ids);
         reader.ReadHoldingsIfDue(key, "kind = 'fc' AND container BETWEEN 20000 AND 20004", "fc_id", ids.Cast<object>().ToList());
-        DrawHoldings(key, FcInventoryTable, rows => rows.OrderBy(h => h.Who).ThenBy(h => h.Container).ThenBy(h => ItemName(h.ItemId, h.Hq)).ToList());
+        DrawHoldings(key, FcInventoryTable, fcHoldingsShown, rows => rows.OrderBy(h => h.Who).ThenBy(h => h.Container).ThenBy(h => ItemName(h.ItemId, h.Hq)).ToList());
     }
 
     // What the Inventory page read for key, or why not yet.
-    private void DrawHoldings(string key, FleetTable<HoldingRow> table, Func<IEnumerable<HoldingRow>, List<HoldingRow>> order)
+    private void DrawHoldings(string key, FleetTable<HoldingRow> table, Memo<List<HoldingRow>> shown, Func<IEnumerable<HoldingRow>, List<HoldingRow>> order)
     {
         if (reader.HoldingsKey != key || reader.Holdings.Data == null)
         {
@@ -165,8 +172,9 @@ public partial class MainWindow
             return;
         }
         ReadLine(reader.Holdings, FleetReader.ListsEvery);
-        var rows = reader.Holdings.Data.Where(h => Matches(inventoryFilter, ItemName(h.ItemId, h.Hq), h.Who, h.Place));
-        var list = order(rows);
+        var data = reader.Holdings.Data;
+        var list = shown.Get(() => order(data.Where(h => Matches(inventoryFilter, ItemName(h.ItemId, h.Hq), h.Who, h.Place))),
+            data, inventoryFilter, plugin.Configuration.HideEquippedGear);
         if (list.Count == 0) { Ui.Text(inventoryFilter.Length > 0 ? "Nothing matches." : "Nothing held."); return; }
         table.Draw(list);
     }
@@ -178,14 +186,18 @@ public partial class MainWindow
         FilterBox(ref inventoryFilter, "inventory");
         HideEquippedBox();
         ReadLine(reader.ItemTotals, FleetReader.ListsEvery);
-        var totals = reader.ItemTotals.Data;
-        if (totals == null) return;
-        // Hiding equipped gear counts only what isn't being worn; an item that is only worn drops out.
-        if (plugin.Configuration.HideEquippedGear)
-            totals = totals.Select(t => t with { Total = t.Total - t.Equipped, Equipped = 0 }).Where(t => t.Total > 0).ToList();
-        // The most held first, as the app.
-        FleetTotalsTable.Draw(totals.Where(t => Matches(inventoryFilter, ItemName(t.ItemId, t.Hq)))
-            .OrderByDescending(t => t.Total).ThenBy(t => ItemName(t.ItemId, t.Hq)).ToList());
+        var read = reader.ItemTotals.Data;
+        if (read == null) return;
+        var hide = plugin.Configuration.HideEquippedGear;
+        FleetTotalsTable.Draw(fleetTotalsShown.Get(() =>
+        {
+            var totals = read;
+            // Hiding equipped gear counts only what isn't being worn; an item that is only worn drops out.
+            if (hide) totals = totals.Select(t => t with { Total = t.Total - t.Equipped, Equipped = 0 }).Where(t => t.Total > 0).ToList();
+            // The most held first, as the app.
+            return totals.Where(t => Matches(inventoryFilter, ItemName(t.ItemId, t.Hq)))
+                .OrderByDescending(t => t.Total).ThenBy(t => ItemName(t.ItemId, t.Hq)).ToList();
+        }, read, inventoryFilter, hide));
     }
 
     private const int WhereIsItLimit = 50;
@@ -210,9 +222,9 @@ public partial class MainWindow
         if (held == null) { Ui.Text("Reading..."); return; }
 
         // Which held items match, by their names in the game's files.
-        var matches = held.Select(id => (Id: id, Name: GameNames.Item(id)))
+        var matches = whereMatches.Get(() => held.Select(id => (Id: id, Name: GameNames.Item(id)))
             .Where(x => FleetOrder.MatchesWords(x.Name, term))
-            .OrderBy(x => x.Name, StringComparer.CurrentCulture).ToList();
+            .OrderBy(x => x.Name, StringComparer.CurrentCulture).ToList(), held, term);
         if (matches.Count == 0) { Ui.Text("Nothing the fleet holds matches."); return; }
         var more = matches.Count > WhereIsItLimit;
         var ids = matches.Take(WhereIsItLimit).Select(x => x.Id).OrderBy(x => x).ToArray();
@@ -228,13 +240,17 @@ public partial class MainWindow
 
         using var child = ImRaii.Child("##whereResults", System.Numerics.Vector2.Zero, false);
         if (!child.Success) return;
-        var all = FleetOrder.WhereIsIt(reader.Holdings.Data, id => ItemName(id, false)).ToList();
-        // Hiding equipped gear leaves out the places where it's being worn, and the items held only as worn gear. The
-        // widths come from everything, so the columns don't move when it's ticked.
-        var items = plugin.Configuration.HideEquippedGear
-            ? FleetOrder.WhereIsIt(reader.Holdings.Data.Where(h => !h.Equipped), id => ItemName(id, false)).ToList()
-            : all;
-        var widths = WhereWidths(reader.Holdings.Data, all);
+        var stacks = reader.Holdings.Data;
+        var (all, items, widths) = whereShown.Get(() =>
+        {
+            var all = FleetOrder.WhereIsIt(stacks, id => ItemName(id, false)).ToList();
+            // Hiding equipped gear leaves out the places where it's being worn, and the items held only as worn gear. The
+            // widths come from everything, so the columns don't move when it's ticked.
+            var items = plugin.Configuration.HideEquippedGear
+                ? FleetOrder.WhereIsIt(stacks.Where(h => !h.Equipped), id => ItemName(id, false)).ToList()
+                : all;
+            return (all, items, WhereWidths(stacks, all));
+        }, stacks, plugin.Configuration.HideEquippedGear, ImGui.GetFontSize());
         TableExportUi.Button("whereIsIt", "Where is it", () =>
         {
             var rows = new List<List<string>> { new() { "Item", "Character / FC", "World", "Where", "Quantity" } };

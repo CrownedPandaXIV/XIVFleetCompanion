@@ -54,6 +54,7 @@ namespace XIVFleetCompanion
             ("Dynamis", "North-America", "Cuchulainn Golem Halicarnassus Kraken Maduin Marilith Rafflesia Seraph"),
             ("Chaos", "Europe", "Cerberus Louisoix Moogle Omega Phantom Ragnarok Sagittarius Spriggan"),
             ("Light", "Europe", "Alpha Lich Odin Phoenix Raiden Shiva Twintania Zodiark"),
+            ("Shadow", "Europe", "Innocence Pixie Titania Tycoon"),
             ("Materia", "Oceania", "Bismarck Ravana Sephirot Sophia Zurvan"),
             ("Elemental", "Japan", "Aegis Atomos Carbuncle Garuda Gungnir Kujata Tonberry Typhon"),
             ("Gaia", "Japan", "Alexander Bahamut Durandal Fenrir Ifrit Ridill Tiamat Ultima"),
@@ -145,9 +146,14 @@ namespace XIVFleetCompanion
         }
 
         // World name (lowercase) -> its name, data center and region: Universalis's list, or the built-in one.
+        // The built-in list is used for an answer while Universalis's can't be read, but not kept: it's asked again after a
+        // while (a network blip at the start shouldn't leave newer data centers out for the whole session).
+        private DateTime placesAskAgainAt = DateTime.MinValue;
+
         private async Task<Dictionary<string, (string Name, string Dc, string Region)>> Places()
         {
             if (places != null) return places;
+            if (DateTime.UtcNow < placesAskAgainAt) return BuiltInPlaces;
             try
             {
                 using var dcs = await GetJson("/api/v2/data-centers");
@@ -158,8 +164,13 @@ namespace XIVFleetCompanion
                 if (list.Any(dc => dc.Worlds.Count > 0)) places = PlacesFrom(list);
             }
             catch { /* the built-in list below */ }
-            return places ??= PlacesFrom(KnownDataCenters.Select(d => (d.Name, d.Region, d.Worlds.Split(' ').ToList())));
+            if (places != null) return places;
+            placesAskAgainAt = DateTime.UtcNow.AddMinutes(30);
+            return BuiltInPlaces;
         }
+
+        private static readonly Dictionary<string, (string Name, string Dc, string Region)> BuiltInPlaces =
+            PlacesFrom(KnownDataCenters.Select(d => (d.Name, d.Region, d.Worlds.Split(' ').ToList())));
 
         private static Dictionary<string, (string, string, string)> PlacesFrom(IEnumerable<(string Name, string Region, List<string> Worlds)> dataCenters)
         {

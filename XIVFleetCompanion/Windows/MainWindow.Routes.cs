@@ -48,12 +48,23 @@ public partial class MainWindow
         return expectedIndex.TryGetValue(cid, out var e) ? e : null;
     }
 
+    // Worked out once per read (the sidebar asks for it every frame on every page).
     private List<SubRoute> Suboptimal()
     {
         IndexRoutes();
-        return routeIndexFor?.Subs.Where(s => s.Suboptimal)
-            .OrderBy(s => s.Gain == null ? 1 : 0).ThenByDescending(s => s.Gain ?? 0).ToList() ?? new List<SubRoute>();
+        var read = routeIndexFor;
+        return suboptimalShown.Get(() => read?.Subs.Where(s => s.Suboptimal)
+            .OrderBy(s => s.Gain == null ? 1 : 0).ThenByDescending(s => s.Gain ?? 0).ToList() ?? new List<SubRoute>(), read);
     }
+    private readonly Memo<List<SubRoute>> suboptimalShown = new();
+
+    // The subs ready for new parts (Summary, the sidebar), once per Parts read.
+    private List<(PartNeed Sub, List<PartNeed> Parts)> SubsReadyNow()
+    {
+        var read = reader.Parts.Data;
+        return subsReadyShown.Get(() => read is { } r ? PartsPlanner.SubsReady(r.Needs) : new List<(PartNeed Sub, List<PartNeed> Parts)>(), read);
+    }
+    private readonly Memo<List<(PartNeed Sub, List<PartNeed> Parts)>> subsReadyShown = new();
 
     /// <summary>"in 2d 5h", "in 7h", "in 40 min" until a time (milliseconds); "now" once it's past, as the app.</summary>
     public static string TimeUntil(double at, double now)
@@ -202,6 +213,8 @@ public partial class MainWindow
     // A character's name and world, for the Route Optimization page (from the Parts read's characters).
     private (string Name, string World) CharacterOf(long cid)
     {
+        // Worked out again after each Subs read, so a rename or world transfer shows here as on the other pages.
+        if (!ReferenceEquals(characterNamesFor, reader.Subs.Data)) { characterNames.Clear(); characterNamesFor = reader.Subs.Data; }
         if (characterNames.TryGetValue(cid, out var known)) return known;
         var c = reader.Subs.Data?.FirstOrDefault(x => x.Cid == cid);
         var found = c != null ? (c.Character, c.World) : (cid.ToString(CultureInfo.InvariantCulture), "");
@@ -209,6 +222,7 @@ public partial class MainWindow
         return found;
     }
     private readonly Dictionary<long, (string, string)> characterNames = new();
+    private object? characterNamesFor;
 
     private void DrawRoutes()
     {
@@ -218,7 +232,7 @@ public partial class MainWindow
         ReadLine(reader.Routes, FleetReader.PartsEvery);
         if (reader.Routes.Data == null) return;
         var subs = Suboptimal();
-        Heading(subs.Count == 0 ? "Every sub from rank 85 is on its Target route." : $"{subs.Count} sub{(subs.Count == 1 ? " isn't" : "s aren't")} on the best route for {(subs.Count == 1 ? "its" : "their")} rank");
+        Heading(subs.Count == 0 ? SubRoutes.NothingToSwitch(reader.Routes.Data.Subs) : $"{subs.Count} sub{(subs.Count == 1 ? " isn't" : "s aren't")} on the best route for {(subs.Count == 1 ? "its" : "their")} rank");
         var gain = subs.Where(s => s.Gain > 0).Sum(s => s.Gain!.Value);
         if (gain > 0) GilLine("Switching them all would make about", gain, " more gil a day.");
         Colored(Dim, "Subs from rank 85 whose route isn't Fight Club's best at their rank (most gil a day after repair kits). Biggest gain first; " +

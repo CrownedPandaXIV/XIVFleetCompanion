@@ -144,7 +144,9 @@ namespace XIVFleetCompanion.Setup
 
         private static readonly Regex Kept = new(@"_before_move_\d{8}_\d{4}$");
 
-        public sealed record Leftover(string Name, string Kind, long Bytes, string? MovedTo);
+        /// <param name="Pcs">For a copy left when the database moved away: the PCs that used it (its PCs list), which find
+        /// the new address through it until they've synced once.</param>
+        public sealed record Leftover(string Name, string Kind, long Bytes, string? MovedTo, List<string>? Pcs = null);
 
         /// <summary>The copies a move left in this PC's PostgreSQL (kept under another name, or left behind when the
         /// database moved away), and everything else. The database in use is never one.</summary>
@@ -161,16 +163,27 @@ namespace XIVFleetCompanion.Setup
                 if (name == current) { others.Add(name); continue; }
                 if (Kept.IsMatch(name)) { leftovers.Add(new Leftover(name, "kept", bytes, null)); continue; }
                 DatabaseMove.Note? note = null;
+                var pcs = new List<string>();
                 try
                 {
                     await using var c = await connectTo(name);
                     note = await DatabaseMove.ReadAsync(c);
+                    if (note is { State: "moved" })
+                    {
+                        try
+                        {
+                            await using var cmd = new NpgsqlCommand("SELECT pc_name || coalesce(' (' || nullif(account_label, '') || ')', '') FROM companion_pc_status ORDER BY 1", c);
+                            await using var r = await cmd.ExecuteReaderAsync();
+                            while (await r.ReadAsync()) pcs.Add(r.GetString(0));
+                        }
+                        catch (PostgresException) { /* no PCs list in it */ }
+                    }
                 }
                 catch
                 {
                     note = null;
                 }
-                if (note is { State: "moved" }) leftovers.Add(new Leftover(name, "moved-away", bytes, $"{note.Host}:{note.Port}"));
+                if (note is { State: "moved" }) leftovers.Add(new Leftover(name, "moved-away", bytes, $"{note.Host}:{note.Port}", pcs));
                 else others.Add(name);
             }
             return (leftovers, others);
@@ -269,7 +282,7 @@ namespace XIVFleetCompanion.Setup
             public Action<int> RecordInstalled = _ => { };
             public Func<DateTime> Now = () => DateTime.Now;
             public Func<int, Task> Wait = ms => Task.Delay(ms);
-            public string TempDir = Path.GetTempPath();
+            public string TempDir = PgBackups.ToolTempDir();
             public int DrainTries = 60;
             public int DrainEveryMs = 3000;
         }
@@ -552,9 +565,22 @@ namespace XIVFleetCompanion.Setup
                 Set("switch", "working", "leaving the new address in the old database...");
                 heartbeat.Cancel();
                 await Exec(old, "UPDATE companion_database_move SET state = 'moved', updated_at = now(), moved_at = now() WHERE id = 1");
+                // From here every PC is being sent to the new database: it's kept whatever happens next (nothing below
+                // undoes it), and the old one stays as it was.
                 pausing = false;
-                saveConfig(config with { Host = local, Port = port });
-                Set("switch", "done", $"Every app and plugin switches to {address}:{port} at its next refresh or sync.");
+                createdDatabase = false;
+                kept = null;
+                createdRole = false;
+                var note = "";
+                try
+                {
+                    saveConfig(config with { Host = local, Port = port });
+                }
+                catch (Exception e)
+                {
+                    note = $" This PC's own saved details couldn't be updated ({e.Message}); it finds the new place by itself at its next sync, as the others do.";
+                }
+                Set("switch", "done", $"Every app and plugin switches to {address}:{port} at its next refresh or sync.{note}");
                 return (true, null, $"{address}:{port}");
             }
             catch (Exception e)

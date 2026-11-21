@@ -10,8 +10,18 @@ on:
 permissions:
   contents: write
 
+# One publishing run at a time (this and test-release.yml both write repo.json): a second waits, never cancels.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
+  # The full tests first (pr-build.yml, against the app's main): nothing is tagged or published unless they all pass.
+  tests:
+    uses: ./.github/workflows/pr-build.yml
+
   tag-release:
+    needs: tests
     runs-on: ubuntu-24.04
 
     steps:
@@ -39,6 +49,7 @@ jobs:
       uses: actions/checkout@v5
       with:
         submodules: recursive
+        persist-credentials: false
 
     - name: Already published?
       id: check
@@ -82,21 +93,36 @@ jobs:
         Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
         Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
 
-    - name: Build and publish the plugin
+    # Numbered above the last test build of this version, if any, so players on it get this too. If repo.json can't
+    # be read (other than not being there yet), stop: guessing .0 would number it below the testers' build.
+    - name: Work out the build number
+      id: build
+      if: steps.check.outputs.publish == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      run: |
+        version="${{ steps.check.outputs.version }}"
+        if ! gh api repos/CrownedPandaXIV/XIVFleetCompanion-Releases/contents/repo.json -H 'Accept: application/vnd.github.raw' > listed.json 2> read-error.txt; then
+          if grep -q 'HTTP 404' read-error.txt; then echo '[]' > listed.json
+          else echo "::error::Couldn't read repo.json from XIVFleetCompanion-Releases: $(cat read-error.txt)"; exit 1; fi
+        fi
+        build=$(bash .github/scripts/stable-build-number.sh "$version" listed.json)
+        echo "Building ${build}"
+        echo "build=${build}" >> "$GITHUB_OUTPUT"
+
+    # No token here: the build runs other people's code (NuGet packages, Dalamud), which must not reach the publishing one.
+    - name: Build the plugin
+      if: steps.check.outputs.publish == 'true'
+      run: dotnet build --configuration Release -p:Version="${{ steps.build.outputs.build }}"
+
+    - name: Publish the plugin
       if: steps.check.outputs.publish == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-      run: |
-        version="${{ steps.check.outputs.version }}"
-        # Numbered above the last test build of this version, if any, so players on it get this too.
-        GH_TOKEN="$RELEASES_TOKEN" gh api repos/CrownedPandaXIV/XIVFleetCompanion-Releases/contents/repo.json \
-          -H 'Accept: application/vnd.github.raw' > listed.json 2>/dev/null || echo '[]' > listed.json
-        build=$(bash .github/scripts/stable-build-number.sh "$version" listed.json)
-        echo "Building ${build}"
-        dotnet build --configuration Release -p:Version="${build}"
-        bash .github/scripts/publish-plugin.sh "$version"
+      run: bash .github/scripts/publish-plugin.sh "${{ steps.check.outputs.version }}"
 
   # Keeps the download page (the Releases repo's README) the same as .github/releases-readme.md.
   releases-readme:
@@ -109,5 +135,9 @@ jobs:
       env:
         RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
       run: |
-        if [ -z "$RELEASES_TOKEN" ]; then echo "No RELEASES_TOKEN secret; skipped."; exit 0; fi
+        if [ -z "$RELEASES_TOKEN" ]; then
+          # Only a copy of this repo (a fork) is expected to have no token; here, the download page would go stale.
+          if [ "$GITHUB_REPOSITORY" = "CrownedPandaXIV/XIVFleetCompanion" ]; then echo "::error::No RELEASES_TOKEN secret: the download page can't be updated."; exit 1; fi
+          echo "No RELEASES_TOKEN secret; skipped."; exit 0
+        fi
         bash .github/scripts/sync-releases-readme.sh
