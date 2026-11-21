@@ -113,9 +113,9 @@ namespace XIVFleetCompanion
                 var maps = new Dictionary<int, string>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineMap>()) maps[(int)r.RowId] = r.Name.ExtractText();
                 var ranks = new List<SubRank>();
-                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineRank>()) ranks.Add(new SubRank((int)r.RowId, r.SpeedBonus, r.RangeBonus, r.ExpToNext));
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineRank>()) ranks.Add(new SubRank((int)r.RowId, r.SpeedBonus, r.RangeBonus, r.ExpToNext, r.SurveillanceBonus, r.RetrievalBonus, r.FavorBonus));
                 var parts = new List<SubPartStat>();
-                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range));
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor));
                 if (sectors.Count > 0 && ranks.Count > 0 && parts.Count > 0) subGame = new SubGameData(sectors, maps, ranks, parts);
             }
             catch (Exception ex)

@@ -32,6 +32,7 @@
     <Compile Include="..\..\XIVFleetCompanion\Universalis.cs" Link="Universalis.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Market.cs" Link="Market.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubRoutes.cs" Link="SubRoutes.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\SubCalculatorData.cs" Link="SubCalculatorData.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Loot.cs" Link="Loot.cs" />
     <Compile Include="..\..\XIVFleetCompanion\ShoppingList.cs" Link="ShoppingList.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Trends.cs" Link="Trends.cs" />
@@ -52,6 +53,7 @@
     <Compile Include="..\..\XIVFleetCompanion\Setup\DatabaseAdmin.cs" Link="Setup/DatabaseAdmin.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Setup\WindowsSetup.cs" Link="Setup/WindowsSetup.cs" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Setup\elevated.ps1" LogicalName="Setup/elevated.ps1" />
+    <EmbeddedResource Include="..\..\XIVFleetCompanion\SubCalculatorData.json" LogicalName="SubCalculatorData.json" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\*.sql;..\..\XIVFleetCompanion\Database\app-version.txt" LogicalName="Database/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\updates\*.sql" LogicalName="Database/updates/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\XIVFleetCompanion\Database\sqlite\*.sql" LogicalName="Database/sqlite/%(Filename)%(Extension)" />

@@ -140,7 +140,7 @@ jobs:
     # Subs routes and Trends depend on the time they're worked out, so only the tests below check those).
     - name: The plugin's copies match the app's ${{ steps.app.outputs.ref }}
       run: |
-        if ! git diff --stat --exit-code -- XIVFleetCompanion/Database tests/FleetWriterTests \
+        if ! git diff --stat --exit-code -- XIVFleetCompanion/Database XIVFleetCompanion/SubCalculatorData.json tests/FleetWriterTests \
              ':!tests/FleetWriterTests/routes-fixture.json' ':!tests/FleetWriterTests/trends-fixture.json'; then
           echo "::error::The plugin's copies of the app's files are out of date. In the app, run its fixture scripts into the plugin (see tests/FleetWriterTests/README.md) and commit the changes."
           exit 1

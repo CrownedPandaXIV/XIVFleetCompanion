@@ -1045,6 +1045,38 @@ internal static partial class Program
         }
     }
 
+    // The Sub Calculator: its data file (the app's, copied by its fixture script) and a build's five stats, with the app's
+    // own cases (tests/sub-calculator-data.test.js).
+    private static void SubCalculatorChecks()
+    {
+        var data = SubCalculatorData.Shipped();
+        var bottom = data.Find(28); // the Rimilala Trench Bottom (AB)
+        Check(data.Sectors.Count >= 140 && data.About.XivstatsUpdated != null, $"Sub Calculator data: {data.Sectors.Count} sectors, XIVStats updated {data.About.XivstatsUpdated:u}");
+        Check(bottom != null && bottom.Xivstats.SequenceEqual(new[] { 130, 150, 155, 200, 120 }) && bottom.Pools[1].Loot.Count > 0 && bottom.Pools[2].Loot.Count > 0,
+            "Sub Calculator data: a sector's XIVStats breakpoints and loot by tier");
+        Check(data.Sectors.Count(s => s.Pepper != null) >= 130
+              && data.Sectors.Where(s => s.Pepper != null).All(s => s.Pepper!.Select((v, i) => Math.Abs(v - s.Xivstats[i])).All(d => d <= 20)),
+            "Sub Calculator data: Pepper's figures beside XIVStats', typos left out");
+        Check(data.Sectors.All(s => s.Pools[1].Loot.All(l => l.PoorMin <= l.PoorMax && l.NormalMin <= l.NormalMax && l.OptimalMin <= l.OptimalMax)),
+            "Sub Calculator data: every amount range runs low to high");
+
+        var ranks = new Dictionary<int, SubRank> { [100] = new(100, 60, 50, 0, 80, 90, 70), [101] = new(101, 61, 51, 0) };
+        var parts = new Dictionary<(int, int), SubPartStat>();
+        for (var slot = 0; slot < 4; slot++)
+        {
+            parts[(1, slot)] = new SubPartStat(1, slot, 5, 15, 10 + slot, 20, 12);
+            parts[(5, slot)] = new SubPartStat(5, slot, 8, 22, 30, 25 + slot, 18);
+        }
+        Check(SubRoutes.BuildStats(100, new[] { "W", "Y", "W", "Y" }, ranks, parts)
+              == new SubStats(80 + 10 + 30 + 12 + 30, 90 + 20 + 26 + 20 + 28, 60 + 5 + 8 + 5 + 8, 50 + 15 + 22 + 15 + 22, 70 + 12 + 18 + 12 + 18),
+            "Sub Calculator: a build's five stats are the rank's bonus plus its four parts'");
+        Check(SubRoutes.BuildStats(101, new[] { "W", "W", "W", "W" }, ranks, parts) == null
+              && SubRoutes.Stat(101, new[] { "W", "W", "W", "W" }, true, ranks, parts) == 61 + 20
+              && SubRoutes.BuildStats(100, new[] { "W", "S", "W", "W" }, ranks, parts) == null
+              && SubRoutes.BuildStats(99, new[] { "W", "W", "W", "W" }, ranks, parts) == null,
+            "Sub Calculator: a stat the game data lacks is unknown, not 0");
+    }
+
     // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.
     private static void FcCreditChecks()
     {
@@ -2256,6 +2288,7 @@ internal static partial class Program
         await MarketAgainstTheApp();
         MemoChecks();
         FcCreditChecks();
+        SubCalculatorChecks();
         Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
             "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");
         RoutesAgainstTheApp();

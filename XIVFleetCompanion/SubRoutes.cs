@@ -31,11 +31,14 @@ namespace XIVFleetCompanion
     /// <summary>A sector from the game's files (SubmarineExploration): its letter, map, position, experience and survey time.</summary>
     public sealed record SubSector(int Id, string Location, int Map, double X, double Y, double Z, double ExpReward, double SurveyMinutes, bool Starting);
 
-    /// <summary>A rank from the game's files (SubmarineRank): its speed and range before parts, and experience to the next.</summary>
-    public sealed record SubRank(int Id, double? Speed, double? Range, double ExpToNext);
+    /// <summary>A rank from the game's files (SubmarineRank): its stats before parts, and experience to the next.</summary>
+    public sealed record SubRank(int Id, double? Speed, double? Range, double ExpToNext, double? Surveillance = null, double? Retrieval = null, double? Favor = null);
 
-    /// <summary>A part's speed and range from the game's files (SubmarinePart), by class (1 Whale ... 10 Syldra+) and slot (0 hull ... 3 bridge).</summary>
-    public sealed record SubPartStat(int Class, int Slot, double Speed, double Range);
+    /// <summary>A part's stats from the game's files (SubmarinePart), by class (1 Whale ... 10 Syldra+) and slot (0 hull ... 3 bridge).</summary>
+    public sealed record SubPartStat(int Class, int Slot, double Speed, double Range, double? Surveillance = null, double? Retrieval = null, double? Favor = null);
+
+    /// <summary>A build's five stats, in the game's order.</summary>
+    public sealed record SubStats(double Surveillance, double Retrieval, double Speed, double Range, double Favor);
 
     /// <summary>The game data the routes need (from the game's files in the plugin; made up in the tests).</summary>
     public sealed record SubGameData(List<SubSector> Sectors, Dictionary<int, string> MapNames, List<SubRank> Ranks, List<SubPartStat> Parts);
@@ -287,6 +290,21 @@ namespace XIVFleetCompanion
                 total += speed ? p.Speed : p.Range;
             }
             return total;
+        }
+
+        /// <summary>All five stats of a build (the app's buildStats): its rank's plus each part's; null when the rank, a part or
+        /// any of their figures isn't known.</summary>
+        public static SubStats? BuildStats(int rank, string[] parts, Dictionary<int, SubRank> ranks, Dictionary<(int, int), SubPartStat> partStats)
+        {
+            if (!ranks.TryGetValue(rank, out var r) || r.Surveillance is not double sv || r.Retrieval is not double rt || r.Speed is not double sp
+                || r.Range is not double rg || r.Favor is not double fv) return null;
+            for (var i = 0; i < 4; i++)
+            {
+                if (!PartClass.TryGetValue(parts[i], out var cls) || !partStats.TryGetValue((cls, i), out var p)
+                    || p.Surveillance is not double psv || p.Retrieval is not double prt || p.Favor is not double pfv) return null;
+                sv += psv; rt += prt; sp += p.Speed; rg += p.Range; fv += pfv;
+            }
+            return new SubStats(sv, rt, sp, rg, fv);
         }
 
         // ---- rank-up.js ----

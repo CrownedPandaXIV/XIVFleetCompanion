@@ -3,6 +3,17 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.6.0 - 2026-11-21
+
+The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
+
+- **Sub Calculator data.** The plugin now ships the loot each sector can give, by tier, and the surveillance,
+  retrieval and favor breakpoints, from XIVStats, with Pepper's FFXIV Ship Guide's breakpoints beside them. Each
+  release reads them again, so new findings arrive with updates. Nothing shows it yet: the Sub Calculator pages
+  come next.
+- **All five sub stats.** Surveillance, retrieval and favor are now read from the game's files alongside speed and
+  range, for the Sub Calculator.
+
 ## 2.5.0 - 2026-11-21
 
 Fixes from a full check of the plugin and the app. This entry grows until 2.5.0 is released.

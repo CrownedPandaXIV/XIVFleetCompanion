@@ -166,6 +166,10 @@ XIV Fleet Companion couldn't work without these plugins. A big thank you to the 
 - **FC Tracker** by erdelf
 - **Submarine Tracker** by Infi
 
+The Sub Calculator's loot and breakpoints come from [XIVStats](https://xivstats.com) by Infi (MIT licence), collected
+from players running the Tracky plugin, checked against [Pepper's FFXIV Ship Guide](https://docs.google.com/document/d/1t2cC8-VuSNU2JLrvFFvr1S0-7NirnJiJ3k41UJ56jqE/edit).
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ## License
 
 The plugin is free software under the [GNU Affero General Public License v3](LICENSE.md), the same as the app. You can
