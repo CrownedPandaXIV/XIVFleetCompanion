@@ -40,8 +40,9 @@ echo "Attached $asset to the $tag release."
 # repo.json: the testing fields of the plugin's entry; the normal ones are left as they are.
 # Its content and sha in one read, so the file written back is the one read (not one a release wrote in between).
 GH_TOKEN="$RELEASES_TOKEN" gh api "repos/$releases/contents/repo.json" > current-meta.json
-jq -r .content current-meta.json | base64 -d > current.json
-sha="$(jq -r .sha current-meta.json)"
+# (jq on Windows ends lines with a carriage return, which base64 and the sha mustn't get.)
+jq -r .content current-meta.json | tr -d '\r\n' | base64 -d > current.json
+sha="$(jq -r .sha current-meta.json | tr -d '\r')"
 bash "$(dirname "$0")/testing-entry.sh" current.json "$build" "$url" "$api" > repo.json
 # Sent as a file: with a long changelog in it, repo.json is too big to pass on the command line (Windows refuses it).
 base64 -w0 < repo.json | jq -Rs --arg m "Plugin test build ${build}" --arg sha "$sha" '{message: $m, content: ., sha: $sha}' > put-body.json
