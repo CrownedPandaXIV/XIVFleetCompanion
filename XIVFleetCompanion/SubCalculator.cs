@@ -69,18 +69,25 @@ namespace XIVFleetCompanion
             }
         }
 
-        /// <summary>The order of these sectors using the least range (then the shortest voyage), as SubmarineTracker picks it.</summary>
-        public static List<SubSector> BestOrder(List<SubSector> sectors, SubSector? start, double speed)
+        /// <summary>The order to send these sectors in (as the app's bestOrder). With the sub's range: the fastest order it
+        /// can fly, the least range on a tie (each leg is rounded on its own for range and for time, so the least range
+        /// isn't always the fastest). With none fitting, or no range given: the least range, then the fastest.</summary>
+        public static List<SubSector> BestOrder(List<SubSector> sectors, SubSector? start, double speed, double? range = null)
         {
             if (sectors.Count <= 1) return sectors;
             List<SubSector>? best = null;
-            int? bestRange = null;
+            int bestUsed = 0;
             double bestHours = 0;
+            var bestFits = false;
             foreach (var order in Permutations(sectors))
             {
-                var range = RangeUsed(order, start);
+                var used = RangeUsed(order, start) ?? 0;
                 var hours = SubRoutes.Voyage(order.Cast<SubSector?>().ToList(), start, speed)?.Hours ?? 0;
-                if (best == null || range < bestRange || (range == bestRange && hours < bestHours)) { best = order; bestRange = range; bestHours = hours; }
+                var fits = range is double r && used <= r;
+                var better = best == null || (fits != bestFits ? fits
+                    : fits ? hours < bestHours || (hours == bestHours && used < bestUsed)
+                    : used < bestUsed || (used == bestUsed && hours < bestHours));
+                if (better) { best = order; bestUsed = used; bestHours = hours; bestFits = fits; }
             }
             return best!;
         }

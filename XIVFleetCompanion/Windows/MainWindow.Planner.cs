@@ -286,11 +286,11 @@ public partial class MainWindow
                 if (plannerRoute.Count > 1 && plannerStats is { } speedFrom && ImGui.Button("Best order##plannerBest"))
                 {
                     var sectors = plannerRoute.Select(id => g.Sectors.GetValueOrDefault(id)).OfType<SubSector>().ToList();
-                    var best = SubCalculator.BestOrder(sectors, SubRoutes.StartFor(sectors[0].Id, g.Starts), speedFrom.Speed);
+                    var best = SubCalculator.BestOrder(sectors, SubRoutes.StartFor(sectors[0].Id, g.Starts), speedFrom.Speed, speedFrom.Range);
                     plannerRoute.Clear();
                     plannerRoute.AddRange(best.Select(s => s.Id));
                 }
-                if (plannerRoute.Count > 1) Hover("Put the sectors in the order that uses the least range");
+                if (plannerRoute.Count > 1) Hover("Put the sectors in the fastest order this sub's range allows");
                 var tooHigh = plannerRoute.Select(id => g.Sectors.GetValueOrDefault(id)).OfType<SubSector>().Where(s => s.RankReq > plannerRank).ToList();
                 if (tooHigh.Count > 0) Colored(Amber, $"Rank {plannerRank} can't go to {string.Join(", ", tooHigh.Select(s => s.Location))} yet.");
             }

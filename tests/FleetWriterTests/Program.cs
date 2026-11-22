@@ -1124,6 +1124,16 @@ internal static partial class Program
     // written by the app's tests/db/calculator-fixture.js): stats, order, range, voyage, experience, loot, gil and wear.
     private static void SubCalculatorAgainstTheApp()
     {
+        // Best order with the sub's range: the fastest it can fly (the app's hand-worked case: C-B-A uses 71 range and
+        // takes 60,861 seconds at speed 210, B-C-A uses 72 and takes 60,821).
+        {
+            var home = new SubSector(10, "", 1, 0, 0, 0, 0, 0, true);
+            SubSector At(string l, double x, double y) => new(l[0], l, 1, x, y, 0, 1, 60, false, l, 0, 10);
+            var three = new List<SubSector> { At("A", 728, 706), At("B", 419, 469), At("C", 310, 599) };
+            string Order(double? range) => string.Concat(SubCalculator.BestOrder(three, home, 210, range).Select(x => x.Location));
+            Check(Order(null) == "CBA" && Order(72) == "BCA" && Order(71) == "CBA" && Order(50) == "CBA",
+                $"best order: the fastest the sub's range allows, else the least range ({Order(null)} {Order(72)} {Order(71)} {Order(50)})");
+        }
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "calculator-fixture.json");
         using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
         var root = doc.RootElement;
@@ -1156,7 +1166,7 @@ internal static partial class Program
             var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
             var route = c.GetProperty("route").EnumerateArray().Select(x => byId[x.GetInt32()]).ToList();
             if (c.GetProperty("bestOrder").GetBoolean() && route.Count > 1 && stats != null)
-                route = SubCalculator.BestOrder(route, SubRoutes.StartFor(route[0].Id, starts), stats.Speed);
+                route = SubCalculator.BestOrder(route, SubRoutes.StartFor(route[0].Id, starts), stats.Speed, stats.Range);
             var p = SubCalculator.PlanFor(route.Select(s => s.Id).ToList(), stats, letters.Select(l => SubRoutes.PartClass[l]).ToList(), byId, starts, partList, data, Price, kitCost);
             var wrong = new List<string>();
             void Want(bool ok, string what) { if (!ok) wrong.Add(what); }

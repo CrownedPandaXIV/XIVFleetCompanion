@@ -11,7 +11,7 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   from one of your subs, and see:
   - the build's surveillance, retrieval, speed, range and favor;
   - the range the route uses against the sub's, the voyage length, experience and ceruleum, and a Best order
-    button that puts the sectors in the order using the least range;
+    button that puts the sectors in the fastest order the sub's range allows (the least range if none fits);
   - for each sector, the loot tier, retrieval and double dip the build reaches, in amber where XIVStats and
     Pepper's guide disagree, and how much more of a stat it needs;
   - the loot it can bring back, gil per voyage and per day, experience per day with bonus experience, and repair
