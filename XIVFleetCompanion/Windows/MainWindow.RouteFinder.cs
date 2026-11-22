@@ -69,8 +69,13 @@ public partial class MainWindow
 
     private FcSectors? RfFcRead() => rfFc == null ? null : reader.SubSectors.Data?.FirstOrDefault(f => f.FcId == rfFc);
 
-    private static string RfWhen(double ms) =>
-        DateTimeOffset.FromUnixTimeMilliseconds((long)ms).LocalDateTime.ToString("d MMM, t", CultureInfo.CurrentCulture);
+    // "22 Nov, 10:01 AM": the date, then the time as this PC shows times (a lone "t" in a date pattern would be only the
+    // first letter of AM or PM).
+    private static string RfWhen(double ms)
+    {
+        var at = DateTimeOffset.FromUnixTimeMilliseconds((long)ms).LocalDateTime;
+        return $"{at.ToString("d MMM", CultureInfo.CurrentCulture)}, {at.ToString("t", CultureInfo.CurrentCulture)}";
+    }
 
     private void DrawRouteFinder()
     {
