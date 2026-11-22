@@ -1190,6 +1190,72 @@ internal static partial class Program
             else if (firstWrong.Length == 0) firstWrong = $" (first wrong: rank {rank} {string.Join("", letters)} route {string.Join(",", route.Select(s => s.Id))}: {string.Join(", ", wrong)})";
         }
         Check(cases >= 30 && good == cases, $"Sub Calculator: the plugin's plans match the app's for {good} of {cases} builds and routes{firstWrong}");
+
+        // The Build Finder: what the goals need, how many builds reach them, and the first 25 builds each way sorted.
+        var f = root.GetProperty("finder");
+        var owned = f.GetProperty("owned").EnumerateArray().Select(x => x.GetString()!).ToHashSet();
+        int fCases = 0, fGood = 0;
+        var fWrong = "";
+        static bool NeedIs(SubCalculator.Breakpoint? bp, System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? bp == null
+            : bp != null && bp.Low == e.GetProperty("low").GetInt32() && bp.High == e.GetProperty("high").GetInt32();
+        foreach (var c in f.GetProperty("cases").EnumerateArray())
+        {
+            fCases++;
+            var goals = c.GetProperty("goals").EnumerateArray().Select(g => new BuildFinder.Goal(g.GetProperty("sectorId").GetInt32(), g.GetProperty("tier").GetInt32(),
+                g.GetProperty("optimal").GetBoolean(), g.GetProperty("doubleDip").GetBoolean(), g.GetProperty("items").EnumerateArray().Select(x => x.GetUInt32()).ToList())).ToList();
+            var sureOnly = c.GetProperty("sureOnly").GetBoolean();
+            var sectorsHere = goals.Select(g => byId[g.SectorId]).ToList();
+            var start = SubRoutes.StartFor(sectorsHere[0].Id, starts);
+            var route = sectorsHere.Count > 1 ? SubCalculator.BestOrder(sectorsHere, start, 100) : sectorsHere;
+            var need = BuildFinder.NeedsFor(goals, id => data.Find(id), id => byId[id].Location);
+            var minRank = Math.Max(1, sectorsHere.Max(s => s.RankReq));
+            var rows = BuildFinder.FindBuilds(need, ranks, parts, minRank, 125, route, start, owned, sureOnly);
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            var en = c.GetProperty("need");
+            Want(route.Select(s => s.Id).SequenceEqual(c.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())), "route");
+            Want(NeedIs(need.Surveillance, en.GetProperty("surveillance")) && NeedIs(need.Retrieval, en.GetProperty("retrieval")) && NeedIs(need.Favor, en.GetProperty("favor")), "needs");
+            Want(need.WhySurveillance.Concat(need.WhyRetrieval).Concat(need.WhyFavor).SequenceEqual(new[] { "surveillance", "retrieval", "favor" }
+                .SelectMany(k => c.GetProperty("why").GetProperty(k).EnumerateArray().Select(x => x.GetString()!))), "why");
+            Want(minRank == c.GetProperty("minRank").GetInt32(), "rank");
+            Want(rows.Count == c.GetProperty("total").GetInt32() && rows.Count(r => r.Sure) == c.GetProperty("sure").GetInt32()
+                 && rows.Count(r => r.RangeShort > 0) == c.GetProperty("outOfRange").GetInt32(), $"counts ({rows.Count} builds)");
+            foreach (var sorted in c.GetProperty("sorted").EnumerateObject())
+            {
+                var mine = BuildFinder.SortBuilds(rows, sorted.Name).Take(25).ToList();
+                var theirs = sorted.Value.EnumerateArray().ToList();
+                Want(mine.Count == theirs.Count && theirs.Select((e, i) =>
+                {
+                    var r = mine[i];
+                    var st = e.GetProperty("stats");
+                    var spare = e.GetProperty("spare");
+                    return r.Parts.SequenceEqual(e.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!)) && r.Rank == e.GetProperty("rank").GetInt32()
+                        && r.Sure == e.GetProperty("sure").GetBoolean() && Near(r.SureRank, e.GetProperty("sureRank"))
+                        && Near(r.Stats.Surveillance, st.GetProperty("surveillance")) && Near(r.Stats.Retrieval, st.GetProperty("retrieval")) && Near(r.Stats.Speed, st.GetProperty("speed"))
+                        && Near(r.Stats.Range, st.GetProperty("range")) && Near(r.Stats.Favor, st.GetProperty("favor"))
+                        && Near(r.SpareSurveillance, spare.GetProperty("surveillance")) && Near(r.SpareRetrieval, spare.GetProperty("retrieval")) && Near(r.SpareFavor, spare.GetProperty("favor"))
+                        && Near(r.RangeShort, e.GetProperty("rangeShort")) && Near(r.InRangeFrom, e.GetProperty("inRangeFrom")) && Near(r.Hours, e.GetProperty("hours"))
+                        && r.MissingParts!.Select(m => $"{m.Letter}|{m.Slot}").SequenceEqual(e.GetProperty("missing").EnumerateArray().Select(x => x.GetString()!));
+                }).All(x => x), $"sorted by {sorted.Name}");
+            }
+            if (wrong.Count == 0) fGood++;
+            else if (fWrong.Length == 0) fWrong = $" (first wrong: case {fCases}: {string.Join(", ", wrong)})";
+        }
+        Check(fCases >= 10 && fGood == fCases, $"Build Finder: the plugin's builds match the app's for {fGood} of {fCases} sets of goals{fWrong}");
+
+        // Parts you own (as the app's ownedParts): fitted, or spare in a bag, a retainer or the FC chest; for one character
+        // only its own subs, bags and retainers and its Free Company's chest. Item numbers: bow, bridge, hull, stern from each base.
+        var partsIn = new PartsInputs(
+            new List<PartsCharacter> { new(1, "A", "W", "", null, "9", 4, true), new(2, "B", "W", "", null, "8", 4, true) },
+            new List<PartsSub> { new(1, "S1", 1, 90, 24358, 24359, 24356, 24357, false), new(2, "S2", 1, 50, 21794, 21795, 21792, 21793, false) },
+            new List<PartsRule>(), new List<PartsFightClubRoute>(),
+            new List<PartsSpare> { new(1, null, false, null, null, 0, 0, 21792, 1), new(null, "9", false, null, null, 20000, 0, 24347, 2),
+                                   new(2, null, true, 5, "R", 10000, 0, 21797, 1), new(1, null, false, null, null, 0, 1, 22526, 0) });
+        var fleetOwned = BuildFinder.Owned(partsIn, null);
+        var oneOwned = BuildFinder.Owned(partsIn, 1);
+        Check(oneOwned.SetEquals(new[] { "W+|0", "W+|1", "W+|2", "W+|3", "S|2", "Y|1" })
+              && fleetOwned.SetEquals(new[] { "W+|0", "W+|1", "W+|2", "W+|3", "S|0", "S|1", "S|2", "S|3", "Y|1", "U|3" }),
+            $"Build Finder: parts owned by one character and by the fleet (one: {string.Join(" ", oneOwned)}; fleet: {string.Join(" ", fleetOwned)})");
     }
 
     // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.

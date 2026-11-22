@@ -85,24 +85,18 @@ public partial class MainWindow
     // Choosing one of your subs: a panel grouped by account, then character (world, Free Company), each group folding
     // away, with a search across character, world, account, Free Company and sub name; each row its rank, build, route
     // and where it is now.
-    private void PlannerSubPicker()
+    // id: the page's own name for it (the Planner's and the Build Finder's are separate); onChoose: what a chosen sub does.
+    private void SubPicker(string id, (long Cid, string SubName)? chosenKey, Action<SubRow> onChoose)
     {
         var subs = reader.Subs.Data ?? new List<SubRow>();
-        var chosen = plannerChosen is { } pc ? subs.FirstOrDefault(s => s.Cid == pc.Cid && s.SubName == pc.SubName) : null;
-        Ui.Text("Start from one of your subs");
-        ImGui.SameLine();
+        var chosen = chosenKey is { } pc ? subs.FirstOrDefault(s => s.Cid == pc.Cid && s.SubName == pc.SubName) : null;
         using (ImRaii.Disabled(subs.Count == 0))
         {
             var label = subs.Count == 0 ? "No subs synced yet" : chosen != null ? $"{chosen.SubName} · {chosen.Character}" : "Choose one of your subs…";
-            if (ImGui.Button($"{label} ▾##plannerPicker")) ImGui.OpenPopup("plannerPickerPanel");
-        }
-        if (chosen != null)
-        {
-            ImGui.SameLine();
-            Colored(Dim, "Change anything below to try other builds; your sub isn't changed.");
+            if (ImGui.Button($"{label} ▾##{id}Picker")) ImGui.OpenPopup($"{id}PickerPanel");
         }
 
-        using var popup = ImRaii.Popup("plannerPickerPanel");
+        using var popup = ImRaii.Popup($"{id}PickerPanel");
         if (!popup) return;
         var scale = ImGuiHelpers.GlobalScale;
         ImGui.SetNextItemWidth(560 * scale);
@@ -148,7 +142,7 @@ public partial class MainWindow
                             var isChosen = chosen != null && chosen.Cid == s.Cid && chosen.SubName == s.SubName;
                             if (ImGui.Selectable($"{s.SubName}##pick{s.Cid}{s.SubName}", isChosen, ImGuiSelectableFlags.SpanAllColumns))
                             {
-                                PlannerLoad(s.Cid, s.SubName);
+                                onChoose(s);
                                 ImGui.CloseCurrentPopup();
                             }
                             ImGui.TableNextColumn();
@@ -186,7 +180,14 @@ public partial class MainWindow
         plannerRank = Math.Clamp(plannerRank, 1, g.MaxRank);
         plannerMap ??= g.Maps.Count > 0 ? g.Maps[^1].Id : null;
 
-        PlannerSubPicker();
+        Ui.Text("Start from one of your subs");
+        ImGui.SameLine();
+        SubPicker("planner", plannerChosen, s => PlannerLoad(s.Cid, s.SubName));
+        if (plannerChosen != null)
+        {
+            ImGui.SameLine();
+            Colored(Dim, "Change anything below to try other builds; your sub isn't changed.");
+        }
         ImGui.Spacing();
 
         // The build and the route side by side.

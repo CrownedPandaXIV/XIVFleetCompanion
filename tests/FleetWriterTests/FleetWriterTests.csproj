@@ -34,6 +34,7 @@
     <Compile Include="..\..\XIVFleetCompanion\SubRoutes.cs" Link="SubRoutes.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubCalculatorData.cs" Link="SubCalculatorData.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubCalculator.cs" Link="SubCalculator.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\BuildFinder.cs" Link="BuildFinder.cs" />
     <Compile Include="..\..\XIVFleetCompanion\PartCondition.cs" Link="PartCondition.cs" />
     <Compile Include="..\..\XIVFleetCompanion\Loot.cs" Link="Loot.cs" />
     <Compile Include="..\..\XIVFleetCompanion\ShoppingList.cs" Link="ShoppingList.cs" />
