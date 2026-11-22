@@ -46,7 +46,8 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   Laid out in three parts: what you want (a card per sector), the options, and the builds: what they need as
   boxes (amber where the sources differ), the counts on one line, and the list grouped by rank while sorted by lowest
   rank. Each build's parts are tags, green for one you own and amber for one to get; the stats the goals ask for show
-  what they have to spare, the rest are greyed.
+  what they have to spare, the rest are greyed. Hover a "+" number to see what it's measured against ("5 more
+  surveillance than what T3 on K needs (273)"); the legend says what they are too.
   - **Find an item:** type a name (Cocobolo Lumber, say) to see every sector on every map that drops it, with the
     rank it needs, the lowest tier it drops at, how often and how many, and the surveillance that tier takes. Add puts
     the sector in with the item as its goal; a sector on another map switches the map after asking.

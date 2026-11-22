@@ -228,6 +228,8 @@ public partial class MainWindow
         ImGui.SameLine(0, 16 * scale); Tag("C+", Amber); ImGui.SameLine(); Colored(Dim, "still to get");
         Flow(ImGui.CalcTextSize("might not  only the lower of the two sources' figures is met").X + 20 * scale);
         Tag("might not", Amber); ImGui.SameLine(); Colored(Dim, "only the lower of the two sources' figures is met");
+        Flow(ImGui.CalcTextSize("+5 how much a stat or the range has beyond what's needed").X + 8 * scale);
+        Colored(Green, "+5"); ImGui.SameLine(); Colored(Dim, "how much a stat or the range has beyond what's needed");
         ImGui.Spacing();
 
         if (result.Rows.Count == 0)
@@ -539,11 +541,16 @@ public partial class MainWindow
         Runs(runs);
     }
 
-    // A stat: one the goals ask for in full with what it has to spare (green; amber at exactly 0), the rest greyed.
-    private void FinderStat(double value, double? spare, bool asked)
+    // A stat: one the goals ask for in full with what it has to spare (green; amber at exactly 0), the rest greyed. On
+    // hover, what the spare is measured against (as the app's).
+    private void FinderStat(string name, double value, double? spare, SubCalculator.Breakpoint? need, List<string>? why)
     {
-        if (!asked || spare is not double sp) { TableCells.Right(PlannerN(value), Dim); return; }
+        if (need == null || spare is not double sp) { TableCells.Right(PlannerN(value), Dim); return; }
+        ImGui.BeginGroup();
         RightRuns((PlannerN(value), null), ($" +{PlannerN(sp)}", sp == 0 ? Amber : Green));
+        ImGui.EndGroup();
+        var whom = why is { Count: > 0 } ? string.Join(", ", why) : "the goals";
+        Hover($"{(sp == 0 ? "Exactly" : $"{PlannerN(sp)} more {name} than")} what {whom} needs ({PlannerN(need.Low)})");
     }
 
     private string PartName(string letter) =>
@@ -570,9 +577,9 @@ public partial class MainWindow
                 Hover($"Reaches the lower of XIVStats' and Pepper's figures, not the higher. {(r.SureRank is int sr ? $"Sure from rank {sr}." : "Never sure.")}");
             }
         }, r => string.Concat(r.Parts), Locked: true),
-        new("surveillance", "Surveillance", r => FinderStat(r.Stats.Surveillance, r.SpareSurveillance, finderNeed?.Surveillance != null), r => r.Stats.Surveillance),
-        new("retrieval", "Retrieval", r => FinderStat(r.Stats.Retrieval, r.SpareRetrieval, finderNeed?.Retrieval != null), r => r.Stats.Retrieval),
-        new("favor", "Favor", r => FinderStat(r.Stats.Favor, r.SpareFavor, finderNeed?.Favor != null), r => r.Stats.Favor),
+        new("surveillance", "Surveillance", r => FinderStat("surveillance", r.Stats.Surveillance, r.SpareSurveillance, finderNeed?.Surveillance, finderNeed?.WhySurveillance), r => r.Stats.Surveillance),
+        new("retrieval", "Retrieval", r => FinderStat("retrieval", r.Stats.Retrieval, r.SpareRetrieval, finderNeed?.Retrieval, finderNeed?.WhyRetrieval), r => r.Stats.Retrieval),
+        new("favor", "Favor", r => FinderStat("favor", r.Stats.Favor, r.SpareFavor, finderNeed?.Favor, finderNeed?.WhyFavor), r => r.Stats.Favor),
         new("speed", "Speed", r => TableCells.Right(PlannerN(r.Stats.Speed), Dim), r => r.Stats.Speed),
         new("range", "Range", r =>
         {
@@ -582,7 +589,13 @@ public partial class MainWindow
                 ImGui.SameLine();
                 Colored(Dim, r.InRangeFrom is int f ? $"in range from rank {f}" : "not in range at any rank");
             }
-            else if (r.RangeNeeded is int n) RightRuns((PlannerN(r.Stats.Range), null), ($" +{PlannerN(r.Stats.Range - n)}", Green));
+            else if (r.RangeNeeded is int n)
+            {
+                ImGui.BeginGroup();
+                RightRuns((PlannerN(r.Stats.Range), null), ($" +{PlannerN(r.Stats.Range - n)}", Green));
+                ImGui.EndGroup();
+                Hover($"{PlannerN(r.Stats.Range - n)} more range than the route uses ({PlannerN(n)})");
+            }
             else TableCells.Right(PlannerN(r.Stats.Range));
         }, r => r.Stats.Range - (r.RangeNeeded ?? 0)),
         new("voyage", "Voyage", r => TableCells.Right(r.Hours is double h ? PlannerHours(h) : "—"), r => r.Hours ?? double.MaxValue),
