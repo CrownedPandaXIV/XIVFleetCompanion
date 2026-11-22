@@ -238,6 +238,17 @@ CREATE TABLE companion_sub_part_condition (
 );
 CREATE INDEX companion_sub_part_condition_read_idx ON companion_sub_part_condition (read_at);
 
+-- Which submarine sectors each Free Company has unlocked and explored, as last read in its workshop (update 018).
+CREATE TABLE companion_fc_sub_sector (
+    fc_id     numeric     NOT NULL,
+    sector_id int         NOT NULL,
+    unlocked  boolean     NOT NULL,
+    explored  boolean     NOT NULL,
+    read_at   timestamptz NOT NULL,
+    cid       numeric,
+    PRIMARY KEY (fc_id, sector_id)
+);
+
 -- One row per venture reward, from AutoRetainer's statistics files.
 CREATE TABLE companion_venture_result (
     owner_cid     numeric     NOT NULL,

@@ -218,6 +218,17 @@ CREATE TABLE companion_sub_part_condition (
 );
 CREATE INDEX companion_sub_part_condition_read_idx ON companion_sub_part_condition (read_at);
 
+-- Which submarine sectors each Free Company has unlocked and explored, as last read in its workshop (1 yes, 0 no).
+CREATE TABLE companion_fc_sub_sector (
+    fc_id     TEXT    NOT NULL,
+    sector_id INTEGER NOT NULL,
+    unlocked  INTEGER NOT NULL,
+    explored  INTEGER NOT NULL,
+    read_at   REAL    NOT NULL,
+    cid       INTEGER,
+    PRIMARY KEY (fc_id, sector_id)
+);
+
 -- Each sub's Next Rank date as the app saved it, once an hour (the Subs tab's forecast line compares them with the real
 -- rank-ups).
 CREATE TABLE companion_rankup_forecast (

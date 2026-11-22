@@ -1087,6 +1087,36 @@ internal static partial class Program
             "part condition: written only for characters synced here that are in a Free Company");
     }
 
+    private static void SubSectorChecks()
+    {
+        SubSectors.Reading R(ulong cid, double at, params (int Id, bool U, bool E)[] sectors) =>
+            new(cid, sectors.Select(x => new SubSectors.Sector(x.Id, x.U, x.E)).ToList(), at);
+        Check(SubSectors.Problem(new List<SubSectors.Sector>()) != null
+              && SubSectors.Problem(new[] { new SubSectors.Sector(1, false, false), new SubSectors.Sector(2, false, false) }) != null
+              && SubSectors.Problem(new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(2, false, true) }) != null
+              && SubSectors.Problem(new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(2, true, false) }) == null,
+            "sub sectors: a reading is kept only when it makes sense (the first sector unlocked, nothing explored that isn't unlocked)");
+        var log = new SubSectors.Log();
+        var kept = new[]
+        {
+            log.Offer(R(1, 1, (1, false, false), (2, false, false))),  // before the game has the workshop's data
+            log.Offer(R(1, 2, (1, true, true), (2, true, false))),
+            log.Offer(R(1, 3, (1, true, true), (2, true, false))),     // the same again
+            log.Offer(R(1, 4, (1, true, true), (2, true, true))),      // J explored
+            log.Offer(R(2, 5, (1, true, false), (2, false, false))),
+        };
+        var taken = log.Take();
+        Check(kept.SequenceEqual(new[] { false, true, false, true, true }) && taken.Select(r => $"{r.Cid}@{r.At}").SequenceEqual(new[] { "1@4", "2@5" }) && log.Count == 0,
+            "sub sectors: a character's first sensible reading, then only a changed one, the newest waiting");
+        log.Offer(R(2, 6, (1, true, true), (2, false, false)));
+        log.PutBack(taken);
+        Check(log.Take().Select(r => $"{r.Cid}@{r.At}").SequenceEqual(new[] { "1@4", "2@6" }), "sub sectors: a reading a sync couldn't write goes back, unless a newer one came in");
+        var rows = SubSectors.ToWrite(new[] { R(1, 1, (1, true, true)), R(2, 2, (1, true, false)), R(3, 3, (1, true, false)), R(4, 4, (1, true, true)) },
+            new Dictionary<ulong, ulong> { [1] = 900, [2] = 900, [3] = 0 });
+        Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 2,
+            "sub sectors: written for characters synced here that are in a Free Company, the newest reading per FC");
+    }
+
     // The Sub Calculator: its data file (the app's, copied by its fixture script) and a build's five stats, with the app's
     // own cases (tests/sub-calculator-data.test.js).
     private static void SubCalculatorChecks()
@@ -1572,7 +1602,7 @@ internal static partial class Program
         using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
         var root = doc.RootElement;
         var files = DatabaseUpkeep.Files.Embedded();
-        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 17 && files.Updates.Count == 8 && files.Views != null,
+        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 18 && files.Updates.Count == 9 && files.Views != null,
             $"database: the plugin carries the app's files (app {files.AppVersion}, updates to {files.Latest})");
         var signature = root.GetProperty("signature").EnumerateObject().Select(p => (p.Name, Sql: p.Value.GetString()!)).ToList();
         var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
@@ -1661,7 +1691,7 @@ internal static partial class Program
                 await Exec(other, $"SELECT pg_advisory_unlock({DatabaseUpkeep.LockKey})");
             }
             var made = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
-            Check(made.Created && made.Version == 17 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
+            Check(made.Created && made.Version == 18 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
             var recorded = await Rows(c, "SELECT app_version FROM companion_views");
             Check((string)recorded[0][0]! == files.AppVersion, "database: the views are recorded with the app version the plugin's files came from");
 
@@ -1682,9 +1712,9 @@ internal static partial class Program
             {
                 await reader.OpenAsync();
                 var fine = await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
-                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 17, "database: a login that may only read is fine while nothing needs changing");
-                // As if made by a copy that had only up to update 16: update 17 is still to do.
-                await Exec(c, "UPDATE companion_schema_version SET version = 16");
+                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 18, "database: a login that may only read is fine while nothing needs changing");
+                // As if made by a copy that had only up to update 17: update 18 is still to do.
+                await Exec(c, "UPDATE companion_schema_version SET version = 17");
                 string? message = null;
                 try
                 {
@@ -1697,8 +1727,8 @@ internal static partial class Program
                 Check(message != null && message.Contains("\"pdb_reader\" is not allowed to change the tables"), "database: and says plainly when it can't apply an update: " + message);
             }
             var back = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
-            Check(back.Applied.SequenceEqual(new[] { "update 17: sub_part_condition" }) && back.Version == 17, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
-            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 17");
+            Check(back.Applied.SequenceEqual(new[] { "update 18: fc_sub_sectors" }) && back.Version == 18, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
+            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 18");
             Check((string)by[0][0]! == "plugin test", "database: each version records who applied it");
 
             // A newer app or plugin updated it further: left alone, and said.
@@ -1717,11 +1747,11 @@ internal static partial class Program
             var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
             Check(keeper.StatusText == "Not looked at yet.", "database: nothing said before the first look");
             await keeper.RunIfDueAsync(c);
-            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 17)"),
+            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 18)"),
                 "database: the first read or sync brings it up to date and says so: " + keeper.StatusText);
             var recordedBy = await Rows(c, "SELECT app_version FROM companion_schema_version");
             Check((string)recordedBy[0][0]! == $"{files.AppVersion} (plugin 2.1.0)", "database: recorded as the plugin, with the app version of its files");
-            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 17");
+            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 18");
             await keeper.RunIfDueAsync(c);
             Check(said.Count == 1 && (await Rows(c, "SELECT count(*) FROM companion_schema_version"))[0][0] is 0L, "database: not looked at again until it's due");
         }
@@ -1958,6 +1988,29 @@ internal static partial class Program
                           + $"{bigFc} 1717000000 0 24356 28650 Kestrel -400 3600 | {bigFc} 1717000000 0 24356 30000 Kestrel -300 3600";
         Check(partsSaved.All(s => s) && partsStored.All(s => s == partsWanted),
             $"file: sub part condition keeps only changes (a voyage's drop, a repair's rise), and writing again adds nothing, on both: {string.Join(" / ", partsStored)}");
+
+        // ---- The sectors each FC has unlocked and explored ----
+        SubSectors.Reading Sectors(double at, bool jExplored) => new(18014498578000001,
+            new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(2, true, jExplored), new SubSectors.Sector(3, jExplored, false) }, at);
+        var sectorsSaved = new List<bool>();
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 600.25, false)) })));
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 300, true)) })));
+        // An older reading (another PC's, synced late) doesn't undo a newer one.
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 900, false)) })));
+        var sectorsStored = new List<string>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, "SELECT fc_id, sector_id, unlocked, explored, read_at, cid FROM companion_fc_sub_sector ORDER BY sector_id");
+            await using var r = await cmd.ExecuteReaderAsync();
+            var lines = new List<string>();
+            while (await r.ReadAsync())
+                lines.Add($"{Db.Id(r, 0)} {Convert.ToInt64(r.GetValue(1))} {Convert.ToBoolean(r.GetValue(2))} {Convert.ToBoolean(r.GetValue(3))} "
+                          + $"{(Db.Time(r, 4) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0.##} {Db.Id(r, 5)}");
+            sectorsStored.Add(string.Join(" | ", lines));
+        });
+        var sectorsWanted = $"{bigFc} 1 True True -300 18014498578000001 | {bigFc} 2 True True -300 18014498578000001 | {bigFc} 3 True False -300 18014498578000001";
+        Check(sectorsSaved.All(s => s) && sectorsStored.All(s => s == sectorsWanted),
+            $"file: the FC's sub sectors as last read, an older reading not undoing a newer one, on both: {string.Join(" / ", sectorsStored)}");
 
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();
@@ -2556,6 +2609,7 @@ internal static partial class Program
         SubCalculatorChecks();
         MarketPriceChecks();
         PartConditionChecks();
+        SubSectorChecks();
         Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
             "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");
         RoutesAgainstTheApp();

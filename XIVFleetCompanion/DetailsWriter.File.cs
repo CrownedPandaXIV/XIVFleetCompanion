@@ -95,6 +95,22 @@ namespace XIVFleetCompanion
             await tx.CommitAsync();
         }
 
+        private static async Task FileWriteSubSectors(DbConnection conn, IReadOnlyList<SubSectors.Row> rows)
+        {
+            await using var tx = await conn.BeginTransactionAsync();
+            foreach (var row in rows)
+                foreach (var sector in row.Reading.Sectors)
+                    await Db.Exec(conn, @"
+                        INSERT INTO companion_fc_sub_sector (fc_id, sector_id, unlocked, explored, read_at, cid)
+                        VALUES (@fc, @sector, @unlocked, @explored, @at, @cid)
+                        ON CONFLICT (fc_id, sector_id) DO UPDATE SET unlocked = excluded.unlocked, explored = excluded.explored,
+                            read_at = excluded.read_at, cid = excluded.cid
+                        WHERE companion_fc_sub_sector.read_at <= excluded.read_at", tx,
+                        ("fc", Db.FcText(row.FcId)), ("sector", (long)sector.Id), ("unlocked", sector.Unlocked ? 1L : 0L),
+                        ("explored", sector.Explored ? 1L : 0L), ("at", row.Reading.At), ("cid", (long)row.Reading.Cid));
+            await tx.CommitAsync();
+        }
+
         private static async Task<Dictionary<(ulong Owner, string Retainer), long>> FileReadNewestVentures(DbConnection conn, IReadOnlyCollection<ulong> cids)
         {
             var newest = new Dictionary<(ulong, string), long>();

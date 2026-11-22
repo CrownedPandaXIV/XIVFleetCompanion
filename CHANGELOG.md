@@ -68,6 +68,11 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   sub part's condition every couple of seconds and saves it at the next sync, keeping only changes: a voyage shows as
   a drop, a repair as a rise. After a few weeks this tells the Sub Calculator how much each voyage wears your parts,
   for its repair costs. Nothing shows it yet.
+- **Explored sub sectors are recorded.** In the Free Company's workshop, once the game has its sub list (the Voyage
+  Control Panel's submarines opened, as AutoRetainer does at each collection), the plugin reads which sectors the FC has
+  unlocked and explored, and saves them at the next sync (database update 18). A reading that doesn't make sense (the
+  first sector locked, before the game has the workshop's data) is never saved. For the Sub Calculator's coming Route
+  Finder; nothing shows it yet.
 
 ## 2.5.0 - 2026-11-21
 
