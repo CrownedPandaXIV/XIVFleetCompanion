@@ -39,7 +39,9 @@ internal static partial class Program
             var has = canned.TryGetProperty(scope, out var byItem);
             var found = ids.Where(id => has && byItem.TryGetProperty(id, out _)).ToList();
             if (found.Count == 0) return Task.FromResult(Reply(404, "{}"));
-            string Item(string id) => $"{{\"itemID\":{id},\"listings\":{byItem.GetProperty(id).GetRawText()}}}";
+            var sold = c.TryGetProperty("sold", out var soldAll) && soldAll.TryGetProperty(scope, out var soldHere) ? soldHere : default;
+            string Sales(string id) => sold.ValueKind == System.Text.Json.JsonValueKind.Object && sold.TryGetProperty(id, out var ss) ? ss.GetRawText() : "[]";
+            string Item(string id) => $"{{\"itemID\":{id},\"listings\":{byItem.GetProperty(id).GetRawText()},\"recentHistory\":{Sales(id)}}}";
             return Task.FromResult(Reply(200, ids.Count == 1 ? Item(ids[0]) : $"{{\"items\":{{{string.Join(",", found.Select(id => $"\"{id}\":{Item(id)}"))}}}}}"));
         }
     }
@@ -195,9 +197,11 @@ internal static partial class Program
     {
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "market-fixture.json");
         using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
-        static string Price(MarketPrice? p) => p == null ? "none" : $"{p.Price.ToString(System.Globalization.CultureInfo.InvariantCulture)}@{p.World ?? "-"}";
+        // A market price as text: price, world, and the outlier checks' note when they changed it.
+        static string Price(MarketPrice? p) => p == null ? "none" : $"{p.Price.ToString(System.Globalization.CultureInfo.InvariantCulture)}@{p.World ?? "-"}{(p.Adjusted ? $" [{p.Note}]" : "")}";
         static string PriceJson(System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? "none"
-            : $"{e.GetProperty("price").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}@{(e.GetProperty("world").ValueKind == System.Text.Json.JsonValueKind.Null ? "-" : e.GetProperty("world").GetString())}";
+            : $"{e.GetProperty("price").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}@{(e.GetProperty("world").ValueKind == System.Text.Json.JsonValueKind.Null ? "-" : e.GetProperty("world").GetString())}"
+              + (e.TryGetProperty("adjusted", out var adj) && adj.GetBoolean() ? $" [{e.GetProperty("note").GetString()}]" : "");
         foreach (var c in doc.RootElement.GetProperty("cases").EnumerateArray())
         {
             var handler = new CannedUniversalis(c);
@@ -223,7 +227,7 @@ internal static partial class Program
             var asked = handler.Asked;
             await universalis.MarketFor(listings.Select(l => (l.World, l.ItemId)));
             Check(names.SequenceEqual(mineNames) && firstListing < 0 && ventureMine.SequenceEqual(ventureApp) && handler.Asked == asked,
-                $"market prices the same as the app's, {c.GetProperty("name").GetString()}: {compared.Count} listings ({compared.Count(x => x.Contains(" True "))} undercut), {ventureMine.Count} characters' ventures, asked again within 30 minutes: kept"
+                $"market prices the same as the app's, {c.GetProperty("name").GetString()}: {compared.Count} listings ({compared.Count(x => x.Contains(" True "))} undercut, {compared.Count(x => x.Contains('['))} with a price the outlier checks changed), {ventureMine.Count} characters' ventures, asked again within 30 minutes: kept"
                 + (firstListing >= 0 ? $" | listing {firstListing + 1}: plugin [{(firstListing < compared.Count ? compared[firstListing] : "none")}], app [{(firstListing < app.Count ? app[firstListing] : "none")}]" : "")
                 + (ventureMine.SequenceEqual(ventureApp) ? "" : $" | ventures: plugin [{string.Join("; ", ventureMine)}], app [{string.Join("; ", ventureApp)}]")
                 + (names.SequenceEqual(mineNames) ? "" : $" | places: plugin [{string.Join(", ", mineNames)}], app [{string.Join(", ", names)}]"));
@@ -1264,6 +1268,22 @@ internal static partial class Program
         Check(oneOwned.SetEquals(new[] { "W+|0", "W+|1", "W+|2", "W+|3", "S|2", "Y|1" })
               && fleetOwned.SetEquals(new[] { "W+|0", "W+|1", "W+|2", "W+|3", "S|0", "S|1", "S|2", "S|3", "Y|1", "U|3" }),
             $"Build Finder: parts owned by one character and by the fleet (one: {string.Join(" ", oneOwned)}; fleet: {string.Join(" ", fleetOwned)})");
+    }
+
+    // The market price's outlier checks, with dates (the app's tests/universalis.test.js): sales older than a week don't count.
+    private static void MarketPriceChecks()
+    {
+        var now = new DateTime(2027, 1, 15, 12, 0, 0, DateTimeKind.Utc);
+        long DaysAgo(double d) => new DateTimeOffset(now.AddDays(-d)).ToUnixTimeSeconds();
+        MarketListing L(double p) => new(p, 1, false, "Seller", null);
+        MarketSale S(double p, double daysAgo) => new(p, 1, false, DaysAgo(daysAgo));
+        var low = Universalis.Price(new[] { L(300), L(320), L(350) }, new[] { S(900, 1), S(1000, 2), S(1100, 3), S(50, 10) }, null, null, null, now);
+        var old = Universalis.Price(new[] { L(300), L(320), L(350) }, new[] { S(900, 8), S(1000, 9), S(1100, 10) }, null, null, null, now);
+        var slip = Universalis.Price(new[] { L(1500), L(120), L(1400), L(1600), L(1450) }, null, null, null, null, now);
+        Check(low?.Price == 1000 && low.Adjusted && low.Note == "The cheapest listing (300 gil) is well below the last week's 3 sales, around 1,000. Using 1,000 gil."
+              && old?.Price == 300 && !old.Adjusted
+              && slip?.Price == 1400 && slip.Note == "Ignored 1 listing at 120 gil (well below the others, around 1,450). Using 1,400 gil.",
+            "market price: a lone low listing skipped, the last week's sales checked (older ones left out), as the app");
     }
 
     // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.
@@ -2509,6 +2529,7 @@ internal static partial class Program
         MemoChecks();
         FcCreditChecks();
         SubCalculatorChecks();
+        MarketPriceChecks();
         PartConditionChecks();
         Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
             "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");

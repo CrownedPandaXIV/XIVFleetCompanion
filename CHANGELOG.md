@@ -18,6 +18,16 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
     kits a day (parts' wear as Submarine Tracker predicts it).
   Its two tables work like every other page's: columns to size, move, sort and choose.
   The plugin's figures are checked against the app's for 30 made-up builds and routes. `/xivfleet planner` opens it.
+- **Market prices skip odd listings (Income, Gil & Market and the Planner alike).** With Live Market Prices on, an
+  item's price is the cheapest listing, but a lone listing far below the others (under half the middle price of the
+  five cheapest) is skipped, and if the price is still under half the middle price of the last week's sales, that is
+  used instead. Universalis is now asked for the last week's sales with the listings. A price changed this way is
+  amber, with a hover saying what was ignored and what was used; Income lists the items whose prices were changed.
+- **The Planner priced on the market.** With Live Market Prices on, the loot, gil per voyage and gil per day use market
+  prices: on the chosen sub's world, or a world you pick (the one most of your subs are on first), with a World / Data
+  center / Region switch (Data center to start).
+- **Sector names without the doubled letter:** "A: South Isle of Zozonan" rather than "A: South Isle of Zozonan (A)".
+- **The sub picker's arrow** shows as an arrow, not "=": it's a dropdown like the others now.
 - **Sub Calculator → Build Finder (new page).** Pick up to five sectors and what you want from each: a loot tier (T2
   or T3), optimal retrieval, a double dip, or particular items (an item asks for the lowest tier that drops it there).
   It checks every rank and part combination (10,000 builds a rank) and lists the builds that get it, each at the

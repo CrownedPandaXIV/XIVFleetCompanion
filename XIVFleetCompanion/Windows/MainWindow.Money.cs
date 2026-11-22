@@ -138,7 +138,7 @@ public partial class MainWindow
     private FleetTable<FleetReader.VentureSummary> VenturesTable => venturesTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncome", plugin.Configuration, VentureColumns(false), v => v.Account, "characters");
     private FleetTable<FleetReader.VentureSummary> VenturesLiveTable => venturesLiveTable ??= new FleetTable<FleetReader.VentureSummary>("ventureIncomeLive", plugin.Configuration, VentureColumns(true), v => v.Account, "characters");
 
-    // With live prices, the rewards a day at the cheapest listing on the character's world, data center and region too.
+    // With live prices, the rewards a day at the market price on the character's world, data center and region too.
     private List<FleetColumn<FleetReader.VentureSummary>> VentureColumns(bool live) => new List<FleetColumn<FleetReader.VentureSummary>>
         {
             new("character", "Character", v => CharacterCell(v.Character, v.World), v => v.Character, Locked: true),
@@ -278,6 +278,16 @@ public partial class MainWindow
             r => { if (LootRouteMarket(r, scope) is { } m) GilCell((long)SubRoutes.Round(m.PerVoyage)); else Colored(Dim, "—"); },
             r => LootRouteMarket(r, scope)?.PerVoyage ?? double.MinValue)) : Enumerable.Empty<FleetColumn<LootRoute>>()).ToList();
 
+    // The item prices the outlier checks changed (a lone low listing skipped, or recent sales used), in amber, each on hover.
+    private void AdjustedPricesNote()
+    {
+        var adjusted = marketCache.Adjusted(reader.Market.Data);
+        if (adjusted.Count == 0) return;
+        var items = adjusted.Select(a => ItemName(a.ItemId, false)).Distinct().ToList();
+        Colored(Amber, $"{items.Count} item price{(items.Count == 1 ? " was" : "s were")} adjusted for odd listings: {string.Join(", ", items.Take(5))}{(items.Count > 5 ? $" and {items.Count - 5} more" : "")} (hover for why).");
+        Hover(string.Join("\n", adjusted.Select(a => $"{ItemName(a.ItemId, false)} ({a.World}, {(a.Scope == "world" ? "world" : a.Scope == "dc" ? "data center" : "region")}): {a.Note}")));
+    }
+
     private void DrawLoot(IncomeRead income)
     {
         if (reader.Loot.Error is { } error) { Colored(Amber, $"Loot per Voyage: {error}"); return; }
@@ -287,11 +297,14 @@ public partial class MainWindow
         var live = lootMarket != null;
         HeadingRuns(T("Loot per Voyage: "), GilRun(loot.PerDay), T(" a day"));
         Colored(Dim, $"What each voyage really brought back over the last {loot.WindowDays} days, from Submarine Tracker (items at what a vendor pays; salvage at the " +
-                     "Salvage page's prices).");
+                     "Salvage page's prices). Market prices: the cheapest listing, skipping a lone listing far below the others and checked against the last week's sales.");
         Runs(T($"{Number(loot.VoyageCount)} voyage{(loot.VoyageCount == 1 ? "" : "s")}, ", Dim), GilRun(loot.Gil), T($", {Number(loot.Salvage)} pieces of salvage.", Dim));
         if (live)
+        {
             Runs(new[] { T("At market prices: ", Dim) }.Concat(Universalis.Scopes.SelectMany((sc, i) => new[] { T(i > 0 ? ", " : "", Dim), GilRun(lootMarket![sc].PerDay, ""), T($" a day ({ScopeLabel(sc)})", Dim) }))
                 .Append(T(", from Universalis.", Dim)).ToArray());
+            AdjustedPricesNote();
+        }
         else if (reader.Market.Data?.Settings.LivePrices == true && marketCache.Working) Colored(Dim, "Working out market prices...");
         if (loot.Subs.Count == 0)
         {

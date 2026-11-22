@@ -87,7 +87,7 @@ public partial class MainWindow
         if (ImGui.GetItemRectMax().X + ImGui.GetStyle().ItemSpacing.X * 2 + width <= lineEnd) ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X * 2);
     }
 
-    // A label in front of its box, the two kept together: "Map [The Northern Empty ▾]".
+    // A label in front of its box, the two kept together: "Map [The Northern Empty]".
     private float FieldWidth(string label, float box) => ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemSpacing.X + box * ImGuiHelpers.GlobalScale;
     private void FieldLabel(string label)
     {
@@ -175,7 +175,7 @@ public partial class MainWindow
         Flow(CheckWidth("Only builds sure to reach it"));
         ImGui.Checkbox("Only builds sure to reach it##finderSure", ref finderSureOnly);
         Hover("Leave out builds that reach the goals only by the lower of XIVStats' and Pepper's figures.");
-        Flow(ImGui.CalcTextSize("Parts you own  Choose one of your subs… ▾  Whole fleet").X + 40 * scale);
+        Flow(ImGui.CalcTextSize("Parts you own  Choose one of your subs…  Whole fleet").X + 60 * scale);
         FieldLabel("Parts you own");
         SubPicker("finder", finderFor, s => finderFor = (s.Cid, s.SubName));
         ImGui.SameLine();
