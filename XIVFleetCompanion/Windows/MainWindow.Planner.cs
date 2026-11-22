@@ -46,6 +46,12 @@ public partial class MainWindow
     private Dictionary<int, string> plannerNotes = new();
     private Func<int, double> plannerPrice = _ => 0; // the price each used for the plan (market or vendor)
 
+    // A note under a tier, retrieval or double dip, wrapped inside its column instead of cut off at its edge.
+    private static void PlannerCellNote(Vector4 color, string text)
+    {
+        using (ImRaii.PushColor(ImGuiCol.Text, color)) Ui.Wrapped(text);
+    }
+
     // How often an item comes, as a chance per voyage in words (as the app's plannerOften).
     private static string PlannerOften(double chance)
     {
@@ -471,22 +477,22 @@ public partial class MainWindow
             if (sp.Result == null) { Colored(Dim, "No XIVStats data for this sector yet."); return; }
             var r = sp.Result;
             PlannerPill(r.TierSure, $"Tier {r.Tier}");
-            if (r.Tier < 3) Colored(Dim, $"{PlannerN(r.Need.T3)} more surveillance for T3");
-            else if (r.TierSure == "maybe") Colored(Amber, $"{PlannerN(r.Need.T3)} more to be sure");
+            if (r.Tier < 3) PlannerCellNote(Dim, $"{PlannerN(r.Need.T3)} more surveillance for T3");
+            else if (r.TierSure == "maybe") PlannerCellNote(Amber, $"{PlannerN(r.Need.T3)} more to be sure");
         }, sp => sp.Result?.Tier ?? -1, sp => sp.Result == null),
         new("retrieval", "Retrieval", sp =>
         {
             if (PlannerNoData(sp)) return;
             var r = sp.Result!;
             PlannerPill(r.Retrieval == "optimal" ? r.RetrievalSure : r.Retrieval == "normal" ? "maybe" : "no", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(r.Retrieval));
-            if (r.Retrieval != "optimal" || r.RetrievalSure == "maybe") Colored(Dim, $"{PlannerN(r.Need.Optimal)} more retrieval for optimal");
+            if (r.Retrieval != "optimal" || r.RetrievalSure == "maybe") PlannerCellNote(Dim, $"{PlannerN(r.Need.Optimal)} more retrieval for optimal");
         }, sp => sp.Result == null ? -1 : Array.IndexOf(new[] { "poor", "normal", "optimal" }, sp.Result.Retrieval), sp => sp.Result == null),
         new("doubleDip", "Double dip", sp =>
         {
             if (PlannerNoData(sp)) return;
             var r = sp.Result!;
             PlannerPill(r.DoubleDip, r.DoubleDip == "yes" ? "Yes" : r.DoubleDip == "maybe" ? "Maybe" : "No");
-            if (r.DoubleDip != "yes") Colored(Dim, $"{PlannerN(r.Need.Favor)} more favor");
+            if (r.DoubleDip != "yes") PlannerCellNote(Dim, $"{PlannerN(r.Need.Favor)} more favor");
         }, sp => sp.Result == null ? -1 : Array.IndexOf(new[] { "no", "maybe", "yes" }, sp.Result.DoubleDip), sp => sp.Result == null),
         new("tiers", "T2 / T3 at", sp => { if (!PlannerNoData(sp)) TableCells.Right($"{PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 0))} / {PlannerRange(SubCalculator.BreakpointOf(sp.Data!, 1))}"); },
             sp => sp.Data == null ? -1 : SubCalculator.BreakpointOf(sp.Data, 1).High, sp => sp.Data == null),

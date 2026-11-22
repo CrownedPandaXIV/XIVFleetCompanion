@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends, Planner, BuildFinder }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends, Planner, BuildFinder, RouteFinder }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -131,6 +131,7 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Routes: DrawRoutes(); break;
             case Tab.Planner: DrawPlanner(); break;
             case Tab.BuildFinder: DrawBuildFinder(); break;
+            case Tab.RouteFinder: DrawRouteFinder(); break;
             case Tab.Supplies: DrawSupplies(); break;
             case Tab.Parts: DrawParts(); break;
             case Tab.Roster: DrawRoster(); break;
@@ -169,7 +170,7 @@ public partial class MainWindow : Window, IDisposable
     {
         [Tab.Summary] = "Summary", [Tab.Trends] = "Trends", [Tab.Subs] = "Subs", [Tab.Routes] = "Route Optimization", [Tab.Parts] = "Parts",
         [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Character Roster", [Tab.Retainers] = "Retainers",
-        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs", [Tab.Planner] = "Planner", [Tab.BuildFinder] = "Build Finder",
+        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs", [Tab.Planner] = "Planner", [Tab.RouteFinder] = "Route Finder", [Tab.BuildFinder] = "Build Finder",
     };
 
     // The sidebar's groups (the app's sidebar has the same).
@@ -265,6 +266,7 @@ public partial class MainWindow : Window, IDisposable
                     break;
                 case "Sub Calculator":
                     Entry(Tab.Planner, FontAwesomeIcon.Calculator, "Planner", folded, null, p.Dim, "Try a build and a route: stats, voyage, loot, gil and wear");
+                    Entry(Tab.RouteFinder, FontAwesomeIcon.Route, "Route Finder", folded, null, p.Dim, "The best routes for a build, and what your Free Company can explore next");
                     Entry(Tab.BuildFinder, FontAwesomeIcon.Search, "Build Finder", folded, null, p.Dim, "The builds that get what you want from chosen sectors");
                     break;
                 case "Characters":
@@ -862,6 +864,7 @@ public partial class MainWindow : Window, IDisposable
             if (r == null || r.TargetRoute.Length == 0) { Colored(Dim, "—"); return; }
             if (r.Suboptimal) { Colored(Amber, r.TargetRoute); Hover("Not on this route now: see Route Optimization."); }
             else Colored(Green, r.TargetRoute);
+            FightClubBlockedCell(sub.Cid, sub.SubName);
         }, sub => RouteOf(sub.Cid, sub.SubName)?.TargetRoute ?? ""),
         new("targetGilDay", "Target gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),

@@ -256,7 +256,8 @@ public partial class MainWindow
 
     // ---- Find an item ----
 
-    private sealed record FinderItem(SubSector Sector, uint ItemId, string Name, int Tier, double? Chance, int Low, int High, SubCalculator.Breakpoint? At);
+    private sealed record FinderItem(SubSector Sector, uint ItemId, string Name, int Tier, double? Chance, int Low, int High, SubCalculator.Breakpoint? At,
+        (int Low, int High)[] Amounts, SubCalculator.Breakpoint? NormalAt, SubCalculator.Breakpoint? OptimalAt);
     private List<FinderItem>? finderItems;
 
     // Every item every sector can drop, at its lowest tier there (read once).
@@ -273,10 +274,29 @@ public partial class MainWindow
                 var pool = d.Pools[tier];
                 var entry = pool.Loot.First(l => l.ItemId == id);
                 list.Add(new FinderItem(s, id, ItemName((int)id, false), tier, pool.Records > 0 ? (double)entry.Times / pool.Records : null,
-                    entry.PoorMin, entry.OptimalMax, tier >= 2 ? SubCalculator.BreakpointOf(d, tier == 3 ? 1 : 0) : null));
+                    entry.PoorMin, entry.OptimalMax, tier >= 2 ? SubCalculator.BreakpointOf(d, tier == 3 ? 1 : 0) : null,
+                    new[] { (entry.PoorMin, entry.PoorMax), (entry.NormalMin, entry.NormalMax), (entry.OptimalMin, entry.OptimalMax) },
+                    SubCalculator.BreakpointOf(d, 2), SubCalculator.BreakpointOf(d, 3)));
             }
         }
         return finderItems = list;
+    }
+
+    // How many each time at poor, normal and optimal retrieval ("1–5 · 5–10 · 10–15 each"), each saying on hover the
+    // retrieval it needs there (as the app's). The Planner shows the one a build reaches.
+    private void FinderAmounts(FinderItem x)
+    {
+        static string Span((int Low, int High) a) => a.Low == a.High ? $"{a.Low}" : $"{a.Low}–{a.High}";
+        var levels = new[] { ("Poor retrieval", (SubCalculator.Breakpoint?)null, Dim), ("Normal retrieval", x.NormalAt, softColor), ("Optimal retrieval", x.OptimalAt, Green) };
+        for (var i = 0; i < 3; i++)
+        {
+            if (i > 0) { ImGui.SameLine(0, 0); Colored(Dim, " · "); ImGui.SameLine(0, 0); }
+            var (label, at, color) = levels[i];
+            Colored(color, Span(x.Amounts[i]));
+            Hover($"{label}{(at is { } bp ? $", {PlannerRange(bp)} retrieval" : "")}: {Span(x.Amounts[i])} each time");
+        }
+        ImGui.SameLine(0, 0);
+        Colored(Dim, " each");
     }
 
     private static string FinderChance(double? c) => c is not double x ? "" : x < 0.01 ? "under 1%" : $"{Math.Round(x * 100)}%";
@@ -299,7 +319,7 @@ public partial class MainWindow
             {
                 Ui.Text(item.First().Name);
                 ImGui.SameLine();
-                Colored(Dim, $"{item.Count()} sector{(item.Count() == 1 ? "" : "s")}");
+                Colored(Dim, $"{item.Count()} sector{(item.Count() == 1 ? "" : "s")} · each time at poor · normal · optimal retrieval");
                 using var table = ImRaii.Table($"##finderFound{item.Key}", 8, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
                 if (!table) continue;
                 foreach (var x in item)
@@ -310,7 +330,7 @@ public partial class MainWindow
                     ImGui.TableNextColumn(); Colored(Dim, $"rank {x.Sector.RankReq}");
                     ImGui.TableNextColumn(); Tag($"T{x.Tier}", softColor);
                     ImGui.TableNextColumn(); Ui.Text(FinderChance(x.Chance)); Hover($"In {FinderChance(x.Chance)} of XIVStats' T{x.Tier} voyages there");
-                    ImGui.TableNextColumn(); Colored(Dim, x.Low == x.High ? $"{x.Low} each" : $"{x.Low}–{x.High} each");
+                    ImGui.TableNextColumn(); FinderAmounts(x);
                     ImGui.TableNextColumn(); Colored(Dim, x.At is { } at ? $"T{x.Tier} at {PlannerRange(at)}" : "any surveillance");
                     ImGui.TableNextColumn();
                     if (ImGui.SmallButton($"Add##finderFoundAdd{x.Sector.Id}_{x.ItemId}")) { FinderAddFromSearch(x.Sector, x.ItemId); finderSearch = ""; }

@@ -1310,6 +1310,84 @@ internal static partial class Program
         }
         Check(fCases >= 10 && fGood == fCases, $"Build Finder: the plugin's builds match the app's for {fGood} of {fCases} sets of goals{fWrong}");
 
+        // The Route Finder: an FC's reading, routes for builds on each map (the first 30 each), its unlocks, and Fight Club
+        // routes checked against the reading.
+        var rf = root.GetProperty("routeFinder");
+        var read = rf.GetProperty("read").EnumerateArray().ToDictionary(x => x.GetProperty("id").GetInt32(), x => (x.GetProperty("unlocked").GetBoolean(), x.GetProperty("explored").GetBoolean()));
+        var openerOf = rf.GetProperty("openerOf").EnumerateArray().ToDictionary(x => x[0].GetInt32(), x => x[1].GetInt32());
+        Check(openerOf.All(kv => (data.Find(kv.Key)?.UnlockedFrom ?? 0) == kv.Value), "Route Finder: what opens what, from the shipped data, as the app reads it");
+        var states = RouteFinder.SectorStates(byId.Keys, read, openerOf);
+        var unread = RouteFinder.SectorStates(byId.Keys, null, openerOf);
+        var opens = RouteFinder.OpensOf(openerOf);
+        int rCases = 0, rGood = 0;
+        var rWrong = "";
+        foreach (var c in rf.GetProperty("cases").EnumerateArray())
+        {
+            rCases++;
+            var letters = c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+            var rank = c.GetProperty("rank").GetInt32();
+            var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
+            var mapId = c.GetProperty("mapId").GetInt32();
+            var onMap = byId.Values.Where(x => x.Map == mapId).OrderBy(x => x.Id).ToList();
+            var st = c.GetProperty("read").GetBoolean() ? states : unread;
+            var allowed = RouteFinder.UsableSectors(onMap, rank, st, c.GetProperty("leaveOut").EnumerateArray().Select(x => x.GetInt32()).ToList());
+            var values = onMap.ToDictionary(x => x.Id, x => RouteFinder.SectorValue(x, data.Find(x.Id), stats!, Price));
+            var maxHours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
+            uint? itemId = c.GetProperty("itemId").ValueKind == System.Text.Json.JsonValueKind.Null ? null : c.GetProperty("itemId").GetUInt32();
+            var routes = RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, c.GetProperty("maxStops").GetInt32(), maxHours,
+                c.GetProperty("must").EnumerateArray().Select(x => x.GetInt32()).ToList(), values, c.GetProperty("rankBy").GetString()!, itemId, opens, st,
+                c.GetProperty("exploreFirst").GetBoolean());
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            Want(allowed.Select(x => x.Id).SequenceEqual(c.GetProperty("allowed").EnumerateArray().Select(x => x.GetInt32())), "the sectors it may use");
+            Want(routes.Count == c.GetProperty("total").GetInt32(), $"how many ({routes.Count})");
+            var theirs = c.GetProperty("first").EnumerateArray().ToList();
+            for (var i = 0; i < theirs.Count && i < routes.Count && wrong.Count == 0; i++)
+            {
+                var r = routes[i];
+                var e = theirs[i];
+                Want(r.Sectors.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())) && Near(r.Hours, e.GetProperty("hours"))
+                     && r.Range == e.GetProperty("range").GetInt32() && Near(r.Exp, e.GetProperty("exp")) && Near(r.ExpPerHour, e.GetProperty("expPerHour"))
+                     && Near(r.GilPerVoyage, e.GetProperty("gilPerVoyage")) && Near(r.GilPerDay, e.GetProperty("gilPerDay")) && Near(r.ItemPerDay, e.GetProperty("itemPerDay"))
+                     && r.Explores == e.GetProperty("explores").GetInt32() && r.Chances == e.GetProperty("chances").GetInt32(), $"route {i + 1} ({string.Join("-", r.Sectors)})");
+            }
+            if (wrong.Count == 0) rGood++;
+            else if (rWrong.Length == 0) rWrong = $" (first wrong: case {rCases}: {string.Join(", ", wrong)})";
+        }
+        Check(rCases >= 5 && rGood == rCases, $"Route Finder: the plugin's routes match the app's for {rGood} of {rCases} builds and maps{rWrong}");
+
+        foreach (var eu in rf.GetProperty("unlocks").EnumerateArray())
+        {
+            var early = eu.GetProperty("read").GetString() == "early";
+            var readHere = early ? read.ToDictionary(kv => kv.Key, kv => kv.Key >= 32 ? (false, false) : kv.Value) : read;
+            var u = RouteFinder.UnlocksOf(byId.Values.OrderBy(x => x.Id).ToList(),
+                eu.GetProperty("maps").EnumerateArray().Select(m => (m.GetProperty("id").GetInt32(), m.GetProperty("name").GetString()!)).ToList(),
+                RouteFinder.SectorStates(byId.Keys, readHere, openerOf), openerOf);
+            var nm = eu.GetProperty("nextMap");
+            Check(u.Maps.Select(m => $"{m.Id}:{m.Total}/{m.Explored}/{m.Discovered}/{m.Open}").SequenceEqual(eu.GetProperty("maps").EnumerateArray()
+                      .Select(m => $"{m.GetProperty("id").GetInt32()}:{m.GetProperty("total").GetInt32()}/{m.GetProperty("explored").GetInt32()}/{m.GetProperty("discovered").GetInt32()}/{m.GetProperty("open").GetBoolean()}"))
+                  && u.Sure.SequenceEqual(eu.GetProperty("sure").EnumerateArray().Select(x => x.GetInt32()))
+                  && u.Chance.Select(x => $"{x.Id}<{x.From}").SequenceEqual(eu.GetProperty("chance").EnumerateArray().Select(x => $"{x.GetProperty("id").GetInt32()}<{x.GetProperty("from").GetInt32()}"))
+                  && (nm.ValueKind == System.Text.Json.JsonValueKind.Null ? u.Next == null
+                      : u.Next != null && u.Next.Id == nm.GetProperty("id").GetInt32() && u.Next.First == nm.GetProperty("first").GetInt32()
+                        && u.Next.Steps.Select(x => $"{x.Id}:{x.How}").SequenceEqual(nm.GetProperty("steps").EnumerateArray().Select(x => $"{x.GetProperty("id").GetInt32()}:{x.GetProperty("how").GetString()}"))),
+                $"Route Finder: the unlocks match the app's{(early ? ", before the second map opened" : "")} (sure {string.Join(",", u.Sure)}; could open {u.Chance.Count}; next map: {(u.Next == null ? "none" : string.Join(" > ", u.Next.Steps.Select(x => $"{x.Id} {x.How}")))})");
+        }
+
+        var fc = rf.GetProperty("fightClub");
+        var fcRows = fc.GetProperty("rows").EnumerateArray().Select((x, i) => new FightClubRow(i + 1, x.GetProperty("route").GetString()!, x.GetProperty("hours").GetDouble(),
+            x.GetProperty("repair_times").GetString(), x.GetProperty("gil_sub_day").GetDouble(), x.GetProperty("rec_build_notes").GetString(), null, null, kitCost)).ToList();
+        var fcMaps = fc.GetProperty("maps").EnumerateArray().ToDictionary(m => m.GetProperty("id").GetInt32(),
+            m => m.GetProperty("letters").EnumerateArray().ToDictionary(x => x[0].GetString()!, x => x[1].GetInt32()));
+        var fcAll = fc.GetProperty("cases").EnumerateArray().Select(e =>
+        {
+            var mine = RouteFinder.CheckFightClub(fcRows, e.GetProperty("rank").GetInt32(), fcMaps, read);
+            string? S(string p) => e.GetProperty(p).ValueKind == System.Text.Json.JsonValueKind.Null ? null : e.GetProperty(p).GetString();
+            return (Ok: mine.Route == S("best") && mine.AltRoute == S("alt") && mine.Missing.SequenceEqual(e.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32())),
+                Text: $"{e.GetProperty("rank").GetInt32()}: {mine.Route} needs [{string.Join(",", mine.Missing)}] → {mine.AltRoute}");
+        }).ToList();
+        Check(fcAll.Count >= 4 && fcAll.All(x => x.Ok), $"Route Finder: Fight Club routes checked against the FC's sectors as the app does ({string.Join("; ", fcAll.Select(x => x.Text))})");
+
         // Parts you own (as the app's ownedParts): fitted, or spare in a bag, a retainer or the FC chest; for one character
         // only its own subs, bags and retainers and its Free Company's chest. Item numbers: bow, bridge, hull, stern from each base.
         var partsIn = new PartsInputs(
@@ -2011,6 +2089,13 @@ internal static partial class Program
         var sectorsWanted = $"{bigFc} 1 True True -300 18014498578000001 | {bigFc} 2 True True -300 18014498578000001 | {bigFc} 3 True False -300 18014498578000001";
         Check(sectorsSaved.All(s => s) && sectorsStored.All(s => s == sectorsWanted),
             $"file: the FC's sub sectors as last read, an older reading not undoing a newer one, on both: {string.Join(" / ", sectorsStored)}");
+        var sectorsRead = new List<string>();
+        await Each(async c =>
+        {
+            var fc = (await FleetReader.ReadSubSectors(c)).FirstOrDefault(f => f.FcId == bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            sectorsRead.Add(fc == null ? "none" : $"{string.Join(",", fc.Sectors.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value.Unlocked}/{x.Value.Explored}"))} at {(fc.ReadAt is double at ? Math.Round(at / 1000 - nowUnix) : double.NaN)}");
+        });
+        Check(sectorsRead.All(x => x == "1:True/True,2:True/True,3:True/False at -300"), $"file: the Route Finder reads them back, on both ({string.Join(" / ", sectorsRead)})");
 
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();

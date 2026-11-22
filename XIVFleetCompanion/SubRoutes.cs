@@ -232,13 +232,13 @@ namespace XIVFleetCompanion
             return string.Join("-", tokens);
         }
 
-        private sealed record Option(FightClubRow Row, int Rank, string[] Parts, double Net);
+        internal sealed record Option(FightClubRow Row, int Rank, string[] Parts, double Net);
 
-        private static List<Option> Options(IEnumerable<FightClubRow> rows) => rows
+        internal static List<Option> Options(IEnumerable<FightClubRow> rows) => rows
             .Select(r => PartsPlanner.ParseRankBuild(r.RecBuild) is { } b ? new Option(r, b.Rank, b.Parts, PartsPlanner.NetGilPerDay(r.AsParts, b.Parts)) : null)
             .OfType<Option>().ToList();
 
-        private static Option? BestOf(List<Option> options, int rank)
+        internal static Option? BestOf(List<Option> options, int rank)
         {
             if (rank < 85) return null;
             Option? best = null;
