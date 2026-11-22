@@ -31,8 +31,9 @@ namespace XIVFleetCompanion
         /// <summary>One item a sector can give: on average how many a voyage, the chance of it at all, and how many each time.</summary>
         public sealed record LootLine(uint ItemId, int Tier, double Chance, int Low, int High, double PerVoyage);
 
-        /// <summary>One item over the route: the sectors giving it, how many a voyage and the gil.</summary>
-        public sealed record RouteLoot(uint ItemId, int Tier, List<string> Sectors, double PerVoyage, int Low, int High, double Gil);
+        /// <summary>One item over the route: the sectors giving it, how many a voyage, the gil, and the chance of getting it
+        /// at all on a voyage (Chance, from any of its sectors).</summary>
+        public sealed record RouteLoot(uint ItemId, int Tier, List<string> Sectors, double PerVoyage, int Low, int High, double Gil, double Chance = 0);
 
         /// <summary>A part's wear on one voyage: condition lost, voyages it lasts, repair materials a voyage.</summary>
         public sealed record Wear(int Slot, double Lost, int? VoyagesLasting, double KitsPerVoyage);
@@ -183,18 +184,19 @@ namespace XIVFleetCompanion
 
             // Loot added up over the route, item by item, in the order first met.
             var order = new List<uint>();
-            var byItem = new Dictionary<uint, (int Tier, List<string> Sectors, double PerVoyage, int Low, int High)>();
+            // Miss: the chance of not getting it from any sector so far (each sector's chance taken as at most 1).
+            var byItem = new Dictionary<uint, (int Tier, List<string> Sectors, double PerVoyage, int Low, int High, double Miss)>();
             foreach (var p in perSector)
             {
                 foreach (var l in p.Loot ?? new List<LootLine>())
                 {
-                    if (!byItem.TryGetValue(l.ItemId, out var was)) { was = (l.Tier, new List<string>(), 0, l.Low, l.High); order.Add(l.ItemId); }
+                    if (!byItem.TryGetValue(l.ItemId, out var was)) { was = (l.Tier, new List<string>(), 0, l.Low, l.High, 1); order.Add(l.ItemId); }
                     if (l.PerVoyage > 0 && !was.Sectors.Contains(p.Sector.Location)) was.Sectors.Add(p.Sector.Location);
-                    was = (Math.Min(was.Tier, l.Tier), was.Sectors, was.PerVoyage + l.PerVoyage, Math.Min(was.Low, l.Low), Math.Max(was.High, l.High));
+                    was = (Math.Min(was.Tier, l.Tier), was.Sectors, was.PerVoyage + l.PerVoyage, Math.Min(was.Low, l.Low), Math.Max(was.High, l.High), was.Miss * (1 - Math.Min(1, l.Chance)));
                     byItem[l.ItemId] = was;
                 }
             }
-            var loot = order.Select(id => { var x = byItem[id]; return new RouteLoot(id, x.Tier, x.Sectors, x.PerVoyage, x.Low, x.High, x.PerVoyage * price(id)); })
+            var loot = order.Select(id => { var x = byItem[id]; return new RouteLoot(id, x.Tier, x.Sectors, x.PerVoyage, x.Low, x.High, x.PerVoyage * price(id), 1 - x.Miss); })
                 .OrderByDescending(l => l.Gil).ThenByDescending(l => l.PerVoyage).ToList();
             var gilPerVoyage = loot.Sum(l => l.Gil);
 

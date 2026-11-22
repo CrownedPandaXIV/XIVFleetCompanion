@@ -44,6 +44,16 @@ public partial class MainWindow
     private volatile PlannerMarketAnswer? plannerMarket;
     private Task? plannerMarketWork;
     private Dictionary<int, string> plannerNotes = new();
+    private Func<int, double> plannerPrice = _ => 0; // the price each used for the plan (market or vendor)
+
+    // How often an item comes, as a chance per voyage in words (as the app's plannerOften).
+    private static string PlannerOften(double chance)
+    {
+        if (!(chance > 0)) return "—";
+        if (chance >= 0.95) return "nearly every voyage";
+        if (chance >= 0.45) return $"about {Math.Floor(chance * 10 + 0.5):0} in 10 voyages";
+        return $"about 1 in {Math.Floor(1 / chance + 0.5).ToString("N0", CultureInfo.CurrentCulture)} voyages";
+    }
     private static readonly (string Key, string Label)[] PlannerScopes = { ("world", "World"), ("dc", "Data center"), ("region", "Region") };
 
     // The game's sectors for the Planner: sectors by id (not starting points; named), starting points, maps with sectors.
@@ -328,6 +338,7 @@ public partial class MainWindow
             price = id => prices.TryGetValue((int)id, out var p) ? p : ListingVendor((int)id);
         }
         else plannerNotes = new();
+        plannerPrice = id => price((uint)id);
 
         // The plan, worked out again only when the build, the route, the prices or the repair kit price change.
         var kitCost = reader.Credits.Data?.RepairKitCost ?? 0;
@@ -506,13 +517,26 @@ public partial class MainWindow
         new("tier", "Tier", l => PlannerLootText(l, $"T{l.Tier}"), l => l.Tier),
         new("sectors", "Sectors", l => PlannerLootText(l, l.Sectors.Count > 0 ? string.Join(", ", l.Sectors) : "—"), l => string.Join(",", l.Sectors)),
         new("amount", "Amount each time", l => PlannerLootText(l, l.Low == l.High ? $"{l.Low}" : $"{l.Low}–{l.High}", true), l => l.High),
+        // How often it comes at all, in words ("about 1 in 15 voyages"): a rare item's gil per voyage is an average.
+        new("often", "How often", l =>
+        {
+            PlannerLootText(l, l.PerVoyage > 0 ? PlannerOften(l.Chance) : "—");
+            if (l.PerVoyage > 0) Hover($"{PlannerN(l.Chance * 100, 1)}% of voyages");
+        }, l => l.Chance),
         new("perVoyage", "Per voyage", l => PlannerLootText(l, l.PerVoyage > 0 ? PlannerN(l.PerVoyage, 2) : "—", true), l => l.PerVoyage),
-        // Amber where the market price was adjusted (a lone low listing skipped, or recent sales used): the hover says why.
-        new("gil", "Gil per voyage", l =>
+        // One of it at the price used (market or vendor): something to aim for. Amber where the market price was adjusted
+        // (a lone low listing skipped, or recent sales used): the hover says why.
+        new("price", "Price each", l =>
         {
             var note = plannerNotes.GetValueOrDefault((int)l.ItemId);
-            PlannerLootText(l, l.Gil > 0 ? PlannerN(l.Gil) : "—", true, note != null ? Amber : Palette.Gil);
+            var each = l.PerVoyage > 0 ? l.Gil / l.PerVoyage : plannerPrice((int)l.ItemId);
+            PlannerLootText(l, each > 0 ? PlannerN(each) : "—", true, note != null ? Amber : Palette.Gil);
             if (note != null) Hover(note);
+        }, l => plannerPrice((int)l.ItemId)),
+        new("gil", "Gil per voyage", l =>
+        {
+            PlannerLootText(l, l.Gil > 0 ? PlannerN(l.Gil) : "—", true, Palette.Gil);
+            Hover("On average: how many a voyage × the price each");
         }, l => l.Gil),
     });
 

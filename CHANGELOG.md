@@ -27,6 +27,9 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   prices, with a World / Data center / Region switch (Data center to start) and a list of every world, data center or
   region to price on, since loot can be moved to a character elsewhere and sold there. It starts on the chosen sub's own
   (else that of the world most of your subs are on).
+- **The Planner's loot says how often and what one is worth.** A "How often" column ("about 1 in 15 voyages") makes
+  clear that a rare item's gil per voyage is an average, and "Price each" shows one of it at the price used (market or
+  vendor; amber with the reason when the market price was adjusted): something to aim for.
 - **Sector names without the doubled letter:** "A: South Isle of Zozonan" rather than "A: South Isle of Zozonan (A)".
 - **The sub picker's arrow** shows as an arrow, not "=": it's a dropdown like the others now.
 - **Sub Calculator → Build Finder (new page).** Pick up to five sectors and what you want from each: a loot tier (T2

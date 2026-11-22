@@ -1201,6 +1201,7 @@ internal static partial class Program
                     var l = p.Loot[i];
                     return l.ItemId == e.GetProperty("itemId").GetUInt32() && l.Tier == e.GetProperty("tier").GetInt32() && l.Low == e.GetProperty("low").GetInt32()
                         && l.High == e.GetProperty("high").GetInt32() && Near(l.PerVoyage, e.GetProperty("perVoyage")) && Near(l.Gil, e.GetProperty("gil"))
+                        && Near(l.Chance, e.GetProperty("chance"))
                         && l.Sectors.SequenceEqual(e.GetProperty("sectors").EnumerateArray().Select(x => x.GetString()!));
                 }).All(x => x), "loot");
             }
