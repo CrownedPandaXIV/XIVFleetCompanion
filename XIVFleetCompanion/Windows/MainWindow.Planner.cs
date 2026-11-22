@@ -33,8 +33,13 @@ public partial class MainWindow
     private SubStats? plannerStats;
     // Live Market Prices: the scope and the world to price on (the chosen sub's, else this one, else the most common).
     private string plannerPriceScope = "dc";
-    private string? plannerPriceWorld;
-    // Set from the background as one object, so the page never sees half of an answer.
+    // A world, data center or region picked for each scope (loot can be moved to a character elsewhere and sold there);
+    // none picked: the chosen sub's own (else the most common world's). Every place Universalis knows, read once.
+    private readonly Dictionary<string, string> plannerPricePicked = new();
+    private (long, string)? plannerPricePickedFor;
+    private volatile List<(string Name, string Dc, string Region)>? plannerPlaces;
+    private Task? plannerPlacesWork;
+    // Set from the background as one object, so the page never sees half of an answer. Place: "scope|name".
     private sealed record PlannerMarketAnswer(string World, HashSet<int> Ids, WorldMarket? Market, string? Error);
     private volatile PlannerMarketAnswer? plannerMarket;
     private Task? plannerMarketWork;
@@ -281,26 +286,38 @@ public partial class MainWindow
             }
         }
 
-        // Market prices (Live Market Prices on): the route's loot asked of Universalis in the background for the world.
+        // Market prices (Live Market Prices on): the route's loot asked of Universalis in the background for the place
+        // picked (a world, data center or region), the chosen sub's own to start with.
         var live = reader.Market.Data?.Settings.LivePrices == true;
         var chosenSub = plannerChosen is { } pc ? reader.Subs.Data?.FirstOrDefault(x => x.Cid == pc.Cid && x.SubName == pc.SubName) : null;
-        var worlds = (reader.Subs.Data ?? new List<SubRow>()).Where(x => x.World.Length > 0).GroupBy(x => x.World)
-            .OrderByDescending(x => x.Count()).ThenBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Key).ToList();
-        var priceWorld = live ? (chosenSub?.World is { Length: > 0 } cw ? cw : plannerPriceWorld ?? worlds.FirstOrDefault()) : null;
+        if (plannerPricePickedFor != plannerChosen) { plannerPricePicked.Clear(); plannerPricePickedFor = plannerChosen; }
+        if (live && plannerPlaces == null && plannerPlacesWork == null)
+            plannerPlacesWork = Task.Run(async () =>
+            {
+                try { plannerPlaces = (await reader.MarketPlacesAsync()).Values.OrderBy(p => p.Name, StringComparer.Ordinal).ToList(); }
+                catch (Exception ex) { Plugin.Log.Warning(ex, "Planner: Universalis's worlds couldn't be read"); plannerPlaces = new(); }
+            });
+        var homeWorld = chosenSub?.World is { Length: > 0 } cw ? cw : (reader.Subs.Data ?? new List<SubRow>()).Where(x => x.World.Length > 0).GroupBy(x => x.World)
+            .OrderByDescending(x => x.Count()).ThenBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Key).FirstOrDefault();
+        var home = plannerPlaces?.FirstOrDefault(p => string.Equals(p.Name, homeWorld, StringComparison.OrdinalIgnoreCase));
+        string? HomeIn(string scope) => scope == "world" ? (home?.Name is { Length: > 0 } hn ? hn : homeWorld) : scope == "dc" ? home?.Dc : home?.Region;
+        var place = live ? (plannerPricePicked.TryGetValue(plannerPriceScope, out var picked) ? picked : HomeIn(plannerPriceScope)) : null;
+        var placeKey = place == null ? null : $"{plannerPriceScope}|{place}";
         var lootIds = plannerRoute.Select(id => data.Find(id)).OfType<SubCalculatorData.Sector>()
             .SelectMany(d => d.Pools.Values.SelectMany(p => p.Loot.Select(l => (int)l.ItemId))).ToHashSet();
         if (plannerMarketWork is { IsCompleted: true }) plannerMarketWork = null;
-        if (priceWorld != null && lootIds.Count > 0 && plannerMarketWork == null
-            && !(plannerMarket is { } had && had.World == priceWorld && (had.Error != null || lootIds.IsSubsetOf(had.Ids))))
+        if (placeKey != null && lootIds.Count > 0 && plannerMarketWork == null
+            && !(plannerMarket is { } had && had.World == placeKey && (had.Error != null || lootIds.IsSubsetOf(had.Ids))))
         {
-            var (world, ids) = (priceWorld, lootIds.Union(plannerMarket is { } was && was.World == priceWorld ? was.Ids : Enumerable.Empty<int>()).ToHashSet());
+            var (key0, where, scope0, ids) = (placeKey, place!, plannerPriceScope,
+                lootIds.Union(plannerMarket is { } was && was.World == placeKey ? was.Ids : Enumerable.Empty<int>()).ToHashSet());
             plannerMarketWork = Task.Run(async () =>
             {
-                try { plannerMarket = new PlannerMarketAnswer(world, ids, await reader.MarketOnAsync(world, ids), null); }
-                catch (Exception ex) { plannerMarket = new PlannerMarketAnswer(world, ids, null, ex.Message); }
+                try { plannerMarket = new PlannerMarketAnswer(key0, ids, await reader.MarketInAsync(where, scope0, ids), null); }
+                catch (Exception ex) { plannerMarket = new PlannerMarketAnswer(key0, ids, null, ex.Message); }
             });
         }
-        var market = plannerMarket is { } pm && pm.World == priceWorld && pm.Market != null ? pm.Market : null;
+        var market = plannerMarket is { } pm && pm.World == placeKey && pm.Market != null ? pm.Market : null;
         Func<uint, double> price = id => ListingVendor((int)id);
         if (market != null)
         {
@@ -314,7 +331,7 @@ public partial class MainWindow
 
         // The plan, worked out again only when the build, the route, the prices or the repair kit price change.
         var kitCost = reader.Credits.Data?.RepairKitCost ?? 0;
-        var key = $"{plannerRank}|{string.Join(",", plannerParts)}|{string.Join(",", plannerRoute)}|{kitCost}|{priceWorld}|{plannerPriceScope}|{(market == null ? 0 : market.GetHashCode())}";
+        var key = $"{plannerRank}|{string.Join(",", plannerParts)}|{string.Join(",", plannerRoute)}|{kitCost}|{placeKey}|{(market == null ? 0 : market.GetHashCode())}";
         if (key != plannerPlanKey)
         {
             plannerPlanKey = key;
@@ -347,17 +364,24 @@ public partial class MainWindow
                 using (ImRaii.PushColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive), plannerPriceScope == k))
                     if (ImGui.SmallButton($"{label}##plannerScope{k}")) plannerPriceScope = k;
             }
+            // Every world, data center or region to pick from, the sub's own first.
             ImGui.SameLine();
-            Colored(Dim, "of");
-            ImGui.SameLine();
-            if (chosenSub?.World is { Length: > 0 } subWorld) { Ui.Text(subWorld); ImGui.SameLine(); Colored(Dim, $"({chosenSub.SubName}'s world)"); }
-            else
+            var own = HomeIn(plannerPriceScope);
+            var whose = chosenSub != null ? $"{chosenSub.SubName}'s" : "your most common";
+            var noun = PlannerScopes.First(x => x.Key == plannerPriceScope).Label.ToLowerInvariant();
+            string Shown(string name) => plannerPriceScope == "region" ? Universalis.RegionLabel(name) : name;
+            var options = (plannerPlaces ?? new()).Select(p => plannerPriceScope == "world" ? (p.Name, $"{p.Name} ({p.Dc})") : plannerPriceScope == "dc" ? (p.Dc, p.Dc) : (p.Region, Universalis.RegionLabel(p.Region)))
+                .Where(o => !string.IsNullOrEmpty(o.Item1)).Distinct().OrderBy(o => o.Item2, StringComparer.Ordinal).ToList();
+            ImGui.SetNextItemWidth(220 * scale);
+            using (var combo = ImRaii.Combo("##plannerPricePlace", place == null ? "—" : place == own ? $"{Shown(place)} ({whose} {noun})" : Shown(place), ImGuiComboFlags.HeightLarge))
             {
-                ImGui.SetNextItemWidth(150 * scale);
-                using var combo = ImRaii.Combo("##plannerPriceWorld", priceWorld ?? "—");
                 if (combo)
-                    foreach (var w in worlds)
-                        if (ImGui.Selectable(w, w == priceWorld)) plannerPriceWorld = w;
+                {
+                    if (own != null && ImGui.Selectable($"{Shown(own)} ({whose} {noun})##own", place == own)) plannerPricePicked.Remove(plannerPriceScope);
+                    foreach (var (name, label) in options.Where(o => o.Item1 != own))
+                        if (ImGui.Selectable($"{label}##place{name}", place == name)) plannerPricePicked[plannerPriceScope] = name;
+                    if (options.Count == 0) Colored(Dim, plannerPlaces == null ? "Reading Universalis's list..." : "Universalis's list couldn't be read.");
+                }
             }
             if (plannerNotes.Count > 0)
             {
@@ -365,7 +389,7 @@ public partial class MainWindow
                 Colored(Amber, $"{plannerNotes.Count} price{(plannerNotes.Count == 1 ? "" : "s")} adjusted for odd listings");
                 Hover("A lone listing far below the others was skipped, or the last week's sales were used: hover a price for why.");
             }
-            if (plannerMarket is { Error: { } err } failed && failed.World == priceWorld) Colored(Amber, $"Universalis: {err} Vendor prices are shown.");
+            if (plannerMarket is { Error: { } err } failed && failed.World == placeKey) Colored(Amber, $"Universalis: {err} Vendor prices are shown.");
             else if (market?.Stale is { } stale) Colored(Amber, $"Some prices are from {stale.Since.ToLocalTime():t}: {stale.Problem}");
             else if (market == null && plannerMarketWork != null) Colored(Dim, "Getting market prices from Universalis...");
         }
@@ -380,8 +404,8 @@ public partial class MainWindow
                 BoxTitle("Gil per voyage", PlannerN(plan.GilPerVoyage), Palette.Gil);
                 if (market != null)
                 {
-                    var place = plannerPriceScope == "world" ? market.Names.World : plannerPriceScope == "dc" ? market.Names.Dc : market.Names.Region;
-                    Colored(Dim, $"expected, at market prices ({PlannerScopes.First(x => x.Key == plannerPriceScope).Label}{(place != null ? $": {place}" : "")})");
+                    var where = plannerPriceScope == "world" ? market.Names.World : plannerPriceScope == "dc" ? market.Names.Dc : market.Names.Region;
+                    Colored(Dim, $"expected, at market prices ({PlannerScopes.First(x => x.Key == plannerPriceScope).Label}{(!string.IsNullOrEmpty(where) ? $": {where}" : "")})");
                     Hover("Items not on the market board at what a vendor pays; salvage at the Salvage page's prices.");
                 }
                 else

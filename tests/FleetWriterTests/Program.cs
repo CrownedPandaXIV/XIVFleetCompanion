@@ -224,6 +224,20 @@ internal static partial class Program
             var firstListing = Enumerable.Range(0, Math.Max(compared.Count, app.Count)).FirstOrDefault(k => k >= compared.Count || k >= app.Count || compared[k] != app[k], -1);
             var ventureMine = ventures.Select(v => $"{v.Cid} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(MarketMath.VentureGil(v.Items, market.GetValueOrDefault(v.World), s, vendor, exclude), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
             var ventureApp = expected.GetProperty("ventures").EnumerateArray().Select(v => $"{v.GetProperty("cid").GetString()} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(v.GetProperty("gil").GetProperty(s).GetDouble(), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
+            // One data center asked for by name (the Planner's "Market prices on"): the same prices and notes as that data
+            // center in a world's market.
+            var withDc = market.Values.FirstOrDefault(m => m.Names.Dc != null);
+            var placeSame = true;
+            if (withDc != null)
+            {
+                var ids = withDc.Listings["dc"].Keys.ToList();
+                var alone = await universalis.PlaceAsync(withDc.Names.Dc!, "dc", ids);
+                var (n1, n2) = (new Dictionary<int, string>(), new Dictionary<int, string>());
+                var p1 = Universalis.ScopePrices(withDc, "dc", vendor, exclude, notes: n1);
+                var p2 = Universalis.ScopePrices(alone, "dc", vendor, exclude, notes: n2);
+                placeSame = p1.OrderBy(kv => kv.Key).SequenceEqual(p2.OrderBy(kv => kv.Key)) && n1.OrderBy(kv => kv.Key).SequenceEqual(n2.OrderBy(kv => kv.Key)) && alone.Names.Dc == withDc.Names.Dc;
+            }
+            Check(placeSame, $"market: a data center asked for by name prices the same as in a world's market ({c.GetProperty("name").GetString()})");
             var asked = handler.Asked;
             await universalis.MarketFor(listings.Select(l => (l.World, l.ItemId)));
             Check(names.SequenceEqual(mineNames) && firstListing < 0 && ventureMine.SequenceEqual(ventureApp) && handler.Asked == asked,

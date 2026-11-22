@@ -184,10 +184,12 @@ namespace XIVFleetCompanion
         /// <summary>The shared settings, read with the parts (every 5 minutes) and after an edit.</summary>
         public FleetRead<FleetSettings> Settings { get; private set; } = new(null, null, null);
         public bool Busy => busy;
-        /// <summary>One world's market for these items (its world, data center and region), for the Planner: asked of
-        /// Universalis (answers kept 30 minutes); null when it has none for that world.</summary>
-        public async Task<WorldMarket?> MarketOnAsync(string world, IEnumerable<int> ids) =>
-            (await universalis.MarketFor(ids.Select(id => ((string?)world, id)))).GetValueOrDefault(world);
+        /// <summary>One world, data center or region's market for these items, for the Planner: asked of Universalis
+        /// (answers kept 30 minutes).</summary>
+        public Task<WorldMarket> MarketInAsync(string place, string scope, IEnumerable<int> ids) => universalis.PlaceAsync(place, scope, ids.ToList());
+
+        /// <summary>Every world Universalis knows (lowercase name -> its name, data center and region), else the built-in list.</summary>
+        public Task<Dictionary<string, (string Name, string Dc, string Region)>> MarketPlacesAsync() => universalis.PlacesAsync();
 
         private volatile bool askingUniversalis;
         /// <summary>True while live prices are being asked of Universalis (apart from the database reads).</summary>

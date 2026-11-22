@@ -348,6 +348,23 @@ namespace XIVFleetCompanion
         /// <summary>The worlds Universalis knows (lowercase name -> its name, data center and region), else the built-in list.</summary>
         public Task<Dictionary<string, (string Name, string Dc, string Region)>> PlacesAsync() => Places();
 
+        /// <summary>A region's short name as the pages show it ("North-America" -> "NA").</summary>
+        public static string RegionLabel(string region) => RegionLabels.TryGetValue(region, out var label) ? label : region;
+
+        /// <summary>One world, data center or region by name (scope: which it is) as a market of its own, listings and the
+        /// last week's sales, for the Planner's "Market prices on" (loot can be moved to a character elsewhere and sold
+        /// there). Its Names.World is the world's name for a world (its listings don't name one), else empty.</summary>
+        public async Task<WorldMarket> PlaceAsync(string place, string scope, List<int> ids)
+        {
+            var wanted = ids.Where(id => id > 0).Distinct().ToList();
+            using var gate = new SemaphoreSlim(Parallel);
+            var (listings, stale, sales) = wanted.Count > 0 ? await ListingsFor(place, wanted, gate)
+                : (new Dictionary<int, List<MarketListing>>(), null, new Dictionary<int, List<MarketSale>>());
+            return new WorldMarket(new MarketPlaceNames(scope == "world" ? place : "", scope == "dc" ? place : null, scope == "region" ? RegionLabel(place) : null),
+                new Dictionary<string, Dictionary<int, List<MarketListing>>> { [scope] = listings }, stale,
+                new Dictionary<string, Dictionary<int, List<MarketSale>>> { [scope] = sales });
+        }
+
         /// <summary>The listings of these items in one world, data center or region (scope: its name), from what's kept or
         /// Universalis; the problem and since when, when some are from an earlier check because it didn't answer.</summary>
         public async Task<(Dictionary<int, List<MarketListing>> Listings, (string Problem, DateTime Since)? Stale)> ListingsInAsync(string scope, List<int> ids)
