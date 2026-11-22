@@ -29,6 +29,10 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
     "Only builds sure to reach it";
   - out of range builds listed last, saying how much more range they need and the rank they're in range from;
   - Sort by lowest rank, fastest voyage, fewest parts still needed or most range to spare; Open in Planner on each.
+  Laid out in three parts: what you want (a card per sector), the options, and the builds: what they need as
+  boxes (amber where the sources differ), the counts on one line, and the list grouped by rank while sorted by lowest
+  rank. Each build's parts are tags, green for one you own and amber for one to get; the stats the goals ask for show
+  what they have to spare, the rest are greyed.
   The plugin's builds are checked against the app's. `/xivfleet buildfinder` opens it.
 - **Choosing one of your subs on the Planner:** a panel grouped by account, then character (with world and Free
   Company), each group folding away, with a search for character, world, account, Free Company or sub name. Each sub

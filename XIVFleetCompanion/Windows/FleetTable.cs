@@ -71,6 +71,16 @@ public sealed class FleetTable<T>
     /// <summary>Whether a column sorts the table (as of the last frame drawn).</summary>
     public bool Sorted => sorted;
 
+    /// <summary>Bands in the table's own order (the Build Finder's "Rank 144 · 312 builds"): while it isn't sorted by a
+    /// column, a heading wherever a row's band differs from the row above. Null: none.</summary>
+    public Func<T, string>? Band { get; set; }
+
+    /// <summary>Columns left out for now, by key (the Build Finder's Rank while its rows are banded by rank); they stay
+    /// chosen in the Columns list. Null: none.</summary>
+    public Func<string, bool>? LeaveOut { get; set; }
+
+    private List<FleetColumn<T>> Drawn() => LeaveOut == null ? Shown() : Shown().Where(c => !LeaveOut(c.Key)).ToList();
+
     /// <summary>While a row is drawn: whether it belongs with the row above (the same run key, the table not sorted).</summary>
     public bool SameAsAbove { get; private set; }
 
@@ -155,7 +165,7 @@ public sealed class FleetTable<T>
     /// its own row), each cell as it reads.</summary>
     public List<List<string>> Export()
     {
-        var shown = Shown();
+        var shown = Drawn();
         var result = new List<List<string>> { shown.Select(c => TableCapture.Visible(c.Label)).ToList() };
         for (var i = 0; i < lastLines.Count; i++)
         {
@@ -246,7 +256,7 @@ public sealed class FleetTable<T>
     /// the space left and scrolls itself.</summary>
     public void Draw(IReadOnlyList<T> rows, Action<T>? afterRow = null, bool fitRows = false)
     {
-        var shown = Shown();
+        var shown = Drawn();
         if (shown.Count == 0) return;
         // A table of its own for each choice of columns, so ImGui's saved widths always fit the columns shown ("|w":
         // widths saved before columns kept their own width were shares of the window, which don't carry over).
@@ -291,6 +301,18 @@ public sealed class FleetTable<T>
                 if (groupNote?.Invoke(groupRows) is { Length: > 0 } note) band += $" · {note}";
                 lines.Add(new Line(default!, band));
                 lines.AddRange(groupRows.Select(r => new Line(r, null)));
+            }
+        }
+        else if (Band != null)
+        {
+            lines = new List<Line>();
+            string? was = null;
+            foreach (var r in rows)
+            {
+                var band = Band(r);
+                if (band != was) lines.Add(new Line(default!, band));
+                was = band;
+                lines.Add(new Line(r, null));
             }
         }
         else
