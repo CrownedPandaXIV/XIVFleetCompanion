@@ -229,7 +229,7 @@ public partial class MainWindow
         Flow(ImGui.CalcTextSize("D not yet   E must be in the route").X + 40 * scale);
         Tag("D", Dim); ImGui.SameLine(); Colored(Dim, "not yet");
         ImGui.SameLine(0, 14 * scale); Tag("E", headingColor ?? softColor); ImGui.SameLine(); Colored(Dim, "must be in the route (click a sector; again to leave it out)");
-        RfTiles(onMap, result?.States ?? new());
+        RfTiles(onMap, result?.States ?? new(), g, RfOpeners(g, data));
 
         // What's next on this map, and new sectors first.
         var states = result?.States ?? new();
@@ -237,16 +237,9 @@ public partial class MainWindow
         var chance = onMap.Where(s => states.GetValueOrDefault(s.Id) == "chance").ToList();
         if (discovered.Count > 0 || chance.Count > 0)
         {
+            // What's sure next; the tiles say what opens from where.
             ImGui.Spacing();
-            var openers = RfOpeners(g, data);
             if (discovered.Count > 0) { Colored(Amber, string.Join(", ", discovered.Select(s => s.Location))); ImGui.SameLine(); Ui.Text("can be explored next."); }
-            if (chance.Count > 0)
-            {
-                if (discovered.Count > 0) ImGui.SameLine(0, 14 * scale);
-                Colored(Blue, string.Join(", ", chance.Select(s => $"{s.Location} opens from {(g.Sectors.TryGetValue(openers.GetValueOrDefault(s.Id), out var f) ? f.Location : "?")}")));
-                ImGui.SameLine(); Ui.Text("by chance.");
-                Hover(RfOdds);
-            }
             ImGui.Checkbox("Put routes that explore something new first##rfExplore", ref rfExploreFirst);
         }
 
@@ -289,7 +282,7 @@ public partial class MainWindow
     }
 
     // The map's sectors as tiles: the letter as a tag, the name, and what the FC has done there (or must / left out).
-    private void RfTiles(List<SubSector> onMap, Dictionary<int, string?> states)
+    private void RfTiles(List<SubSector> onMap, Dictionary<int, string?> states, PlannerGame g, Dictionary<int, int> openers)
     {
         var scale = ImGuiHelpers.GlobalScale;
         var width = 168 * scale;
@@ -305,7 +298,11 @@ public partial class MainWindow
             var usable = rankOk && state is null or "explored" or "discovered";
             var must = rfMust.Contains(s.Id);
             var outOf = rfLeaveOut.Contains(s.Id);
-            var status = must ? "must be in the route" : outOf ? "left out" : !rankOk ? $"needs rank {s.RankReq}" : state != null ? RfStateText(state) : $"rank {s.RankReq}";
+            // Could open: where from; not yet: after which (itself not discovered yet). The colour says which.
+            var opener = g.Sectors.TryGetValue(openers.GetValueOrDefault(s.Id), out var o) ? o.Location : null;
+            var status = must ? "must be in the route" : outOf ? "left out" : !rankOk ? $"needs rank {s.RankReq}"
+                : state == "chance" ? $"opens from {opener ?? "?"}" : state == "locked" ? (opener != null ? $"after {opener}" : "not yet")
+                : state != null ? RfStateText(state) : $"rank {s.RankReq}";
             var start = ImGui.GetCursorScreenPos();
             var size = new Vector2(width, ImGui.GetTextLineHeight() * 2 + 10 * scale);
             using (ImRaii.PushId($"rfTile{s.Id}"))
@@ -367,6 +364,23 @@ public partial class MainWindow
             ImGui.ProgressBar(max > 0 ? (float)Math.Clamp(value / max, 0.02, 1) : 0, new Vector2(70 * scale, 6 * scale), "");
     }
 
+    // A route's chances at new sectors, by the stop that may open them (as the app's): "J and M open from I, P from L, Q
+    // from E: each voyage there is about a 20–30% chance (Pepper's guess); stats don't change the odds."
+    private static string RfChancesText(RouteFinder.Route r, PlannerGame g, Dictionary<int, string?> states)
+    {
+        var data = SubCalculatorData.Shipped();
+        var parts = new List<string>();
+        foreach (var id in r.Sectors)
+        {
+            var opens = g.Sectors.Values.Where(s => (data.Find(s.Id)?.UnlockedFrom ?? 0) == id && states.GetValueOrDefault(s.Id) == "chance")
+                .OrderBy(s => s.Id).Select(s => s.Location).ToList();
+            if (opens.Count == 0) continue;
+            var list = opens.Count == 1 ? opens[0] : $"{string.Join(", ", opens.Take(opens.Count - 1))} and {opens[^1]}";
+            parts.Add(parts.Count == 0 ? $"{list} {(opens.Count > 1 ? "open" : "opens")} from {g.Sectors[id].Location}" : $"{list} from {g.Sectors[id].Location}");
+        }
+        return $"{string.Join(", ", parts)}: each voyage there is about a 20–30% chance (Pepper's guess); stats don't change the odds.";
+    }
+
     private double RfMax(Func<RouteFinder.Route, double> of) => rfDraw is { } d && d.Result.Routes.Count > 0 ? d.Result.Routes.Take(RfShown).Max(of) : 0;
 
     private FleetTable<RouteFinder.Route>? rfTable;
@@ -393,7 +407,7 @@ public partial class MainWindow
             {
                 ImGui.SameLine(0, 8 * scale);
                 Tag($"{r.Chances} chance{(r.Chances == 1 ? "" : "s")} at new sectors", Blue);
-                Hover(RfOdds);
+                Hover(RfChancesText(r, d.G, d.Result.States));
             }
             if (ReferenceEquals(r, d.Result.Routes[0])) { ImGui.SameLine(0, 8 * scale); Tag("best", Green); }
         }, r => r.Sectors.Count, Locked: true),

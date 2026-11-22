@@ -84,6 +84,8 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   **Unlocks:** for a Free Company, what's sure to explore next, what could open by chance and from where (about 20–30%
   a voyage, Pepper's guess), and the way to the next map, step by step; then each map's sectors and how far along it is.
   Until the plugin has read an FC's sectors in its workshop, every sector is allowed and it says "not read yet".
+  A tile that could open says where from ("opens from I"), one further off what comes first ("after N"), and hovering
+  a route's "chances at new sectors" lists them ("J and M open from I, P from L").
 - **Fight Club routes your FC can't run yet are marked (Subs and Route Optimization).** When a sub's Fight Club target
   uses a sector its Free Company hasn't discovered, it says "needs R" (hover: it opens from L, by chance) and, below it,
   the best Fight Club route the FC can run now ("now: O-J · 250k/day").
