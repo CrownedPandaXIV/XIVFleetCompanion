@@ -28,9 +28,13 @@ public partial class MainWindow
     private string finderSort = "rank";
     private bool finderSureOnly;
     private (long Cid, string SubName)? finderFor;
+    private readonly BuildFinder.SlotFilter?[] finderSlots = new BuildFinder.SlotFilter?[4]; // the part filter, per slot
+    private string finderSearch = "";
+    private (SubSector Sector, uint Item)? finderSwitchTo; // a sector from the item search on another map, waiting for a yes
+    private string? finderNote;
 
     private sealed record FinderResult(BuildFinder.Needs Need, List<SubSector> Route, List<SubSector> Sectors, int MinRank, int? RangeNeeded, int Total, int Sure,
-        int OutOfRange, Dictionary<int, int> ByRank, List<BuildFinder.Row> Rows);
+        int OutOfRange, Dictionary<int, int> ByRank, List<BuildFinder.Row> Rows, int Unfiltered);
     private string finderKey = "";
     private FinderResult? finderResult;
     private Task<FinderResult?>? finderWork;
@@ -104,6 +108,23 @@ public partial class MainWindow
 
         // 1. What you want: the map, add a sector, then a card for each sector with its goals.
         HeadingRuns(("What you want", null), ($"   {finderGoals.Count} of 5 sectors", Dim));
+        FinderItemSearch(g, data);
+        if (finderSwitchTo is { } sw)
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, Amber))
+                Ui.Wrapped($"{sw.Sector.Location}: {sw.Sector.Name} is on {g.Maps.FirstOrDefault(m => m.Id == sw.Sector.Map).Name}. A voyage stays on one map, " +
+                           $"so switching clears your {finderGoals.Count} sector{(finderGoals.Count == 1 ? "" : "s")} here.");
+            if (ImGui.Button("Switch map##finderSwitch"))
+            {
+                finderMap = sw.Sector.Map;
+                finderGoals.Clear();
+                finderGoals.Add(new BuildFinder.Goal(sw.Sector.Id, 0, false, false, new List<uint> { sw.Item }));
+                finderSwitchTo = null;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Cancel##finderSwitchCancel")) finderSwitchTo = null;
+        }
+        if (finderNote != null) Colored(Amber, finderNote);
         FieldLabel("Map");
         ImGui.SetNextItemWidth(220 * scale);
         using (var combo = ImRaii.Combo("##finderMap", g.Maps.FirstOrDefault(m => m.Id == finderMap).Name ?? ""))
@@ -165,7 +186,7 @@ public partial class MainWindow
 
         // Worked out in the background when anything changes; the last answer stays shown meanwhile.
         var inputs = reader.Parts.Data?.Inputs;
-        var key = $"{string.Join(";", finderGoals.Select(x => $"{x.SectorId}:{x.Tier}:{x.Optimal}:{x.DoubleDip}:{string.Join(",", x.Items)}"))}|{finderSort}|{finderSureOnly}|{finderFor}|{inputs?.GetHashCode()}";
+        var key = $"{string.Join(";", finderGoals.Select(x => $"{x.SectorId}:{x.Tier}:{x.Optimal}:{x.DoubleDip}:{string.Join(",", x.Items)}"))}|{finderSort}|{finderSureOnly}|{finderFor}|{inputs?.GetHashCode()}|{string.Join(";", finderSlots.Select(f => f == null ? "-" : f.Own ? "own" : string.Join(",", f.Letters)))}";
         if (finderWork is { IsCompleted: true } done)
         {
             if (done.IsCompletedSuccessfully) finderResult = done.Result;
@@ -177,8 +198,9 @@ public partial class MainWindow
         {
             var goals = finderGoals.ToList();
             var (sort, sureOnly, forCid) = (finderSort, finderSureOnly, finderFor?.Cid);
+            var slots = finderSlots.ToList();
             finderWorkKey = key;
-            finderWork = Task.Run(() => FindBuilds(g, data, goals, sort, sureOnly, inputs, forCid));
+            finderWork = Task.Run(() => FindBuilds(g, data, goals, sort, sureOnly, inputs, forCid, slots));
         }
         var result = finderResult;
         var working = key != finderKey;
@@ -189,7 +211,14 @@ public partial class MainWindow
         FinderNeeds(result);
         if (result.Need.Missing.Count > 0) Colored(Amber, $"No loot data yet for {string.Join(", ", result.Need.Missing)}: its goals are left out.");
         ImGui.Spacing();
-        var tally = new List<(string, Vector4?)> { ($"{PlannerN(result.Total)}", null), ($" build{(result.Total == 1 ? "" : "s")}   ", Dim), ($"{PlannerN(result.Sure)}", Green), (" sure   ", Dim) };
+        FinderSlotFilters();
+        var filtered = finderSlots.Any(f => f != null);
+        var tally = new List<(string, Vector4?)>();
+        if (filtered) { tally.Add(($"{PlannerN(result.Unfiltered)}", null)); tally.Add((" builds · ", Dim)); }
+        tally.Add(($"{PlannerN(result.Total)}", null));
+        tally.Add((filtered ? " with these parts   " : $" build{(result.Total == 1 ? "" : "s")}   ", Dim));
+        tally.Add(($"{PlannerN(result.Sure)}", Green));
+        tally.Add((" sure   ", Dim));
         if (result.Total > result.Sure) { tally.Add(($"{PlannerN(result.Total - result.Sure)}", Amber)); tally.Add((" might not   ", Dim)); }
         tally.Add(($"{PlannerN(result.OutOfRange)}", result.OutOfRange > 0 ? Red : null));
         tally.Add((" out of range", Dim));
@@ -203,7 +232,8 @@ public partial class MainWindow
 
         if (result.Rows.Count == 0)
         {
-            Ui.Wrapped($"No build reaches all of that at any rank{(finderSureOnly ? " for sure (untick \"Only builds sure to reach it\" to see the near ones)" : "")}.");
+            Ui.Wrapped(filtered && result.Unfiltered > 0 ? "No build with these parts reaches it: loosen the part filter."
+                : $"No build reaches all of that at any rank{(finderSureOnly ? " for sure (untick \"Only builds sure to reach it\" to see the near ones)" : "")}.");
         }
         else
         {
@@ -220,6 +250,155 @@ public partial class MainWindow
                 Colored(Dim, $"Showing the first {result.Rows.Count} of {PlannerN(result.Total)}, by {FinderSorts.First(x => x.Key == finderSort).Label.ToLowerInvariant()}.");
         }
         FinderFoot();
+    }
+
+    // ---- Find an item ----
+
+    private sealed record FinderItem(SubSector Sector, uint ItemId, string Name, int Tier, double? Chance, int Low, int High, SubCalculator.Breakpoint? At);
+    private List<FinderItem>? finderItems;
+
+    // Every item every sector can drop, at its lowest tier there (read once).
+    private List<FinderItem> FinderItems(PlannerGame g, SubCalculatorData.Data data)
+    {
+        if (finderItems != null) return finderItems;
+        var list = new List<FinderItem>();
+        foreach (var s in g.Sectors.Values.OrderBy(x => x.Map).ThenBy(x => x.Id))
+        {
+            if (data.Find(s.Id) is not { } d) continue;
+            foreach (var id in d.Pools.SelectMany(p => p.Value.Loot.Select(l => l.ItemId)).Distinct())
+            {
+                var tier = BuildFinder.ItemTier(d, id) ?? 1;
+                var pool = d.Pools[tier];
+                var entry = pool.Loot.First(l => l.ItemId == id);
+                list.Add(new FinderItem(s, id, ItemName((int)id, false), tier, pool.Records > 0 ? (double)entry.Times / pool.Records : null,
+                    entry.PoorMin, entry.OptimalMax, tier >= 2 ? SubCalculator.BreakpointOf(d, tier == 3 ? 1 : 0) : null));
+            }
+        }
+        return finderItems = list;
+    }
+
+    private static string FinderChance(double? c) => c is not double x ? "" : x < 0.01 ? "under 1%" : $"{Math.Round(x * 100)}%";
+
+    // Find an item: every sector that drops it, on every map, with the rank it needs, the lowest tier it drops at, how
+    // often and how many, and the surveillance that tier takes. Add puts the sector in with the item as its goal.
+    private void FinderItemSearch(PlannerGame g, SubCalculatorData.Data data)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        ImGui.SetNextItemWidth(360 * scale);
+        ImGui.InputTextWithHint("##finderSearch", "Find an item, e.g. Cocobolo Lumber", ref finderSearch, 64);
+        if (finderSearch.Length > 0) { ImGui.SameLine(); if (ImGui.SmallButton("×##finderSearchClear")) finderSearch = ""; }
+        if (finderSearch.Trim().Length < 2) return;
+        var found = FinderItems(g, data).Where(x => Matches(finderSearch, x.Name)).GroupBy(x => x.ItemId)
+            .OrderBy(x => x.First().Name, StringComparer.CurrentCulture).ToList();
+        // Drawn plainly, not boxed: a box and a table both split the window's drawing into layers, which don't nest.
+        {
+            if (found.Count == 0) { Colored(Dim, $"No sector drops anything called “{finderSearch}”."); return; }
+            foreach (var item in found.Take(8))
+            {
+                Ui.Text(item.First().Name);
+                ImGui.SameLine();
+                Colored(Dim, $"{item.Count()} sector{(item.Count() == 1 ? "" : "s")}");
+                using var table = ImRaii.Table($"##finderFound{item.Key}", 8, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
+                if (!table) continue;
+                foreach (var x in item)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn(); Colored(Dim, g.Maps.FirstOrDefault(m => m.Id == x.Sector.Map).Name ?? "");
+                    ImGui.TableNextColumn(); Tag(x.Sector.Location, headingColor ?? softColor); ImGui.SameLine(); Ui.Text(x.Sector.Name);
+                    ImGui.TableNextColumn(); Colored(Dim, $"rank {x.Sector.RankReq}");
+                    ImGui.TableNextColumn(); Tag($"T{x.Tier}", softColor);
+                    ImGui.TableNextColumn(); Ui.Text(FinderChance(x.Chance)); Hover($"In {FinderChance(x.Chance)} of XIVStats' T{x.Tier} voyages there");
+                    ImGui.TableNextColumn(); Colored(Dim, x.Low == x.High ? $"{x.Low} each" : $"{x.Low}–{x.High} each");
+                    ImGui.TableNextColumn(); Colored(Dim, x.At is { } at ? $"T{x.Tier} at {PlannerRange(at)}" : "any surveillance");
+                    ImGui.TableNextColumn();
+                    if (ImGui.SmallButton($"Add##finderFoundAdd{x.Sector.Id}_{x.ItemId}")) { FinderAddFromSearch(x.Sector, x.ItemId); finderSearch = ""; }
+                }
+            }
+            if (found.Count > 8) Colored(Dim, $"{found.Count - 8} more items match: type more of the name.");
+            ImGui.Separator();
+        }
+    }
+
+    // A sector from the item search, with the item as its goal: added to it when already chosen; another map starts fresh.
+    private void FinderAddFromSearch(SubSector sector, uint itemId)
+    {
+        finderNote = null;
+        if (sector.Map != finderMap)
+        {
+            if (finderGoals.Count > 0) { finderSwitchTo = (sector, itemId); return; }
+            finderMap = sector.Map;
+            finderGoals.Add(new BuildFinder.Goal(sector.Id, 0, false, false, new List<uint> { itemId }));
+            return;
+        }
+        var at = finderGoals.FindIndex(x => x.SectorId == sector.Id);
+        if (at >= 0)
+        {
+            if (!finderGoals[at].Items.Contains(itemId)) finderGoals[at] = finderGoals[at] with { Items = finderGoals[at].Items.Append(itemId).ToList() };
+            return;
+        }
+        if (finderGoals.Count >= 5) { finderNote = "A voyage has at most 5 sectors: remove one to add this."; return; }
+        finderGoals.Add(new BuildFinder.Goal(sector.Id, 0, false, false, new List<uint> { itemId }));
+    }
+
+    // ---- Only these parts ----
+
+    private static readonly string[] FinderPlain = { "S", "U", "W", "C", "Y" };
+    private static readonly string[] FinderModified = { "S+", "U+", "W+", "C+", "Y+" };
+
+    private string FinderSlotText(BuildFinder.SlotFilter? f)
+    {
+        if (f == null) return "Any";
+        if (f.Own) return "Ones I own";
+        var l = f.Letters;
+        if (l.Count == 5 && FinderPlain.All(l.Contains)) return "Plain only";
+        if (l.Count == 5 && FinderModified.All(l.Contains)) return "Modified only";
+        if (l.Count > 3) return $"{l.Count} parts";
+        return string.Join(", ", l.Select(x => PlannerClassNames[x[..1]] + (x.EndsWith('+') ? "+" : "")));
+    }
+
+    // Four dropdowns (hull, stern, bow, bridge): Any, Plain only, Modified only, Ones I own, or ticked parts.
+    private void FinderSlotFilters()
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        Colored(Dim, "Only these parts");
+        string[] names = { "Hull", "Stern", "Bow", "Bridge" };
+        for (var i = 0; i < 4; i++)
+        {
+            Flow(ImGui.CalcTextSize(names[i]).X + 140 * scale);
+            Colored(Dim, names[i]);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(130 * scale);
+            using (ImRaii.PushColor(ImGuiCol.Text, headingColor ?? softColor, finderSlots[i] != null))
+            using (var combo = ImRaii.Combo($"##finderSlot{i}", FinderSlotText(finderSlots[i]), ImGuiComboFlags.HeightLarge))
+            {
+                if (!combo) continue;
+                using (ImRaii.PushColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.Text], finderSlots[i] != null))
+                {
+                    if (ImGui.SmallButton("Any")) finderSlots[i] = null;
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Plain only")) finderSlots[i] = new BuildFinder.SlotFilter(false, FinderPlain.ToList());
+                    if (ImGui.SmallButton("Modified only")) finderSlots[i] = new BuildFinder.SlotFilter(false, FinderModified.ToList());
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Ones I own")) finderSlots[i] = new BuildFinder.SlotFilter(true, Array.Empty<string>());
+                    ImGui.Separator();
+                    var letters = finderSlots[i] is { Own: false } f ? f.Letters.ToList() : new List<string>();
+                    foreach (var l in FinderPlain.Concat(FinderModified))
+                    {
+                        var on = letters.Contains(l);
+                        if (ImGui.Checkbox($"{PartName(l)}##finderSlot{i}{l}", ref on))
+                        {
+                            if (on) letters.Add(l); else letters.Remove(l);
+                            finderSlots[i] = letters.Count > 0 ? new BuildFinder.SlotFilter(false, letters) : null;
+                        }
+                    }
+                }
+            }
+        }
+        if (finderSlots.Any(f => f != null))
+        {
+            ImGui.SameLine(0, 14 * scale);
+            if (ImGui.SmallButton("Clear filters##finderSlotsClear")) Array.Clear(finderSlots);
+        }
     }
 
     // A sector's card: its letter and name, the rank it needs, Remove; then its goals. True when it was removed.
@@ -307,7 +486,8 @@ public partial class MainWindow
     }
 
     // The search itself (away from the frame): what the goals need, the route in its least-range order, every build.
-    private static FinderResult? FindBuilds(PlannerGame g, SubCalculatorData.Data data, List<BuildFinder.Goal> goals, string sort, bool sureOnly, PartsInputs? inputs, long? forCid)
+    private static FinderResult? FindBuilds(PlannerGame g, SubCalculatorData.Data data, List<BuildFinder.Goal> goals, string sort, bool sureOnly, PartsInputs? inputs, long? forCid,
+        List<BuildFinder.SlotFilter?> slots)
     {
         var sectors = goals.Select(x => g.Sectors.GetValueOrDefault(x.SectorId)).OfType<SubSector>().Take(5).ToList();
         if (sectors.Count == 0) return null;
@@ -316,10 +496,12 @@ public partial class MainWindow
         var route = sectors.Count > 1 ? SubCalculator.BestOrder(sectors, start, 100) : sectors;
         var minRank = Math.Max(1, sectors.Max(s => s.RankReq));
         var owned = inputs != null ? BuildFinder.Owned(inputs, forCid) : null;
-        var rows = BuildFinder.SortBuilds(BuildFinder.FindBuilds(need, g.Ranks, g.Parts, minRank, g.MaxRank, route, start, owned, sureOnly), sort);
+        var all = BuildFinder.FindBuilds(need, g.Ranks, g.Parts, minRank, g.MaxRank, route, start, owned, sureOnly);
+        // The part filter applies before the list is cut, so the counts and rank groups follow it.
+        var rows = BuildFinder.SortBuilds(BuildFinder.FilterByParts(all, slots, owned), sort);
         var byRank = rows.Where(r => r.RangeShort <= 0).GroupBy(r => r.Rank).ToDictionary(x => x.Key, x => x.Count());
         return new FinderResult(need, route, sectors, minRank, SubCalculator.RangeUsed(route, start), rows.Count, rows.Count(r => r.Sure), rows.Count(r => r.RangeShort > 0),
-            byRank, rows.Take(FinderShown).ToList());
+            byRank, rows.Take(FinderShown).ToList(), all.Count);
     }
 
     private void FinderFoot()

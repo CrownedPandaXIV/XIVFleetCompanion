@@ -33,6 +33,11 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   boxes (amber where the sources differ), the counts on one line, and the list grouped by rank while sorted by lowest
   rank. Each build's parts are tags, green for one you own and amber for one to get; the stats the goals ask for show
   what they have to spare, the rest are greyed.
+  - **Find an item:** type a name (Cocobolo Lumber, say) to see every sector on every map that drops it, with the
+    rank it needs, the lowest tier it drops at, how often and how many, and the surveillance that tier takes. Add puts
+    the sector in with the item as its goal; a sector on another map switches the map after asking.
+  - **Only these parts:** a dropdown per slot (hull, stern, bow, bridge) with Any, Plain only, Modified only, Ones I
+    own, or parts to tick. It filters every build before the list is cut to 200, so the counts and rank groups follow it.
   The plugin's builds are checked against the app's. `/xivfleet buildfinder` opens it.
 - **Choosing one of your subs on the Planner:** a panel grouped by account, then character (with world and Free
   Company), each group folding away, with a search for character, world, account, Free Company or sub name. Each sub

@@ -113,6 +113,23 @@ namespace XIVFleetCompanion
             return rows;
         }
 
+        /// <summary>One slot's part filter: any part (null), one the player owns (Own), or these parts (Letters).</summary>
+        public sealed record SlotFilter(bool Own, IReadOnlyList<string> Letters);
+
+        /// <summary>The builds whose parts pass the part filter, slot by slot (as the app's filterByParts). slots: hull, stern,
+        /// bow, bridge, each null for any; owned: "letter|slot" the player has.</summary>
+        public static List<Row> FilterByParts(List<Row> rows, IReadOnlyList<SlotFilter?>? slots, ISet<string>? owned)
+        {
+            if (slots == null || slots.All(x => x == null)) return rows;
+            return rows.Where(r => r.Parts.Select((letter, slot) => (letter, slot)).All(p =>
+            {
+                var f = p.slot < slots.Count ? slots[p.slot] : null;
+                if (f == null) return true;
+                if (f.Own) return owned != null && owned.Contains($"{p.letter}|{p.slot}");
+                return f.Letters.Contains(p.letter);
+            })).ToList();
+        }
+
         public static readonly string[] Sorts = { "rank", "speed", "parts", "range" };
 
         private static int Cmp(double a, double b) => a.CompareTo(b);

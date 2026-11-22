@@ -1194,6 +1194,9 @@ internal static partial class Program
         // The Build Finder: what the goals need, how many builds reach them, and the first 25 builds each way sorted.
         var f = root.GetProperty("finder");
         var owned = f.GetProperty("owned").EnumerateArray().Select(x => x.GetString()!).ToHashSet();
+        var partFilter = f.GetProperty("partFilter").EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Null ? null
+            : x.TryGetProperty("own", out var own) && own.GetBoolean() ? new BuildFinder.SlotFilter(true, Array.Empty<string>())
+            : new BuildFinder.SlotFilter(false, x.GetProperty("letters").EnumerateArray().Select(l => l.GetString()!).ToList())).ToList();
         int fCases = 0, fGood = 0;
         var fWrong = "";
         static bool NeedIs(SubCalculator.Breakpoint? bp, System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? bp == null
@@ -1238,6 +1241,11 @@ internal static partial class Program
                         && r.MissingParts!.Select(m => $"{m.Letter}|{m.Slot}").SequenceEqual(e.GetProperty("missing").EnumerateArray().Select(x => x.GetString()!));
                 }).All(x => x), $"sorted by {sorted.Name}");
             }
+            // The part filter (the same for every case).
+            var kept = BuildFinder.SortBuilds(BuildFinder.FilterByParts(rows, partFilter, owned), "rank");
+            var ef = c.GetProperty("filtered");
+            Want(kept.Count == ef.GetProperty("total").GetInt32() && kept.Take(25).Select(r => string.Join("|", r.Parts))
+                .SequenceEqual(ef.GetProperty("first").EnumerateArray().Select(x => x.GetString()!)), $"part filter ({kept.Count} builds)");
             if (wrong.Count == 0) fGood++;
             else if (fWrong.Length == 0) fWrong = $" (first wrong: case {fCases}: {string.Join(", ", wrong)})";
         }
