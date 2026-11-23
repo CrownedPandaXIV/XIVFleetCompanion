@@ -326,6 +326,7 @@ public partial class MainWindow
             if (b.Who.Length > 0) Colored(Dim, b.Who);
             Tag($"Rank {b.Rank}", softColor);
             foreach (var p in b.Parts) { ImGui.SameLine(0, 4 * scale); Tag(p, softColor); }
+            PartRankNote(PlannerGameData(), b.Rank, b.Parts);
             if (ImGui.SmallButton(cmpEditing == i ? "Done" : "Change")) cmpEditing = cmpEditing == i ? null : i;
             if (cmpEditing == i)
             {

@@ -129,6 +129,10 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
     Company has found them.
   The plugin's plans are checked against the app's. `/xivfleet levelling` opens it.
 - **Build Finder: a slot's Any is highlighted** while that slot has a filter, as the way to clear it.
+- **Build Finder: no build below the rank its parts need.** A build is listed from the highest rank its parts can be
+  fitted at (Unkiu 15, Whale 25, Coelacanth 35, Syldra 45, Modified parts 50), not just where its stats are enough.
+- **Voyage Planner and Compare Builds: an amber note for a part the rank can't fit yet** ("Not fittable at rank 10
+  yet: Modified Whale (Hull) needs rank 50."). The build is still worked out as typed.
 - **Working out… on the busy pages.** While the Levelling Plan, Compare Builds or Build Finder works out its answer, a
   line says so and the old answer is dimmed until the new one is in.
 - **Choosing a Free Company** (Levelling Plan, Route Finder, Compare Builds) works like choosing a sub: a panel grouped

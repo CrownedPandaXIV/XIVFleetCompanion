@@ -1280,6 +1280,8 @@ internal static partial class Program
             Want(need.WhySurveillance.Concat(need.WhyRetrieval).Concat(need.WhyFavor).SequenceEqual(new[] { "surveillance", "retrieval", "favor" }
                 .SelectMany(k => c.GetProperty("why").GetProperty(k).EnumerateArray().Select(x => x.GetString()!))), "why");
             Want(minRank == c.GetProperty("minRank").GetInt32(), "rank");
+            var tooLow = rows.FirstOrDefault(r => r.Rank < r.Parts.Select((l, slot) => parts[(SubRoutes.PartClass[l], slot)].PartRank).Max());
+            Want(tooLow == null, $"no build below its parts' ranks ({(tooLow == null ? "" : $"{string.Join("", tooLow.Parts)} at {tooLow.Rank}")})");
             Want(rows.Count == c.GetProperty("total").GetInt32() && rows.Count(r => r.Sure) == c.GetProperty("sure").GetInt32()
                  && rows.Count(r => r.RangeShort > 0) == c.GetProperty("outOfRange").GetInt32(), $"counts ({rows.Count} builds)");
             foreach (var sorted in c.GetProperty("sorted").EnumerateObject())

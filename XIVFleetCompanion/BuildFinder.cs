@@ -55,7 +55,8 @@ namespace XIVFleetCompanion
             return new Needs(sv, rt, fv, whySv, whyRt, whyFv, missing);
         }
 
-        /// <summary>Every build reaching the needs, each at the lowest rank from minRank it does (as the app's findBuilds).
+        /// <summary>Every build reaching the needs, each at the lowest rank from minRank it does and its parts can be fitted
+        /// at (each part's PartRank; as the app's findBuilds).
         /// route: the sectors in the order using the least range; owned: "letter|slot" the player has (null: not marked).</summary>
         public static List<Row> FindBuilds(Needs need, Dictionary<int, SubRank> ranksById, Dictionary<(int, int), SubPartStat> partStats, int minRank, int maxRank,
             List<SubSector> route, SubSector? start, ISet<string>? owned, bool sureOnly)
@@ -73,12 +74,14 @@ namespace XIVFleetCompanion
             {
                 var parts = new[] { a, b, c, d };
                 double sv = 0, rt = 0, sp = 0, rg = 0, fv = 0;
+                var fitted = 0; // the rank its parts can be fitted from: a build is never put below it
                 var known = true;
                 for (var slot = 0; slot < 4; slot++)
                 {
                     if (!partStats.TryGetValue((SubRoutes.PartClass[parts[slot]], slot), out var p) || p.Surveillance is not double psv || p.Retrieval is not double prt || p.Favor is not double pfv)
                     { known = false; break; }
                     sv += psv; rt += prt; sp += p.Speed; rg += p.Range; fv += pfv;
+                    fitted = Math.Max(fitted, p.PartRank);
                 }
                 if (!known) continue;
                 SubStats At(SubRank r) => new(r.Surveillance!.Value + sv, r.Retrieval!.Value + rt, r.Speed!.Value + sp, r.Range!.Value + rg, r.Favor!.Value + fv);
@@ -86,6 +89,7 @@ namespace XIVFleetCompanion
                 int? sureRank = null;
                 foreach (var (r, s) in ranks)
                 {
+                    if (r < fitted) continue;
                     var st = At(s);
                     if (found == null && Meets(st, false)) found = (r, st);
                     if (Meets(st, true)) { sureRank = r; found ??= (r, st); break; }

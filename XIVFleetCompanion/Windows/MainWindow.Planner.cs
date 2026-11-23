@@ -115,6 +115,18 @@ public partial class MainWindow
         return ($"At sea until {(at.Date == DateTime.Today ? time : $"{at.ToString("ddd", CultureInfo.CurrentCulture)} {time}")}", null);
     }
 
+    // The parts a build has that its rank can't fit yet (each part needs a rank: Unkiu 15, Whale 25 and so on, Modified
+    // parts 50), as an amber note; nothing when they all fit. The build is still worked out as typed. As the app's
+    // PartRankNote.
+    private void PartRankNote(PlannerGame? g, int rank, IReadOnlyList<string> parts)
+    {
+        if (g == null) return;
+        var high = parts.Select((p, slot) => (P: p, Slot: slot, Needs: SubRoutes.PartClass.TryGetValue(p, out var c) && g.Parts.TryGetValue((c, slot), out var st) ? st.PartRank : 0))
+            .Where(x => x.Needs > rank).ToList();
+        if (high.Count == 0) return;
+        using (ImRaii.PushColor(ImGuiCol.Text, Amber)) Ui.Wrapped($"Not fittable at rank {rank} yet: {string.Join(", ", high.Select(x => $"{PlannerPartName(x.P)} ({PlannerSlots[x.Slot]}) needs rank {x.Needs}"))}.");
+    }
+
     // Choosing a Free Company (Levelling Plan, Route Finder, Compare Builds), the Voyage Planner's way: a panel grouped by
     // account label (in name order, no label last), each account's Free Companies as the Character Roster orders their
     // characters, with their world and whether the workshop's sectors have been read; a search across name, world and
@@ -326,6 +338,7 @@ public partial class MainWindow
                     Runs(("Surveillance ", Dim), (PlannerN(st.Surveillance), null), ("  ·  Retrieval ", Dim), (PlannerN(st.Retrieval), null),
                         ("  ·  Speed ", Dim), (PlannerN(st.Speed), null), ("  ·  Range ", Dim), (PlannerN(st.Range), null), ("  ·  Favor ", Dim), (PlannerN(st.Favor), null));
                 else Colored(Amber, "This rank or one of these parts isn't in the game data.");
+                PartRankNote(g, plannerRank, plannerParts);
                 if (plannerStats != null)
                 {
                     // Add to compare: as your sub while its rank and parts are unchanged, else as a build from here.
