@@ -414,6 +414,17 @@ namespace XIVFleetCompanion
             return r;
         }
 
+        /// <summary>The top rank a sub can reach: the last rank the game gives stats to (any bonus above 0). The game's
+        /// table also lists experience "to the next rank" on the top rank (145 shows 46,234,004 with 146 an empty row), so
+        /// that can't be used alone; without any stats, the first rank with no experience to the next. As the app's
+        /// rank-up.js topRank.</summary>
+        public static int TopRank(IEnumerable<SubRank> ranks)
+        {
+            var list = ranks.ToList();
+            var top = list.Where(r => new[] { r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor }.Any(v => v > 0)).Select(r => r.Id).DefaultIfEmpty(0).Max();
+            return top > 0 ? top : MaxRank(list.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First().ExpToNext));
+        }
+
         private static (int Rank, string[] Build)? NextBuildRank(int rank, int top, Func<int, string[]?> buildAt)
         {
             static string Key(string[]? b) => b == null ? "" : string.Join("-", b);
@@ -526,9 +537,9 @@ namespace XIVFleetCompanion
             foreach (var r in game.Ranks) ranks[r.Id] = r;
             var partStats = new Dictionary<(int, int), SubPartStat>();
             foreach (var p in game.Parts) partStats[(p.Class, p.Slot)] = p;
-            var topRank = Math.Max(0, ranks.Values.Where(r => r.Speed != null).Select(r => r.Id).DefaultIfEmpty(0).Max());
+            var topRank = TopRank(ranks.Values);
             var expToNext = ranks.ToDictionary(kv => kv.Key, kv => kv.Value.ExpToNext);
-            var top = MaxRank(expToNext);
+            var top = topRank;
 
             var windowStart = now - MeasureWindowDays * Day;
             var historyStart = now - BonusWindowDays * Day;

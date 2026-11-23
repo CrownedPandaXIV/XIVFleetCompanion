@@ -78,7 +78,7 @@ public partial class MainWindow
         var maps = game.MapNames.Where(m => m.Value.Length > 0 && sectors.Values.Any(s => s.Map == m.Key)).OrderBy(m => m.Key).Select(m => (m.Key, m.Value)).ToList();
         var ranks = game.Ranks.ToDictionary(r => r.Id);
         var parts = game.Parts.GroupBy(p => (p.Class, p.Slot)).ToDictionary(g => g.Key, g => g.First());
-        var maxRank = Math.Max(1, game.Ranks.Where(r => r.ExpToNext > 0).Select(r => r.Id + 1).DefaultIfEmpty(1).Max());
+        var maxRank = Math.Max(1, SubRoutes.TopRank(game.Ranks));
         return plannerGame = new PlannerGame(game, sectors, game.Sectors.Where(s => s.Starting).ToList(), maps, ranks, parts, maxRank);
     }
 

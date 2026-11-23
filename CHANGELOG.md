@@ -126,6 +126,9 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   line says so and the old answer is dimmed until the new one is in.
 - **Choosing a Free Company** (Levelling Plan, Route Finder, Compare Builds) works like choosing a sub: a panel grouped
   by account label, each Free Company with its world, in Character Roster order, with a search.
+- **The top rank is the game's (145), not one past it.** The game's rank table lists experience "to the next rank" on the
+  top rank too, so the top was taken as 146. It's now the last rank the game gives stats to, on the Sub Calculator's pages
+  and for the next build on the Subs page.
 
 ## 2.5.0 - 2026-11-21
 

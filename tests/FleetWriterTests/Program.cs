@@ -2206,6 +2206,11 @@ internal static partial class Program
             sectorsRead.Add(fc == null ? "none" : $"{string.Join(",", fc.Sectors.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value.Unlocked}/{x.Value.Explored}"))} at {(fc.ReadAt is double at ? Math.Round(at / 1000 - nowUnix) : double.NaN)}");
         });
         Check(sectorsRead.All(x => x == "1:True/True,2:True/True,3:True/False at -300"), $"file: the Route Finder reads them back, on both ({string.Join(" / ", sectorsRead)})");
+        // The top rank: the last with stats, though the game lists experience to the next on it (145 does; 146 is empty).
+        var topRanks = new[] { new SubRank(144, 98, 129, 112765858), new SubRank(145, 100, 130, 46234004), new SubRank(146, 0, 0, 0), new SubRank(150, 0, 0, 0) };
+        var noStats = new[] { new SubRank(1, null, null, 10), new SubRank(2, null, null, 10), new SubRank(3, null, null, 0) };
+        Check(SubRoutes.TopRank(topRanks) == 145 && SubRoutes.TopRank(noStats) == 3,
+            $"the top rank is the last with stats ({SubRoutes.TopRank(topRanks)}), not one past the last with experience to the next; without stats, the first with none ({SubRoutes.TopRank(noStats)})");
         var fcWho = new List<string>();
         await Each(async c =>
         {
