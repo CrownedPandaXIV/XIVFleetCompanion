@@ -111,7 +111,7 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   - **The plan:** ranks and experience needed, voyages, about how many days and the date it gets there, ceruleum tanks
     and repair kits, and a strip showing how long each stage takes.
   - **Stages:** a card per route, with its ranks, days and voyages, voyage length, experience a voyage and an hour, the
-    sectors a new rank opens, and, when a sector your FC hasn't discovered yet would do better, by how much. Open in
+    sectors a new rank opens, and, when a sector your FC hasn't discovered yet would do at least 1% better, by how much. Open in
     Voyage Planner on each.
   - **Plan for one sub, or every sub in a Free Company** (one line each, with when it gets there; Stages opens it).
   - **Keep this build, or suggest changes on the way:** at the start of each stage, the one-part swap that makes the

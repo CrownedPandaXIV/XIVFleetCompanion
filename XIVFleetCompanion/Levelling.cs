@@ -286,7 +286,7 @@ namespace XIVFleetCompanion
             {
                 var better = every?.BestAt(st.FromRank, st.Parts);
                 var missing = better?.Route.Where(id => !(read.TryGetValue(id, out var r) && r.Unlocked)).ToList() ?? new List<int>();
-                st.Better = better != null && missing.Count > 0 && better.ExpPerHour > st.ExpPerHour * 1.0001 ? new Better(better.Route, better.ExpPerHour, missing) : null;
+                st.Better = better != null && missing.Count > 0 && better.ExpPerHour >= st.ExpPerHour * 1.01 ? new Better(better.Route, better.ExpPerHour, missing) : null;
             }
         }
     }
