@@ -208,7 +208,7 @@ public partial class MainWindow
             if (s.Gain is double g) TableCells.Right((g >= 0 ? "+" : "−") + Gil(Math.Abs(g)), g > 0 ? Green : g < 0 ? Red : (Vector4?)null);
             else { Colored(Dim, "—"); Hover("Its current route isn't in Fight Club, so the gain can't be worked out: it should still switch."); }
         }, s => s.Gain ?? double.MinValue, s => s.Gain == null),
-        new("planner", "Planner", s => { if (Ui.SmallButton($"Open in Planner##planner{s.Cid}{s.SubName}")) OpenInPlanner(s.Cid, s.SubName); Hover("Open this sub's build and route in Sub Calculator → Planner."); }, New: true),
+        new("planner", "Voyage Planner", s => { if (Ui.SmallButton($"Open in Voyage Planner##planner{s.Cid}{s.SubName}")) OpenInPlanner(s.Cid, s.SubName); Hover("Open this sub's build and route in Sub Calculator → Voyage Planner."); }, New: true),
     });
 
     // A character's name and world, for the Route Optimization page (from the Parts read's characters).

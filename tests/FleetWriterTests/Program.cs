@@ -2206,6 +2206,14 @@ internal static partial class Program
             sectorsRead.Add(fc == null ? "none" : $"{string.Join(",", fc.Sectors.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value.Unlocked}/{x.Value.Explored}"))} at {(fc.ReadAt is double at ? Math.Round(at / 1000 - nowUnix) : double.NaN)}");
         });
         Check(sectorsRead.All(x => x == "1:True/True,2:True/True,3:True/False at -300"), $"file: the Route Finder reads them back, on both ({string.Join(" / ", sectorsRead)})");
+        var fcWho = new List<string>();
+        await Each(async c =>
+        {
+            var fc = (await FleetReader.ReadSubSectors(c)).FirstOrDefault(f => f.FcId == bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            fcWho.Add(fc == null ? "none" : $"{fc.World} | {string.Join(", ", fc.Accounts.OrderBy(a => a.Account, StringComparer.Ordinal).Select(a => $"{a.Account}@{a.SortIndex}"))}");
+        });
+        Check(fcWho.Count == 2 && fcWho[0] == fcWho[1] && !fcWho[0].StartsWith(" |", StringComparison.Ordinal) && fcWho[0].Contains('@'),
+            $"file: the Free Company picker gets the FC's world and account labels, the same on both ({string.Join(" / ", fcWho)})");
 
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();

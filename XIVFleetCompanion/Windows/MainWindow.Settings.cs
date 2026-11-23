@@ -80,7 +80,7 @@ public partial class MainWindow
         }
         Hover("Universalis (universalis.app) collects market board prices from players. With this on, each item's market price on the "
               + "character's world, data center and region (the cheapest listing, skipping a lone listing far below the others and checked against "
-              + "the last week's sales) is shown next to the vendor prices: on Income, Gil & Market, the Planner and the Parts page's "
+              + "the last week's sales) is shown next to the vendor prices: on Income, Gil & Market, the Voyage Planner and the Parts page's "
               + "Shopping List. Only item numbers and world, data center or region names are sent. Prices are kept for 30 minutes.");
 
         // Warnings.

@@ -29,6 +29,7 @@ public partial class MainWindow
     private bool lvSuggest;
     private bool lvStandardOnly;
     private string? lvFc;
+    private bool lvEverySector;
 
     private sealed record LvSub((long Cid, string SubName) Key, int Rank, double Exp, int Target, string[] Parts, long Cid);
     private sealed record LvResult(bool Every, List<(LvSub Sub, Levelling.Plan Plan)> Plans);
@@ -77,16 +78,14 @@ public partial class MainWindow
         void FcLine()
         {
             FieldLabel("Sectors explored by");
-            ImGui.SetNextItemWidth(240 * scale);
+            if (FcPicker("lv", fcs, lvFc) is { } picked) lvFc = picked;
             var f0 = lvFc == null ? null : fcs.FirstOrDefault(f => f.FcId == lvFc);
-            using (var combo = ImRaii.Combo("##lvFc", f0 == null ? (fcs.Count == 0 ? "No Free Company yet" : "Choose…") : f0.Name + (f0.ReadAt == null ? " (not read yet)" : "")))
-            {
-                if (combo)
-                    foreach (var f in fcs)
-                        if (ImGui.Selectable($"{f.Name}{(f.ReadAt == null ? " (not read yet)" : "")}##lvFc{f.FcId}", f.FcId == lvFc)) lvFc = f.FcId;
-            }
-            ImGui.SameLine();
-            Colored(Dim, f0?.ReadAt is double at ? $"only sectors {f0.Name} has discovered (read at the workshop {RfWhen(at)})" : "not read yet: every sector is allowed");
+            ImGui.SameLine(0, 12 * scale);
+            ImGui.Checkbox("Use every sector##lvEvery", ref lvEverySector);
+            Hover("Plan as if every sector were discovered: how long it takes once the Free Company has found them.");
+            ImGui.SameLine(0, 12 * scale);
+            Colored(Dim, lvEverySector ? "every sector, as if all were discovered"
+                : f0?.ReadAt is double at ? $"only sectors {f0.Name} has discovered (read at the workshop {RfWhen(at)})" : "not read yet: every sector is allowed");
         }
         // The longest voyage, and keep the build or suggest changes.
         void Choices()
@@ -119,7 +118,7 @@ public partial class MainWindow
         }
         var fcRead = lvFc == null ? null : fcs.FirstOrDefault(f => f.FcId == lvFc);
         var kitCost = reader.Credits.Data?.RepairKitCost ?? 0;
-        var key = $"{lvEveryFc}|{string.Join(";", asked.Select(a => $"{a.Key}|{a.Rank}|{a.Exp}|{a.Target}|{string.Join(",", a.Parts)}"))}|{lvMaxHours}|{lvSuggest}|{lvStandardOnly}|{lvFc}|{fcRead?.ReadAt}|{kitCost}";
+        var key = $"{lvEveryFc}|{string.Join(";", asked.Select(a => $"{a.Key}|{a.Rank}|{a.Exp}|{a.Target}|{string.Join(",", a.Parts)}"))}|{lvMaxHours}|{lvSuggest}|{lvStandardOnly}|{lvFc}|{lvEverySector}|{fcRead?.ReadAt}|{kitCost}";
         if (lvWork is { IsCompleted: true } done)
         {
             if (done.IsCompletedSuccessfully) lvResult = done.Result;
@@ -130,7 +129,8 @@ public partial class MainWindow
         if (key != lvKey && lvWork == null)
         {
             var (every, hours, suggest, standard) = (lvEveryFc, lvMaxHours, lvSuggest, lvStandardOnly);
-            var read = fcRead?.ReadAt != null ? fcRead.Sectors : null;
+            // Use every sector: as if every sector were discovered (the full-map plan), whatever the FC has read.
+            var read = !lvEverySector && fcRead?.ReadAt != null ? fcRead.Sectors : null;
             var inputs = reader.Parts.Data?.Inputs;
             var list = asked.ToList();
             lvWorkKey = key;
@@ -205,10 +205,12 @@ public partial class MainWindow
 
             // 2. The plan.
             ImGui.Spacing();
-            HeadingRuns(("The plan", null), ($"   best experience at each rank, sent out again as soon as it's back{(working ? " · working out…" : "")}", Dim));
+            HeadingRuns(("The plan", null), ("   best experience at each rank, sent out again as soon as it's back", Dim));
             Choices();
             if (lvRank >= g.MaxRank) { Ui.Wrapped("This sub is at the top rank."); return; }
+            Working(working, "Working out the plan…");
             if (result?.Plans.FirstOrDefault() is not { } one) return;
+            using var dim = WorkingDim(working);
             var plan = one.Plan;
             ImGui.Spacing();
             LvSummary(one.Sub, plan, LvStart(chosenSub));
@@ -219,10 +221,12 @@ public partial class MainWindow
         }
         else
         {
-            HeadingRuns(("Every sub in a Free Company", null), ($"   each to its next build's rank (else the top rank){(working ? " · working out…" : "")}", Dim));
+            HeadingRuns(("Every sub in a Free Company", null), ("   each to its next build's rank (else the top rank)", Dim));
             FcLine();
             Choices();
             if (fcSubs.Count == 0) { Ui.Wrapped("No subs in this Free Company."); return; }
+            Working(working, "Working out the plans…");
+            using var dim = WorkingDim(working);
             using var table = ImRaii.Table("##lvFleet", 6, ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.PadOuterX | ImGuiTableFlags.SizingStretchProp);
             if (table)
             {
@@ -368,14 +372,25 @@ public partial class MainWindow
             if (before != null)
                 foreach (var id in st.Route.Where(id => !before.Route.Contains(id) && g.Sectors.TryGetValue(id, out var s) && s.RankReq > before.FromRank))
                 { ImGui.SameLine(0, 8 * scale); Tag($"{L(id)} from rank {g.Sectors[id].RankReq}", Blue); }
-            if (plan.Swaps.Count > 0) foreach (var p in st.Parts) { ImGui.SameLine(0, 4 * scale); Tag(p, Dim); }
+            if (plan.Swaps.Count > 0)
+            {
+                // The parts, set apart from the route: a line, a "PARTS" label, outlined letters.
+                ImGui.SameLine(0, 14 * scale);
+                var top = ImGui.GetCursorScreenPos();
+                ImGui.GetWindowDrawList().AddLine(top, top + new Vector2(0, ImGui.GetTextLineHeight() + 2 * scale), ImGui.GetColorU32(Dim with { W = 0.6f * ImGui.GetStyle().Alpha }), 1 * scale);
+                ImGui.Dummy(new Vector2(1, 1));
+                ImGui.SameLine(0, 10 * scale);
+                Colored(Dim, "PARTS");
+                Hover("This stage's parts: Hull, Stern, Bow, Bridge.");
+                foreach (var p in st.Parts) { ImGui.SameLine(0, 4 * scale); OutlineTag(p, Blue); Hover(PlannerPartName(p)); }
+            }
             Runs(($"{PlannerHours(st.Hours / st.Voyages)}", null), (" a voyage   ", Dim), ($"{PlannerN(st.ExpPerVoyage)}", null), (" exp a voyage   ", Dim),
                 ($"{PlannerN(st.ExpPerHour)}", null), (" exp an hour", Dim));
             if (st.Better is { } b)
                 Colored(softColor, $"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
                                    $"{string.Join("-", b.Route.Select(L))} gives {PlannerN((b.ExpPerHour / st.ExpPerHour - 1) * 100)}% more an hour.");
             ImGui.TableNextColumn();
-            if (Ui.SmallButton($"Open in Planner##lvOpen{i}"))
+            if (Ui.SmallButton($"Open in Voyage Planner##lvOpen{i}"))
             {
                 plannerChosen = null;
                 plannerRank = st.FromRank;
@@ -385,7 +400,7 @@ public partial class MainWindow
                 if (st.Route.Count > 0 && g.Sectors.TryGetValue(st.Route[0], out var first)) plannerMap = first.Map;
                 shown = Tab.Planner;
             }
-            Hover("Open this stage's build and route in Sub Calculator → Planner.");
+            Hover("Open this stage's build and route in Sub Calculator → Voyage Planner.");
         }
     }
 }

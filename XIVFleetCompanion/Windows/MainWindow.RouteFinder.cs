@@ -110,16 +110,9 @@ public partial class MainWindow
     // The Free Company picker and whether it has been read.
     private void RfFcLine(List<FcSectors> fcs, string label)
     {
-        var scale = ImGuiHelpers.GlobalScale;
         FieldLabel(label);
-        ImGui.SetNextItemWidth(240 * scale);
+        if (FcPicker("rf" + label, fcs, rfFc) is { } picked) rfFc = picked;
         var fc = RfFcRead();
-        using (var combo = ImRaii.Combo("##rfFc" + label, fc == null ? (fcs.Count == 0 ? "No Free Company yet" : "Choose…") : fc.Name + (fc.ReadAt == null ? " (not read yet)" : "")))
-        {
-            if (combo)
-                foreach (var f in fcs)
-                    if (ImGui.Selectable($"{f.Name}{(f.ReadAt == null ? " (not read yet)" : "")}##rfFc{f.FcId}", f.FcId == rfFc)) rfFc = f.FcId;
-        }
         ImGui.SameLine();
         if (fc?.ReadAt is double at) Colored(Dim, $"read at the workshop {RfWhen(at)}");
         else Colored(Dim, "not read yet: every sector is allowed");
@@ -437,9 +430,9 @@ public partial class MainWindow
             Colored(Green, $"+{PlannerN(spare)}");
             Hover($"{PlannerN(spare)} more range than this route uses ({PlannerN(r.Range)})");
         }, r => -r.Range),
-        new("planner", "Planner", r =>
+        new("planner", "Voyage Planner", r =>
         {
-            if (Ui.SmallButton($"Open in Planner##rf{string.Join("-", r.Sectors)}"))
+            if (Ui.SmallButton($"Open in Voyage Planner##rf{string.Join("-", r.Sectors)}"))
             {
                 plannerChosen = null;
                 plannerRank = rfRank;
@@ -449,7 +442,7 @@ public partial class MainWindow
                 plannerMap = rfMap;
                 shown = Tab.Planner;
             }
-            Hover("Open this build and route in Sub Calculator → Planner.");
+            Hover("Open this build and route in Sub Calculator → Voyage Planner.");
         }),
     });
 

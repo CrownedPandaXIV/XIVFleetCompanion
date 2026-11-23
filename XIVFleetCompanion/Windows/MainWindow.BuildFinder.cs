@@ -51,10 +51,48 @@ public partial class MainWindow
         var size = ImGui.CalcTextSize(text);
         var at = ImGui.GetCursorScreenPos();
         var draw = ImGui.GetWindowDrawList();
-        draw.AddRectFilled(at, at + size + pad * 2, ImGui.GetColorU32(color with { W = 0.16f }), 3 * scale);
-        draw.AddText(at + pad, ImGui.GetColorU32(color), text);
+        var alpha = ImGui.GetStyle().Alpha; // dimmed with the rest while a page works out its answer
+        draw.AddRectFilled(at, at + size + pad * 2, ImGui.GetColorU32(color with { W = 0.16f * alpha }), 3 * scale);
+        draw.AddText(at + pad, ImGui.GetColorU32(color with { W = color.W * alpha }), text);
         ImGui.Dummy(size + pad * 2);
     }
+
+    // Text in an outlined box of its colour, no fill: a stage's parts on the Levelling Plan, set apart from its route's
+    // filled letters.
+    private static void OutlineTag(string text, Vector4 color)
+    {
+        if (TableCapture.Current != null) { Ui.Text(text); return; }
+        var scale = ImGuiHelpers.GlobalScale;
+        var pad = new Vector2(5, 1) * scale;
+        var size = ImGui.CalcTextSize(text);
+        var at = ImGui.GetCursorScreenPos();
+        var draw = ImGui.GetWindowDrawList();
+        var alpha = ImGui.GetStyle().Alpha;
+        draw.AddRect(at, at + size + pad * 2, ImGui.GetColorU32(color with { W = 0.6f * alpha }), 3 * scale, ImDrawFlags.None, 1 * scale);
+        draw.AddText(at + pad, ImGui.GetColorU32(color with { W = color.W * alpha }), text);
+        ImGui.Dummy(size + pad * 2);
+    }
+
+    // "Working out…" while a page works out its answer (a turning arc, then the words), as the app's Working; the caller
+    // dims the old answer under it (WorkingDim).
+    private void Working(bool busy, string text)
+    {
+        if (!busy || TableCapture.Current != null) return;
+        var scale = ImGuiHelpers.GlobalScale;
+        var h = ImGui.GetTextLineHeight();
+        var at = ImGui.GetCursorScreenPos();
+        var centre = at + new Vector2(h / 2, h / 2);
+        var t = (float)(ImGui.GetTime() * 6);
+        var draw = ImGui.GetWindowDrawList();
+        draw.PathArcTo(centre, h / 2 - 1.5f * scale, t, t + 4.4f, 16);
+        draw.PathStroke(ImGui.GetColorU32(Blue), ImDrawFlags.None, 2 * scale);
+        ImGui.Dummy(new Vector2(h, h));
+        ImGui.SameLine(0, 6 * scale);
+        Ui.Text(text);
+    }
+
+    // The old answer dimmed while the new one is worked out (dispose to end).
+    private static IDisposable WorkingDim(bool busy) => ImRaii.PushStyle(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * (busy ? 0.4f : 1f));
 
     // Draws content in a box with padding: a fill (null: none) and a border; fullWidth: as wide as the space left.
     private void Boxed(Action content, Vector4? fill, bool fullWidth, float padX = 10, float padY = 7)
@@ -206,8 +244,10 @@ public partial class MainWindow
         var working = key != finderKey;
 
         // 3. The builds.
-        HeadingRuns(("Builds that get it", null), (working ? "   working out…" : "", Dim));
+        HeadingRuns(("Builds that get it", null));
+        Working(working, "Working out the builds…");
         if (result == null) { FinderFoot(); return; }
+        using var dim = WorkingDim(working);
         FinderNeeds(result);
         if (result.Need.Missing.Count > 0) Colored(Amber, $"No loot data yet for {string.Join(", ", result.Need.Missing)}: its goals are left out.");
         ImGui.Spacing();
@@ -633,10 +673,10 @@ public partial class MainWindow
                 Hover(string.Join(", ", r.MissingParts.Select(p => $"{PartName(p.Letter)} {FinderSlots[p.Slot]}")));
             }
         }, r => r.MissingParts?.Count ?? -1),
-        new("planner", "Planner / Compare", r =>
+        new("planner", "Voyage Planner / Compare", r =>
         {
-            if (Ui.SmallButton($"Open in Planner##finder{string.Concat(r.Parts)}")) FinderOpen(r);
-            Hover("Open this build and the route in Sub Calculator → Planner.");
+            if (Ui.SmallButton($"Open in Voyage Planner##finder{string.Concat(r.Parts)}")) FinderOpen(r);
+            Hover("Open this build and the route in Sub Calculator → Voyage Planner.");
             ImGui.SameLine();
             CmpAddButton($"finder{string.Concat(r.Parts)}{r.Rank}", string.Concat(r.Parts), "from the Build Finder", r.Rank, r.Parts, finderResult?.Route.Select(x => x.Id).ToList());
         }),

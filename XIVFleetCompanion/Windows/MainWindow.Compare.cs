@@ -120,7 +120,7 @@ public partial class MainWindow
             }
         }
         ImGui.SameLine();
-        Colored(Dim, full ? "Take one out to add another." : "or use Add to compare on the Build Finder or Planner.");
+        Colored(Dim, full ? "Take one out to add another." : "or use Add to compare on the Build Finder or Voyage Planner.");
 
         // 2. The route.
         ImGui.Spacing();
@@ -193,14 +193,8 @@ public partial class MainWindow
             RfSegment("cmpHours", RfHours.Select(x => x.Label).ToArray(), Array.FindIndex(RfHours, x => x.Hours == cmpMaxHours), i => cmpMaxHours = RfHours[i].Hours);
             // The Free Company whose explored sectors the routes go through.
             FieldLabel("Sectors explored by");
-            ImGui.SetNextItemWidth(240 * scale);
+            if (FcPicker("cmp", fcs, cmpFc) is { } picked) cmpFc = picked;
             var fc = cmpFc == null ? null : fcs.FirstOrDefault(f => f.FcId == cmpFc);
-            using (var combo = ImRaii.Combo("##cmpFc", fc == null ? (fcs.Count == 0 ? "No Free Company yet" : "Choose…") : fc.Name + (fc.ReadAt == null ? " (not read yet)" : "")))
-            {
-                if (combo)
-                    foreach (var f in fcs)
-                        if (ImGui.Selectable($"{f.Name}{(f.ReadAt == null ? " (not read yet)" : "")}##cmpFc{f.FcId}", f.FcId == cmpFc)) cmpFc = f.FcId;
-            }
             ImGui.SameLine();
             Colored(Dim, fc?.ReadAt is double at ? $"read at the workshop {RfWhen(at)}" : "not read yet: every sector is allowed");
             Colored(Dim, "Must go to:");
@@ -240,13 +234,14 @@ public partial class MainWindow
             cmpWork = Task.Run<CmpResult?>(() => CmpWorkOut(g, data, mode, builds, route, map, rankBy, hours, must, read, kitCost));
         }
         var working = key != cmpKey;
-        HeadingRuns(("Side by side", null), ($"   green: the best of these builds{(working ? " · working out…" : "")}", Dim));
-        if (cmpBuilds.Count == 0) { Ui.Wrapped("Add a build to start: one of your subs, one typed in, or Add to compare on the Build Finder or Planner."); return; }
+        HeadingRuns(("Side by side", null), ("   green: the best of these builds", Dim));
+        if (cmpBuilds.Count == 0) { Ui.Wrapped("Add a build to start: one of your subs, one typed in, or Add to compare on the Build Finder or Voyage Planner."); return; }
+        Working(working, "Working out the comparison…");
         // Only an answer for these builds in this mode.
         var result = cmpResult is { } r0 && r0.Mode == mode && r0.Columns.Count == cmpBuilds.Count ? r0 : null;
-        CmpTable(g, result, mode);
+        using (WorkingDim(working)) CmpTable(g, result, mode);
         ImGui.Spacing();
-        Colored(Dim, "Numbers as the Planner works them out, gil at vendor prices. Best route each: as the Route Finder ranks them (up to 5 stops), only through " +
+        Colored(Dim, "Numbers as the Voyage Planner works them out, gil at vendor prices. Best route each: as the Route Finder ranks them (up to 5 stops), only through " +
                      "sectors the Free Company has discovered. A build that can't fly the route shows why instead of numbers.");
     }
 
@@ -450,7 +445,7 @@ public partial class MainWindow
             ImGui.TableNextColumn();
             var b = cmpBuilds[i];
             var route = result?.Columns[i].Route is { Count: > 0 } rt ? rt : cmpRoute;
-            if (Ui.SmallButton($"Open in Planner##cmpOpen{i}"))
+            if (Ui.SmallButton($"Open in Voyage Planner##cmpOpen{i}"))
             {
                 plannerChosen = null;
                 plannerRank = b.Rank;
@@ -460,7 +455,7 @@ public partial class MainWindow
                 if (route.Count > 0 && g.Sectors.TryGetValue(route[0], out var first)) plannerMap = first.Map;
                 shown = Tab.Planner;
             }
-            Hover("Open this build and its route in Sub Calculator → Planner.");
+            Hover("Open this build and its route in Sub Calculator → Voyage Planner.");
         }
     }
 }

@@ -28,6 +28,8 @@ public partial class MainWindow
     private (long Cid, string SubName)? plannerChosen;
     private string plannerSearch = "";
     private readonly HashSet<string> plannerFolded = new();
+    private string fcPickerSearch = "";
+    private readonly HashSet<string> fcPickerFolded = new();
     private string plannerPlanKey = "";
     private SubCalculator.Plan? plannerPlan;
     private SubStats? plannerStats;
@@ -80,7 +82,7 @@ public partial class MainWindow
         return plannerGame = new PlannerGame(game, sectors, game.Sectors.Where(s => s.Starting).ToList(), maps, ranks, parts, maxRank);
     }
 
-    // "Open in Planner" on the Subs and Route Optimization pages: load that sub, then show the Planner.
+    // "Open in Voyage Planner" on the Subs and Route Optimization pages: load that sub, then show the Planner.
     private void OpenInPlanner(long cid, string subName)
     {
         PlannerLoad(cid, subName);
@@ -111,6 +113,79 @@ public partial class MainWindow
         var at = DateTimeOffset.FromUnixTimeSeconds(returnTime).LocalDateTime;
         var time = at.ToString("t", CultureInfo.CurrentCulture);
         return ($"At sea until {(at.Date == DateTime.Today ? time : $"{at.ToString("ddd", CultureInfo.CurrentCulture)} {time}")}", null);
+    }
+
+    // Choosing a Free Company (Levelling Plan, Route Finder, Compare Builds), the Voyage Planner's way: a panel grouped by
+    // account label (in name order, no label last), each account's Free Companies as the Character Roster orders their
+    // characters, with their world and whether the workshop's sectors have been read; a search across name, world and
+    // account. As the app's FcPicker. Returns the Free Company chosen this frame, else null.
+    private string? FcPicker(string id, List<FcSectors> fcs, string? value)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var chosen = value == null ? null : fcs.FirstOrDefault(f => f.FcId == value);
+        var label = fcs.Count == 0 ? "No Free Company yet" : chosen == null ? "Choose a Free Company…"
+            : $"{chosen.Name}{(chosen.World.Length > 0 ? $" ({chosen.World})" : "")}{(chosen.ReadAt == null ? " · not read yet" : "")}";
+        ImGui.SetNextItemWidth(Math.Max(220 * scale, ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + 16 * scale));
+        if (fcs.Count == 0)
+        {
+            using (ImRaii.Disabled())
+            using (ImRaii.Combo($"##{id}FcPicker", label)) { }
+            return null;
+        }
+        ImGui.SetNextWindowSizeConstraints(new Vector2(440 * scale, 0), new Vector2(float.MaxValue, float.MaxValue));
+        using var popup = ImRaii.Combo($"##{id}FcPicker", label, ImGuiComboFlags.HeightLargest);
+        if (!popup) return null;
+        ImGui.SetNextItemWidth(420 * scale);
+        if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+        ImGui.InputTextWithHint("##fcPickerSearch", "Search Free Company, world or account", ref fcPickerSearch, 64);
+        var searching = fcPickerSearch.Trim().Length > 0;
+        var shown = fcs.Where(f => Matches(fcPickerSearch, new[] { f.Name, f.World }.Concat(f.Accounts.Select(a => a.Account)).ToArray())).ToList();
+        string? picked = null;
+        using var list = ImRaii.Child("##fcPickerList", new Vector2(420 * scale, 320 * scale), false);
+        if (!list) return null;
+        if (shown.Count == 0) { Colored(Dim, $"No Free Company matches “{fcPickerSearch}”."); return null; }
+        foreach (var (account, inIt) in FcPickerGroups(shown))
+        {
+            var aKey = $"a|{account}";
+            if (searching) ImGui.SetNextItemOpen(true);
+            else ImGui.SetNextItemOpen(!fcPickerFolded.Contains(aKey));
+            var aOpen = ImGui.TreeNodeEx($"{account} ({inIt.Count})##fc{aKey}", ImGuiTreeNodeFlags.SpanAvailWidth);
+            if (!searching && ImGui.IsItemToggledOpen()) { if (!fcPickerFolded.Remove(aKey)) fcPickerFolded.Add(aKey); }
+            if (!aOpen) continue;
+            using (var table = ImRaii.Table($"##fcPick{account}", 2, ImGuiTableFlags.SizingStretchProp))
+            {
+                if (table)
+                {
+                    foreach (var f in inIt)
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        if (ImGui.Selectable($"{f.Name}{(f.World.Length > 0 ? $" ({f.World})" : "")}##fcPick{account}{f.FcId}", f.FcId == value, ImGuiSelectableFlags.SpanAllColumns))
+                        {
+                            picked = f.FcId;
+                            ImGui.CloseCurrentPopup();
+                        }
+                        ImGui.TableNextColumn();
+                        Colored(Dim, f.ReadAt is double at ? $"sectors read {RfWhen(at)}" : "not read yet");
+                    }
+                }
+            }
+            ImGui.TreePop();
+        }
+        return picked;
+    }
+
+    // The Free Company picker's groups: accounts in name order with "No account label" last, each account's Free
+    // Companies by where their first character is in the Character Roster, then by name (as the app's fcPickerGroups).
+    internal static List<(string Account, List<FcSectors> Fcs)> FcPickerGroups(IEnumerable<FcSectors> fcs)
+    {
+        const string none = "No account label";
+        return fcs.SelectMany(f => (f.Accounts.Count > 0 ? f.Accounts : new List<(string Account, int SortIndex)> { ("", int.MaxValue) })
+                .Select(a => (Account: a.Account.Length > 0 ? a.Account : none, At: a.SortIndex, F: f)))
+            .GroupBy(x => x.Account)
+            .OrderBy(g => g.Key == none).ThenBy(g => g.Key, StringComparer.CurrentCulture)
+            .Select(g => (g.Key, g.OrderBy(x => x.At).ThenBy(x => x.F.Name, StringComparer.CurrentCultureIgnoreCase).Select(x => x.F).ToList()))
+            .ToList();
     }
 
     // Choosing one of your subs: a panel grouped by account, then character (world, Free Company), each group folding
@@ -211,7 +286,7 @@ public partial class MainWindow
     {
         reader.ReadIfDue(withLists: true); // the subs to choose from, and their Free Companies
         var g = PlannerGameData();
-        if (g == null) { Ui.Wrapped("The Planner needs the game's sub data, which couldn't be read."); return; }
+        if (g == null) { Ui.Wrapped("The Voyage Planner needs the game's sub data, which couldn't be read."); return; }
         var data = SubCalculatorData.Shipped();
         plannerRank = Math.Clamp(plannerRank, 1, g.MaxRank);
         plannerMap ??= g.Maps.Count > 0 ? g.Maps[^1].Id : null;
@@ -256,7 +331,7 @@ public partial class MainWindow
                     // Add to compare: as your sub while its rank and parts are unchanged, else as a build from here.
                     var mine = plannerChosen is { } ch ? reader.Subs.Data?.FirstOrDefault(x => x.Cid == ch.Cid && x.SubName == ch.SubName) : null;
                     var same = mine != null && mine.Rank == plannerRank && mine.Build == string.Join("-", plannerParts);
-                    CmpAddButton("planner", same ? mine!.SubName : string.Concat(plannerParts), same ? string.Join(" · ", new[] { mine!.Character, mine.World }.Where(x => x.Length > 0)) : "from the Planner",
+                    CmpAddButton("planner", same ? mine!.SubName : string.Concat(plannerParts), same ? string.Join(" · ", new[] { mine!.Character, mine.World }.Where(x => x.Length > 0)) : "from the Voyage Planner",
                         plannerRank, plannerParts, plannerRoute, same ? reader.Parts.Data?.Inputs?.Characters?.FirstOrDefault(c => c.Cid == mine!.Cid)?.FcId : null);
                 }
 
@@ -319,7 +394,7 @@ public partial class MainWindow
             plannerPlacesWork = Task.Run(async () =>
             {
                 try { plannerPlaces = (await reader.MarketPlacesAsync()).Values.OrderBy(p => p.Name, StringComparer.Ordinal).ToList(); }
-                catch (Exception ex) { Plugin.Log.Warning(ex, "Planner: Universalis's worlds couldn't be read"); plannerPlaces = new(); }
+                catch (Exception ex) { Plugin.Log.Warning(ex, "Voyage Planner: Universalis's worlds couldn't be read"); plannerPlaces = new(); }
             });
         var homeWorld = chosenSub?.World is { Length: > 0 } cw ? cw : (reader.Subs.Data ?? new List<SubRow>()).Where(x => x.World.Length > 0).GroupBy(x => x.World)
             .OrderByDescending(x => x.Count()).ThenBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Key).FirstOrDefault();

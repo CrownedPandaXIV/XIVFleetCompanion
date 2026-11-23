@@ -95,7 +95,14 @@ namespace XIVFleetCompanion
 
     /// <summary>A Free Company and the sub sectors the plugin last read in its workshop (database update 18), for the Route
     /// Finder and the Fight Club marks: ReadAt in milliseconds (null: not read yet).</summary>
-    public sealed record FcSectors(string FcId, string Name, double? ReadAt, Dictionary<int, (bool Unlocked, bool Explored)> Sectors);
+    /// <summary>One Free Company's sub sectors as last read in its workshop, for the Sub Calculator's pickers: World and
+    /// Accounts (each account label its characters are on, "" for none, with the Character Roster place of the first of
+    /// them) say where it sits in the Free Company picker.</summary>
+    public sealed record FcSectors(string FcId, string Name, double? ReadAt, Dictionary<int, (bool Unlocked, bool Explored)> Sectors)
+    {
+        public string World { get; init; } = "";
+        public List<(string Account, int SortIndex)> Accounts { get; init; } = new();
+    }
 
     /// <summary>The Income page's read: each character's income, the venture rewards, the window (days) and repair kit cost.</summary>
     public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
@@ -671,6 +678,19 @@ namespace XIVFleetCompanion
             catch (Exception ex) when (ex is PostgresException { SqlState: "42P01" } || ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
             {
                 // A database without update 18 yet: nothing read.
+            }
+            // Who is in each: its world, and the account labels its characters are on (as the app's fcSectors).
+            List<SupplyRow> members;
+            try { members = await ReadSupplies(conn); }
+            catch (DbException) { members = new(); }
+            foreach (var id in byFc.Keys.ToList())
+            {
+                var mine = members.Where(m => m.FcId == id).ToList();
+                byFc[id] = byFc[id] with
+                {
+                    World = mine.Select(m => m.World).FirstOrDefault(w => !string.IsNullOrEmpty(w)) ?? "",
+                    Accounts = mine.GroupBy(m => m.Account ?? "").Select(g => (g.Key, g.Min(m => m.SortIndex))).ToList(),
+                };
             }
             return byFc.Values.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         }
