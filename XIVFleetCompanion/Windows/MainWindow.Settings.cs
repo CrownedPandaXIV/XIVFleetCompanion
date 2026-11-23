@@ -23,8 +23,8 @@ public partial class MainWindow
     };
 
     // The boxes as typed; they follow what's read until changed here, and again once saved.
-    private int kitsBox, ceruleumBox, houseBox = 7, notSyncedBox = 30, costBox;
-    private bool warningsTyped, costTyped;
+    private int kitsBox, ceruleumBox, houseBox = 7, notSyncedBox = 30;
+    private bool warningsTyped;
     private DateTime? settingsShownAt;
     // A choice just saved here, shown until the next read has it.
     private (string? Play, bool? Live, DateTime At) settingsPending;
@@ -44,7 +44,6 @@ public partial class MainWindow
         {
             if (!warningsTyped)
                 (kitsBox, ceruleumBox, houseBox, notSyncedBox) = ((int)st.RepairKitThreshold, (int)st.CeruleumThreshold, st.HouseWarnDays, st.NotSyncedMinutes);
-            if (!costTyped) costBox = (int)(st.RepairKitCost ?? 0);
             settingsShownAt = read.At;
         }
         var pending = DateTime.Now - settingsPending.At < TimeSpan.FromSeconds(15) && !(read.At > settingsPending.At);
@@ -79,25 +78,10 @@ public partial class MainWindow
             settingsPending = (null, on, DateTime.Now);
             reader.Edit("Live Market Prices", async c => { await FleetEdits.SaveLivePrices(c, on); return null; });
         }
-        Hover("Universalis (universalis.app) collects market board prices from players. With this on, the cheapest listing of each item on the "
-              + "character's world, data center and region is shown next to the vendor prices: on Income, Gil & Market and the Parts page's "
+        Hover("Universalis (universalis.app) collects market board prices from players. With this on, each item's market price on the "
+              + "character's world, data center and region (the cheapest listing, skipping a lone listing far below the others and checked against "
+              + "the last week's sales) is shown next to the vendor prices: on Income, Gil & Market, the Voyage Planner and the Parts page's "
               + "Shopping List. Only item numbers and world, data center or region names are sent. Prices are kept for 30 minutes.");
-
-        // Repair kit cost.
-        ImGui.Spacing();
-        Ui.Text("Repair kit cost");
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(width);
-        if (Ui.InputInt("##repairKitCost", ref costBox, 0)) costTyped = true;
-        Hover("What one repair kit costs you, for the routes' profit (Route Optimization and Income).");
-        ImGui.SameLine();
-        Tinted(Palette.Gil, "gil");
-        ImGui.SameLine();
-        if (ImGui.Button("Save##repairKitCost"))
-        {
-            var gil = costBox;
-            reader.Edit("the repair kit cost", c => FleetEdits.SaveRepairKitCost(c, gil), error => { if (error == null) costTyped = false; });
-        }
 
         // Warnings.
         ImGui.Spacing();

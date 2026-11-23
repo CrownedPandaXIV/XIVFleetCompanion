@@ -100,6 +100,14 @@ namespace XIVFleetCompanion
             }
         }
 
+        /// <summary>A sector's name without the letter it ends in ("South Isle of Zozonan (A)" -> "South Isle of Zozonan"): the
+        /// letter is shown beside it (as the app).</summary>
+        public static string WithoutLetter(string name, string letter)
+        {
+            var suffix = $"({letter})";
+            return letter.Length > 0 && name.EndsWith(suffix, StringComparison.Ordinal) ? name[..^suffix.Length].TrimEnd() : name;
+        }
+
         /// <summary>The sectors, maps, ranks and parts the routes are worked out from (SubmarineExploration, SubmarineMap,
         /// SubmarineRank, SubmarinePart), read once; null when they can't be read.</summary>
         public static SubGameData? SubGame()
@@ -109,13 +117,14 @@ namespace XIVFleetCompanion
             {
                 var sectors = new List<SubSector>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineExploration>())
-                    sectors.Add(new SubSector((int)r.RowId, r.Location.ExtractText(), (int)r.Map.RowId, r.X, r.Y, r.Z, r.ExpReward, r.SurveyDurationmin, r.StartingPoint));
+                    sectors.Add(new SubSector((int)r.RowId, r.Location.ExtractText(), (int)r.Map.RowId, r.X, r.Y, r.Z, r.ExpReward, r.SurveyDurationmin, r.StartingPoint,
+                        WithoutLetter(r.Destination.ExtractText(), r.Location.ExtractText()), r.RankReq, r.SurveyDistance, r.CeruleumTankReq));
                 var maps = new Dictionary<int, string>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineMap>()) maps[(int)r.RowId] = r.Name.ExtractText();
                 var ranks = new List<SubRank>();
-                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineRank>()) ranks.Add(new SubRank((int)r.RowId, r.SpeedBonus, r.RangeBonus, r.ExpToNext));
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarineRank>()) ranks.Add(new SubRank((int)r.RowId, r.SpeedBonus, r.RangeBonus, r.ExpToNext, r.SurveillanceBonus, r.RetrievalBonus, r.FavorBonus));
                 var parts = new List<SubPartStat>();
-                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range));
+                foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor, r.Rank, r.RepairMaterials));
                 if (sectors.Count > 0 && ranks.Count > 0 && parts.Count > 0) subGame = new SubGameData(sectors, maps, ranks, parts);
             }
             catch (Exception ex)

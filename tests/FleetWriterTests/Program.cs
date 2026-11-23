@@ -39,7 +39,9 @@ internal static partial class Program
             var has = canned.TryGetProperty(scope, out var byItem);
             var found = ids.Where(id => has && byItem.TryGetProperty(id, out _)).ToList();
             if (found.Count == 0) return Task.FromResult(Reply(404, "{}"));
-            string Item(string id) => $"{{\"itemID\":{id},\"listings\":{byItem.GetProperty(id).GetRawText()}}}";
+            var sold = c.TryGetProperty("sold", out var soldAll) && soldAll.TryGetProperty(scope, out var soldHere) ? soldHere : default;
+            string Sales(string id) => sold.ValueKind == System.Text.Json.JsonValueKind.Object && sold.TryGetProperty(id, out var ss) ? ss.GetRawText() : "[]";
+            string Item(string id) => $"{{\"itemID\":{id},\"listings\":{byItem.GetProperty(id).GetRawText()},\"recentHistory\":{Sales(id)}}}";
             return Task.FromResult(Reply(200, ids.Count == 1 ? Item(ids[0]) : $"{{\"items\":{{{string.Join(",", found.Select(id => $"\"{id}\":{Item(id)}"))}}}}}"));
         }
     }
@@ -195,9 +197,11 @@ internal static partial class Program
     {
         var file = System.IO.Path.Combine(AppContext.BaseDirectory, "market-fixture.json");
         using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
-        static string Price(MarketPrice? p) => p == null ? "none" : $"{p.Price.ToString(System.Globalization.CultureInfo.InvariantCulture)}@{p.World ?? "-"}";
+        // A market price as text: price, world, and the outlier checks' note when they changed it.
+        static string Price(MarketPrice? p) => p == null ? "none" : $"{p.Price.ToString(System.Globalization.CultureInfo.InvariantCulture)}@{p.World ?? "-"}{(p.Adjusted ? $" [{p.Note}]" : "")}";
         static string PriceJson(System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? "none"
-            : $"{e.GetProperty("price").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}@{(e.GetProperty("world").ValueKind == System.Text.Json.JsonValueKind.Null ? "-" : e.GetProperty("world").GetString())}";
+            : $"{e.GetProperty("price").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}@{(e.GetProperty("world").ValueKind == System.Text.Json.JsonValueKind.Null ? "-" : e.GetProperty("world").GetString())}"
+              + (e.TryGetProperty("adjusted", out var adj) && adj.GetBoolean() ? $" [{e.GetProperty("note").GetString()}]" : "");
         foreach (var c in doc.RootElement.GetProperty("cases").EnumerateArray())
         {
             var handler = new CannedUniversalis(c);
@@ -220,10 +224,24 @@ internal static partial class Program
             var firstListing = Enumerable.Range(0, Math.Max(compared.Count, app.Count)).FirstOrDefault(k => k >= compared.Count || k >= app.Count || compared[k] != app[k], -1);
             var ventureMine = ventures.Select(v => $"{v.Cid} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(MarketMath.VentureGil(v.Items, market.GetValueOrDefault(v.World), s, vendor, exclude), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
             var ventureApp = expected.GetProperty("ventures").EnumerateArray().Select(v => $"{v.GetProperty("cid").GetString()} " + string.Join(" ", Universalis.Scopes.Select(s => Math.Round(v.GetProperty("gil").GetProperty(s).GetDouble(), 4).ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
+            // One data center asked for by name (the Planner's "Market prices on"): the same prices and notes as that data
+            // center in a world's market.
+            var withDc = market.Values.FirstOrDefault(m => m.Names.Dc != null);
+            var placeSame = true;
+            if (withDc != null)
+            {
+                var ids = withDc.Listings["dc"].Keys.ToList();
+                var alone = await universalis.PlaceAsync(withDc.Names.Dc!, "dc", ids);
+                var (n1, n2) = (new Dictionary<int, string>(), new Dictionary<int, string>());
+                var p1 = Universalis.ScopePrices(withDc, "dc", vendor, exclude, notes: n1);
+                var p2 = Universalis.ScopePrices(alone, "dc", vendor, exclude, notes: n2);
+                placeSame = p1.OrderBy(kv => kv.Key).SequenceEqual(p2.OrderBy(kv => kv.Key)) && n1.OrderBy(kv => kv.Key).SequenceEqual(n2.OrderBy(kv => kv.Key)) && alone.Names.Dc == withDc.Names.Dc;
+            }
+            Check(placeSame, $"market: a data center asked for by name prices the same as in a world's market ({c.GetProperty("name").GetString()})");
             var asked = handler.Asked;
             await universalis.MarketFor(listings.Select(l => (l.World, l.ItemId)));
             Check(names.SequenceEqual(mineNames) && firstListing < 0 && ventureMine.SequenceEqual(ventureApp) && handler.Asked == asked,
-                $"market prices the same as the app's, {c.GetProperty("name").GetString()}: {compared.Count} listings ({compared.Count(x => x.Contains(" True "))} undercut), {ventureMine.Count} characters' ventures, asked again within 30 minutes: kept"
+                $"market prices the same as the app's, {c.GetProperty("name").GetString()}: {compared.Count} listings ({compared.Count(x => x.Contains(" True "))} undercut, {compared.Count(x => x.Contains('['))} with a price the outlier checks changed), {ventureMine.Count} characters' ventures, asked again within 30 minutes: kept"
                 + (firstListing >= 0 ? $" | listing {firstListing + 1}: plugin [{(firstListing < compared.Count ? compared[firstListing] : "none")}], app [{(firstListing < app.Count ? app[firstListing] : "none")}]" : "")
                 + (ventureMine.SequenceEqual(ventureApp) ? "" : $" | ventures: plugin [{string.Join("; ", ventureMine)}], app [{string.Join("; ", ventureApp)}]")
                 + (names.SequenceEqual(mineNames) ? "" : $" | places: plugin [{string.Join(", ", mineNames)}], app [{string.Join(", ", names)}]"));
@@ -1045,6 +1063,493 @@ internal static partial class Program
         }
     }
 
+    // Sub part condition read in the workshop: only changes wait for the sync, and only for characters synced here.
+    private static void PartConditionChecks()
+    {
+        var log = new PartCondition.Log();
+        PartCondition.Reading R(ulong cid, int slot, uint item, int condition, double at) => new(cid, 7, "Kestrel", 1, slot, item, condition, 0, at);
+        var kept = log.Offer(new[] { R(1, 0, 24356, 30000, 1), R(1, 1, 24361, 30000, 1) })
+                   + log.Offer(new[] { R(1, 0, 24356, 30000, 3), R(1, 1, 24361, 30000, 3) })
+                   + log.Offer(new[] { R(1, 0, 24356, 29100, 5), R(1, 1, 24361, 30000, 5), R(1, 2, 0, 30000, 5) })
+                   + log.Offer(new[] { R(1, 0, 24357, 30000, 7) });
+        var taken = log.Take();
+        Check(kept == 4 && taken.Select(r => $"{r.PartSlot}:{r.ItemId}:{r.Condition}@{r.At}").SequenceEqual(new[] { "0:24356:30000@1", "1:24361:30000@1", "0:24356:29100@5", "0:24357:30000@7" })
+              && log.Count == 0,
+            "part condition: a part's first reading, then only when its item or condition changes");
+        log.Offer(new[] { R(1, 0, 24357, 29000, 9) });
+        log.PutBack(taken);
+        Check(log.Take().Select(r => r.At).SequenceEqual(new[] { 1.0, 1, 5, 7, 9 }), "part condition: readings a sync couldn't write go back in front, oldest first");
+        for (var i = 0; i < PartCondition.Log.MaxPending + 10; i++) log.Offer(new[] { R(1, 3, 24360, i, i) });
+        Check(log.Count == PartCondition.Log.MaxPending && log.Take()[0].At == 10, "part condition: at most 5,000 wait, the oldest going first");
+        var rows = PartCondition.ToWrite(new[] { R(1, 0, 24356, 1, 1), R(2, 0, 24356, 1, 1), R(3, 0, 24356, 1, 1) },
+            new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 });
+        Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 1,
+            "part condition: written only for characters synced here that are in a Free Company");
+    }
+
+    private static void SubSectorChecks()
+    {
+        SubSectors.Reading R(ulong cid, double at, params (int Id, bool U, bool E)[] sectors) =>
+            new(cid, sectors.Select(x => new SubSectors.Sector(x.Id, x.U, x.E)).ToList(), at);
+        Check(SubSectors.Problem(new List<SubSectors.Sector>()) != null
+              && SubSectors.Problem(new[] { new SubSectors.Sector(1, false, false), new SubSectors.Sector(2, false, false) }) != null
+              && SubSectors.Problem(new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(2, false, true) }) != null
+              && SubSectors.Problem(new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(2, true, false) }) == null,
+            "sub sectors: a reading is kept only when it makes sense (the first sector unlocked, nothing explored that isn't unlocked)");
+        var log = new SubSectors.Log();
+        var kept = new[]
+        {
+            log.Offer(R(1, 1, (1, false, false), (2, false, false))),  // before the game has the workshop's data
+            log.Offer(R(1, 2, (1, true, true), (2, true, false))),
+            log.Offer(R(1, 3, (1, true, true), (2, true, false))),     // the same again
+            log.Offer(R(1, 4, (1, true, true), (2, true, true))),      // J explored
+            log.Offer(R(2, 5, (1, true, false), (2, false, false))),
+        };
+        var taken = log.Take();
+        Check(kept.SequenceEqual(new[] { false, true, false, true, true }) && taken.Select(r => $"{r.Cid}@{r.At}").SequenceEqual(new[] { "1@4", "2@5" }) && log.Count == 0,
+            "sub sectors: a character's first sensible reading, then only a changed one, the newest waiting");
+        log.Offer(R(2, 6, (1, true, true), (2, false, false)));
+        log.PutBack(taken);
+        Check(log.Take().Select(r => $"{r.Cid}@{r.At}").SequenceEqual(new[] { "1@4", "2@6" }), "sub sectors: a reading a sync couldn't write goes back, unless a newer one came in");
+        var rows = SubSectors.ToWrite(new[] { R(1, 1, (1, true, true)), R(2, 2, (1, true, false)), R(3, 3, (1, true, false)), R(4, 4, (1, true, true)) },
+            new Dictionary<ulong, ulong> { [1] = 900, [2] = 900, [3] = 0 });
+        Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 2,
+            "sub sectors: written for characters synced here that are in a Free Company, the newest reading per FC");
+    }
+
+    // The Sub Calculator: its data file (the app's, copied by its fixture script) and a build's five stats, with the app's
+    // own cases (tests/sub-calculator-data.test.js).
+    private static void SubCalculatorChecks()
+    {
+        var data = SubCalculatorData.Shipped();
+        var bottom = data.Find(28); // the Rimilala Trench Bottom (AB)
+        Check(data.Sectors.Count >= 140 && data.About.XivstatsUpdated != null, $"Sub Calculator data: {data.Sectors.Count} sectors, XIVStats updated {data.About.XivstatsUpdated:u}");
+        Check(bottom != null && bottom.Xivstats.SequenceEqual(new[] { 130, 150, 155, 200, 120 }) && bottom.Pools[1].Loot.Count > 0 && bottom.Pools[2].Loot.Count > 0,
+            "Sub Calculator data: a sector's XIVStats breakpoints and loot by tier");
+        Check(data.Sectors.Count(s => s.Pepper != null) >= 130
+              && data.Sectors.Where(s => s.Pepper != null).All(s => s.Pepper!.Select((v, i) => Math.Abs(v - s.Xivstats[i])).All(d => d <= 20)),
+            "Sub Calculator data: Pepper's figures beside XIVStats', typos left out");
+        Check(data.Sectors.All(s => s.Pools[1].Loot.All(l => l.PoorMin <= l.PoorMax && l.NormalMin <= l.NormalMax && l.OptimalMin <= l.OptimalMax)),
+            "Sub Calculator data: every amount range runs low to high");
+
+        var ranks = new Dictionary<int, SubRank> { [100] = new(100, 60, 50, 0, 80, 90, 70), [101] = new(101, 61, 51, 0) };
+        var parts = new Dictionary<(int, int), SubPartStat>();
+        for (var slot = 0; slot < 4; slot++)
+        {
+            parts[(1, slot)] = new SubPartStat(1, slot, 5, 15, 10 + slot, 20, 12);
+            parts[(5, slot)] = new SubPartStat(5, slot, 8, 22, 30, 25 + slot, 18);
+        }
+        Check(SubRoutes.BuildStats(100, new[] { "W", "Y", "W", "Y" }, ranks, parts)
+              == new SubStats(80 + 10 + 30 + 12 + 30, 90 + 20 + 26 + 20 + 28, 60 + 5 + 8 + 5 + 8, 50 + 15 + 22 + 15 + 22, 70 + 12 + 18 + 12 + 18),
+            "Sub Calculator: a build's five stats are the rank's bonus plus its four parts'");
+        Check(SubRoutes.BuildStats(101, new[] { "W", "W", "W", "W" }, ranks, parts) == null
+              && SubRoutes.Stat(101, new[] { "W", "W", "W", "W" }, true, ranks, parts) == 61 + 20
+              && SubRoutes.BuildStats(100, new[] { "W", "S", "W", "W" }, ranks, parts) == null
+              && SubRoutes.BuildStats(99, new[] { "W", "W", "W", "W" }, ranks, parts) == null,
+            "Sub Calculator: a stat the game data lacks is unknown, not 0");
+        SubCalculatorAgainstTheApp();
+    }
+
+    // The Planner's working out (SubCalculator) against the app's answers for made-up game data (calculator-fixture.json,
+    // written by the app's tests/db/calculator-fixture.js): stats, order, range, voyage, experience, loot, gil and wear.
+    private static void SubCalculatorAgainstTheApp()
+    {
+        // Best order with the sub's range: the fastest it can fly (the app's hand-worked case: C-B-A uses 71 range and
+        // takes 60,861 seconds at speed 210, B-C-A uses 72 and takes 60,821).
+        {
+            var home = new SubSector(10, "", 1, 0, 0, 0, 0, 0, true);
+            SubSector At(string l, double x, double y) => new(l[0], l, 1, x, y, 0, 1, 60, false, l, 0, 10);
+            var three = new List<SubSector> { At("A", 728, 706), At("B", 419, 469), At("C", 310, 599) };
+            string Order(double? range) => string.Concat(SubCalculator.BestOrder(three, home, 210, range).Select(x => x.Location));
+            Check(Order(null) == "CBA" && Order(72) == "BCA" && Order(71) == "CBA" && Order(50) == "CBA",
+                $"best order: the fastest the sub's range allows, else the least range ({Order(null)} {Order(72)} {Order(71)} {Order(50)})");
+        }
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "calculator-fixture.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+        var root = doc.RootElement;
+        var g = root.GetProperty("game");
+        var all = g.GetProperty("sectors").EnumerateArray().Select(s => new SubSector(s.GetProperty("id").GetInt32(), s.GetProperty("location").GetString() ?? "",
+            s.GetProperty("map").GetInt32(), s.GetProperty("x").GetDouble(), s.GetProperty("y").GetDouble(), s.GetProperty("z").GetDouble(),
+            s.GetProperty("expReward").GetDouble(), s.GetProperty("surveyMinutes").GetDouble(), s.GetProperty("starting").GetBoolean(),
+            s.GetProperty("name").GetString() ?? "", s.GetProperty("rankReq").GetInt32(), s.GetProperty("surveyDistance").GetInt32(), s.GetProperty("tanks").GetInt32())).ToList();
+        var byId = all.Where(s => !s.Starting).ToDictionary(s => s.Id);
+        var starts = all.Where(s => s.Starting).ToList();
+        var ranks = g.GetProperty("ranks").EnumerateArray().ToDictionary(r => r.GetProperty("id").GetInt32(), r => new SubRank(r.GetProperty("id").GetInt32(),
+            r.GetProperty("speed").GetDouble(), r.GetProperty("range").GetDouble(), 0, r.GetProperty("surveillance").GetDouble(), r.GetProperty("retrieval").GetDouble(), r.GetProperty("favor").GetDouble()));
+        var partList = g.GetProperty("parts").EnumerateArray().Select(p => new SubPartStat(p.GetProperty("class").GetInt32(), p.GetProperty("slot").GetInt32(),
+            p.GetProperty("speed").GetDouble(), p.GetProperty("range").GetDouble(), p.GetProperty("surveillance").GetDouble(), p.GetProperty("retrieval").GetDouble(),
+            p.GetProperty("favor").GetDouble(), p.GetProperty("rank").GetInt32(), p.GetProperty("repairKits").GetInt32())).ToList();
+        var parts = partList.ToDictionary(p => (p.Class, p.Slot));
+        var kitCost = root.GetProperty("repairKitCost").GetDouble();
+        var data = SubCalculatorData.Shipped();
+        static double Price(uint id) => id % 97 * 10;
+        static bool Near(double? a, System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? a == null
+            : a is double x && Math.Abs(x - e.GetDouble()) <= 1e-5 * Math.Max(1, Math.Abs(e.GetDouble()));
+
+        int cases = 0, good = 0;
+        var firstWrong = "";
+        foreach (var c in root.GetProperty("cases").EnumerateArray())
+        {
+            cases++;
+            var letters = c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+            var rank = c.GetProperty("rank").GetInt32();
+            var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
+            var route = c.GetProperty("route").EnumerateArray().Select(x => byId[x.GetInt32()]).ToList();
+            if (c.GetProperty("bestOrder").GetBoolean() && route.Count > 1 && stats != null)
+                route = SubCalculator.BestOrder(route, SubRoutes.StartFor(route[0].Id, starts), stats.Speed, stats.Range);
+            var p = SubCalculator.PlanFor(route.Select(s => s.Id).ToList(), stats, letters.Select(l => SubRoutes.PartClass[l]).ToList(), byId, starts, partList, data, Price, kitCost);
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            var es = c.GetProperty("stats");
+            Want(stats != null && Near(stats.Surveillance, es.GetProperty("surveillance")) && Near(stats.Retrieval, es.GetProperty("retrieval"))
+                 && Near(stats.Speed, es.GetProperty("speed")) && Near(stats.Range, es.GetProperty("range")) && Near(stats.Favor, es.GetProperty("favor")), "stats");
+            Want(route.Select(s => s.Id).SequenceEqual(c.GetProperty("order").EnumerateArray().Select(x => x.GetInt32())), "order");
+            if (p == null) { wrong.Add("no plan"); }
+            else
+            {
+                Want(Near(p.Range, c.GetProperty("range")), "range");
+                Want(Near(p.Hours, c.GetProperty("hours")), "hours");
+                Want(Near(p.Exp, c.GetProperty("exp")) && Near(p.ExpSure, c.GetProperty("expSure")) && Near(p.ExpBest, c.GetProperty("expBest")), "experience");
+                Want(p.Tanks == c.GetProperty("tanks").GetInt32(), "tanks");
+                Want(Near(p.GilPerVoyage, c.GetProperty("gilPerVoyage")) && Near(p.GilPerDay, c.GetProperty("gilPerDay")) && Near(p.VoyagesPerDay, c.GetProperty("voyagesPerDay")), "gil");
+                Want(Near(p.KitsPerVoyage, c.GetProperty("kitsPerVoyage")) && Near(p.RepairGilPerDay, c.GetProperty("repairGilPerDay")), "repairs");
+                var ew = c.GetProperty("wear").EnumerateArray().ToList();
+                Want(ew.Count == p.Wear.Count && ew.Select((w, i) => w.ValueKind == System.Text.Json.JsonValueKind.Null ? p.Wear[i] == null
+                    : p.Wear[i] is { } pw && pw.Slot == w.GetProperty("slot").GetInt32() && Near(pw.Lost, w.GetProperty("lost")) && Near(pw.VoyagesLasting, w.GetProperty("voyagesLasting"))
+                      && Near(pw.KitsPerVoyage, w.GetProperty("kitsPerVoyage"))).All(x => x), "wear");
+                var esec = c.GetProperty("sectors").EnumerateArray().ToList();
+                Want(esec.Count == p.Sectors.Count && esec.Select((e, i) =>
+                {
+                    var sp = p.Sectors[i];
+                    if (sp.Sector.Id != e.GetProperty("id").GetInt32()) return false;
+                    var r = e.GetProperty("result");
+                    if (r.ValueKind == System.Text.Json.JsonValueKind.Null) return sp.Result == null;
+                    var res = sp.Result!;
+                    var need = r.GetProperty("need");
+                    var b = e.GetProperty("bonus");
+                    return res.Tier == r.GetProperty("tier").GetInt32() && res.TierSure == r.GetProperty("tierSure").GetString() && res.Retrieval == r.GetProperty("retrieval").GetString()
+                        && res.RetrievalSure == r.GetProperty("retrievalSure").GetString() && res.DoubleDip == r.GetProperty("doubleDip").GetString()
+                        && res.SureTier == r.GetProperty("sureTier").GetInt32() && res.SureRetrieval == r.GetProperty("sureRetrieval").GetString()
+                        && Near(res.Need.T2, need.GetProperty("t2")) && Near(res.Need.T3, need.GetProperty("t3")) && Near(res.Need.Normal, need.GetProperty("normal"))
+                        && Near(res.Need.Optimal, need.GetProperty("optimal")) && Near(res.Need.Favor, need.GetProperty("favor"))
+                        && sp.Bonus!.Sure == b.GetProperty("sure").GetInt32() && sp.Bonus.Best == b.GetProperty("best").GetInt32();
+                }).All(x => x), "sector results");
+                Want(p.MissingData.Select(s => s.Id).SequenceEqual(c.GetProperty("missingData").EnumerateArray().Select(x => x.GetInt32())), "missing data");
+                var el = c.GetProperty("loot").EnumerateArray().ToList();
+                Want(el.Count == p.Loot.Count && el.Select((e, i) =>
+                {
+                    var l = p.Loot[i];
+                    return l.ItemId == e.GetProperty("itemId").GetUInt32() && l.Tier == e.GetProperty("tier").GetInt32() && l.Low == e.GetProperty("low").GetInt32()
+                        && l.High == e.GetProperty("high").GetInt32() && Near(l.PerVoyage, e.GetProperty("perVoyage")) && Near(l.Gil, e.GetProperty("gil"))
+                        && Near(l.Chance, e.GetProperty("chance"))
+                        && l.Sectors.SequenceEqual(e.GetProperty("sectors").EnumerateArray().Select(x => x.GetString()!));
+                }).All(x => x), "loot");
+            }
+            if (wrong.Count == 0) good++;
+            else if (firstWrong.Length == 0) firstWrong = $" (first wrong: rank {rank} {string.Join("", letters)} route {string.Join(",", route.Select(s => s.Id))}: {string.Join(", ", wrong)})";
+        }
+        Check(cases >= 30 && good == cases, $"Sub Calculator: the plugin's plans match the app's for {good} of {cases} builds and routes{firstWrong}");
+
+        // The Build Finder: what the goals need, how many builds reach them, and the first 25 builds each way sorted.
+        var f = root.GetProperty("finder");
+        var owned = f.GetProperty("owned").EnumerateArray().Select(x => x.GetString()!).ToHashSet();
+        var partFilter = f.GetProperty("partFilter").EnumerateArray().Select(x => x.ValueKind == System.Text.Json.JsonValueKind.Null ? null
+            : x.TryGetProperty("own", out var own) && own.GetBoolean() ? new BuildFinder.SlotFilter(true, Array.Empty<string>())
+            : new BuildFinder.SlotFilter(false, x.GetProperty("letters").EnumerateArray().Select(l => l.GetString()!).ToList())).ToList();
+        int fCases = 0, fGood = 0;
+        var fWrong = "";
+        static bool NeedIs(SubCalculator.Breakpoint? bp, System.Text.Json.JsonElement e) => e.ValueKind == System.Text.Json.JsonValueKind.Null ? bp == null
+            : bp != null && bp.Low == e.GetProperty("low").GetInt32() && bp.High == e.GetProperty("high").GetInt32();
+        foreach (var c in f.GetProperty("cases").EnumerateArray())
+        {
+            fCases++;
+            var goals = c.GetProperty("goals").EnumerateArray().Select(g => new BuildFinder.Goal(g.GetProperty("sectorId").GetInt32(), g.GetProperty("tier").GetInt32(),
+                g.GetProperty("optimal").GetBoolean(), g.GetProperty("doubleDip").GetBoolean(), g.GetProperty("items").EnumerateArray().Select(x => x.GetUInt32()).ToList())).ToList();
+            var sureOnly = c.GetProperty("sureOnly").GetBoolean();
+            var sectorsHere = goals.Select(g => byId[g.SectorId]).ToList();
+            var start = SubRoutes.StartFor(sectorsHere[0].Id, starts);
+            var route = sectorsHere.Count > 1 ? SubCalculator.BestOrder(sectorsHere, start, 100) : sectorsHere;
+            var need = BuildFinder.NeedsFor(goals, id => data.Find(id), id => byId[id].Location);
+            var minRank = Math.Max(1, sectorsHere.Max(s => s.RankReq));
+            var rows = BuildFinder.FindBuilds(need, ranks, parts, minRank, 125, route, start, owned, sureOnly);
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            var en = c.GetProperty("need");
+            Want(route.Select(s => s.Id).SequenceEqual(c.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())), "route");
+            Want(NeedIs(need.Surveillance, en.GetProperty("surveillance")) && NeedIs(need.Retrieval, en.GetProperty("retrieval")) && NeedIs(need.Favor, en.GetProperty("favor")), "needs");
+            Want(need.WhySurveillance.Concat(need.WhyRetrieval).Concat(need.WhyFavor).SequenceEqual(new[] { "surveillance", "retrieval", "favor" }
+                .SelectMany(k => c.GetProperty("why").GetProperty(k).EnumerateArray().Select(x => x.GetString()!))), "why");
+            Want(minRank == c.GetProperty("minRank").GetInt32(), "rank");
+            var tooLow = rows.FirstOrDefault(r => r.Rank < r.Parts.Select((l, slot) => parts[(SubRoutes.PartClass[l], slot)].PartRank).Max());
+            Want(tooLow == null, $"no build below its parts' ranks ({(tooLow == null ? "" : $"{string.Join("", tooLow.Parts)} at {tooLow.Rank}")})");
+            Want(rows.Count == c.GetProperty("total").GetInt32() && rows.Count(r => r.Sure) == c.GetProperty("sure").GetInt32()
+                 && rows.Count(r => r.RangeShort > 0) == c.GetProperty("outOfRange").GetInt32(), $"counts ({rows.Count} builds)");
+            foreach (var sorted in c.GetProperty("sorted").EnumerateObject())
+            {
+                var mine = BuildFinder.SortBuilds(rows, sorted.Name).Take(25).ToList();
+                var theirs = sorted.Value.EnumerateArray().ToList();
+                Want(mine.Count == theirs.Count && theirs.Select((e, i) =>
+                {
+                    var r = mine[i];
+                    var st = e.GetProperty("stats");
+                    var spare = e.GetProperty("spare");
+                    return r.Parts.SequenceEqual(e.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!)) && r.Rank == e.GetProperty("rank").GetInt32()
+                        && r.Sure == e.GetProperty("sure").GetBoolean() && Near(r.SureRank, e.GetProperty("sureRank"))
+                        && Near(r.Stats.Surveillance, st.GetProperty("surveillance")) && Near(r.Stats.Retrieval, st.GetProperty("retrieval")) && Near(r.Stats.Speed, st.GetProperty("speed"))
+                        && Near(r.Stats.Range, st.GetProperty("range")) && Near(r.Stats.Favor, st.GetProperty("favor"))
+                        && Near(r.SpareSurveillance, spare.GetProperty("surveillance")) && Near(r.SpareRetrieval, spare.GetProperty("retrieval")) && Near(r.SpareFavor, spare.GetProperty("favor"))
+                        && Near(r.RangeShort, e.GetProperty("rangeShort")) && Near(r.InRangeFrom, e.GetProperty("inRangeFrom")) && Near(r.Hours, e.GetProperty("hours"))
+                        && r.MissingParts!.Select(m => $"{m.Letter}|{m.Slot}").SequenceEqual(e.GetProperty("missing").EnumerateArray().Select(x => x.GetString()!));
+                }).All(x => x), $"sorted by {sorted.Name}");
+            }
+            // The part filter (the same for every case).
+            var kept = BuildFinder.SortBuilds(BuildFinder.FilterByParts(rows, partFilter, owned), "rank");
+            var ef = c.GetProperty("filtered");
+            Want(kept.Count == ef.GetProperty("total").GetInt32() && kept.Take(25).Select(r => string.Join("|", r.Parts))
+                .SequenceEqual(ef.GetProperty("first").EnumerateArray().Select(x => x.GetString()!)), $"part filter ({kept.Count} builds)");
+            if (wrong.Count == 0) fGood++;
+            else if (fWrong.Length == 0) fWrong = $" (first wrong: case {fCases}: {string.Join(", ", wrong)})";
+        }
+        Check(fCases >= 10 && fGood == fCases, $"Build Finder: the plugin's builds match the app's for {fGood} of {fCases} sets of goals{fWrong}");
+
+        // The Route Finder: an FC's reading, routes for builds on each map (the first 30 each), its unlocks, and Fight Club
+        // routes checked against the reading.
+        var rf = root.GetProperty("routeFinder");
+        var read = rf.GetProperty("read").EnumerateArray().ToDictionary(x => x.GetProperty("id").GetInt32(), x => (x.GetProperty("unlocked").GetBoolean(), x.GetProperty("explored").GetBoolean()));
+        var openerOf = rf.GetProperty("openerOf").EnumerateArray().ToDictionary(x => x[0].GetInt32(), x => x[1].GetInt32());
+        Check(openerOf.All(kv => (data.Find(kv.Key)?.UnlockedFrom ?? 0) == kv.Value), "Route Finder: what opens what, from the shipped data, as the app reads it");
+        var states = RouteFinder.SectorStates(byId.Keys, read, openerOf);
+        var unread = RouteFinder.SectorStates(byId.Keys, null, openerOf);
+        var opens = RouteFinder.OpensOf(openerOf);
+        int rCases = 0, rGood = 0;
+        var rWrong = "";
+        foreach (var c in rf.GetProperty("cases").EnumerateArray())
+        {
+            rCases++;
+            var letters = c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+            var rank = c.GetProperty("rank").GetInt32();
+            var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
+            var mapId = c.GetProperty("mapId").GetInt32();
+            var onMap = byId.Values.Where(x => x.Map == mapId).OrderBy(x => x.Id).ToList();
+            var st = c.GetProperty("read").GetBoolean() ? states : unread;
+            var allowed = RouteFinder.UsableSectors(onMap, rank, st, c.GetProperty("leaveOut").EnumerateArray().Select(x => x.GetInt32()).ToList());
+            var values = onMap.ToDictionary(x => x.Id, x => RouteFinder.SectorValue(x, data.Find(x.Id), stats!, Price));
+            var maxHours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
+            uint? itemId = c.GetProperty("itemId").ValueKind == System.Text.Json.JsonValueKind.Null ? null : c.GetProperty("itemId").GetUInt32();
+            var routes = RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, c.GetProperty("maxStops").GetInt32(), maxHours,
+                c.GetProperty("must").EnumerateArray().Select(x => x.GetInt32()).ToList(), values, c.GetProperty("rankBy").GetString()!, itemId, opens, st,
+                c.GetProperty("exploreFirst").GetBoolean());
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            Want(allowed.Select(x => x.Id).SequenceEqual(c.GetProperty("allowed").EnumerateArray().Select(x => x.GetInt32())), "the sectors it may use");
+            Want(routes.Count == c.GetProperty("total").GetInt32(), $"how many ({routes.Count})");
+            var theirs = c.GetProperty("first").EnumerateArray().ToList();
+            for (var i = 0; i < theirs.Count && i < routes.Count && wrong.Count == 0; i++)
+            {
+                var r = routes[i];
+                var e = theirs[i];
+                Want(r.Sectors.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())) && Near(r.Hours, e.GetProperty("hours"))
+                     && r.Range == e.GetProperty("range").GetInt32() && Near(r.Exp, e.GetProperty("exp")) && Near(r.ExpPerHour, e.GetProperty("expPerHour"))
+                     && Near(r.GilPerVoyage, e.GetProperty("gilPerVoyage")) && Near(r.GilPerDay, e.GetProperty("gilPerDay")) && Near(r.ItemPerDay, e.GetProperty("itemPerDay"))
+                     && r.Explores == e.GetProperty("explores").GetInt32() && r.Chances == e.GetProperty("chances").GetInt32(), $"route {i + 1} ({string.Join("-", r.Sectors)})");
+            }
+            if (wrong.Count == 0) rGood++;
+            else if (rWrong.Length == 0) rWrong = $" (first wrong: case {rCases}: {string.Join(", ", wrong)})";
+        }
+        Check(rCases >= 5 && rGood == rCases, $"Route Finder: the plugin's routes match the app's for {rGood} of {rCases} builds and maps{rWrong}");
+
+        foreach (var eu in rf.GetProperty("unlocks").EnumerateArray())
+        {
+            var early = eu.GetProperty("read").GetString() == "early";
+            var readHere = early ? read.ToDictionary(kv => kv.Key, kv => kv.Key >= 32 ? (false, false) : kv.Value) : read;
+            var u = RouteFinder.UnlocksOf(byId.Values.OrderBy(x => x.Id).ToList(),
+                eu.GetProperty("maps").EnumerateArray().Select(m => (m.GetProperty("id").GetInt32(), m.GetProperty("name").GetString()!)).ToList(),
+                RouteFinder.SectorStates(byId.Keys, readHere, openerOf), openerOf);
+            var nm = eu.GetProperty("nextMap");
+            Check(u.Maps.Select(m => $"{m.Id}:{m.Total}/{m.Explored}/{m.Discovered}/{m.Open}").SequenceEqual(eu.GetProperty("maps").EnumerateArray()
+                      .Select(m => $"{m.GetProperty("id").GetInt32()}:{m.GetProperty("total").GetInt32()}/{m.GetProperty("explored").GetInt32()}/{m.GetProperty("discovered").GetInt32()}/{m.GetProperty("open").GetBoolean()}"))
+                  && u.Sure.SequenceEqual(eu.GetProperty("sure").EnumerateArray().Select(x => x.GetInt32()))
+                  && u.Chance.Select(x => $"{x.Id}<{x.From}").SequenceEqual(eu.GetProperty("chance").EnumerateArray().Select(x => $"{x.GetProperty("id").GetInt32()}<{x.GetProperty("from").GetInt32()}"))
+                  && (nm.ValueKind == System.Text.Json.JsonValueKind.Null ? u.Next == null
+                      : u.Next != null && u.Next.Id == nm.GetProperty("id").GetInt32() && u.Next.First == nm.GetProperty("first").GetInt32()
+                        && u.Next.Steps.Select(x => $"{x.Id}:{x.How}").SequenceEqual(nm.GetProperty("steps").EnumerateArray().Select(x => $"{x.GetProperty("id").GetInt32()}:{x.GetProperty("how").GetString()}"))),
+                $"Route Finder: the unlocks match the app's{(early ? ", before the second map opened" : "")} (sure {string.Join(",", u.Sure)}; could open {u.Chance.Count}; next map: {(u.Next == null ? "none" : string.Join(" > ", u.Next.Steps.Select(x => $"{x.Id} {x.How}")))})");
+        }
+
+        var fc = rf.GetProperty("fightClub");
+        var fcRows = fc.GetProperty("rows").EnumerateArray().Select((x, i) => new FightClubRow(i + 1, x.GetProperty("route").GetString()!, x.GetProperty("hours").GetDouble(),
+            x.GetProperty("repair_times").GetString(), x.GetProperty("gil_sub_day").GetDouble(), x.GetProperty("rec_build_notes").GetString(), null, null, kitCost)).ToList();
+        var fcMaps = fc.GetProperty("maps").EnumerateArray().ToDictionary(m => m.GetProperty("id").GetInt32(),
+            m => m.GetProperty("letters").EnumerateArray().ToDictionary(x => x[0].GetString()!, x => x[1].GetInt32()));
+        var fcAll = fc.GetProperty("cases").EnumerateArray().Select(e =>
+        {
+            var mine = RouteFinder.CheckFightClub(fcRows, e.GetProperty("rank").GetInt32(), fcMaps, read);
+            string? S(string p) => e.GetProperty(p).ValueKind == System.Text.Json.JsonValueKind.Null ? null : e.GetProperty(p).GetString();
+            return (Ok: mine.Route == S("best") && mine.AltRoute == S("alt") && mine.Missing.SequenceEqual(e.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32())),
+                Text: $"{e.GetProperty("rank").GetInt32()}: {mine.Route} needs [{string.Join(",", mine.Missing)}] → {mine.AltRoute}");
+        }).ToList();
+        Check(fcAll.Count >= 4 && fcAll.All(x => x.Ok), $"Route Finder: Fight Club routes checked against the FC's sectors as the app does ({string.Join("; ", fcAll.Select(x => x.Text))})");
+
+        // Compare (as the app's subs/compare.js): builds on one route as given, and each on its own best route on a map
+        // through the FC's reading; whether each can fly it, the numbers for each row, and the best in each row.
+        int cCases = 0, cGood = 0;
+        var cWrong = "";
+        foreach (var c in root.GetProperty("compare").GetProperty("cases").EnumerateArray())
+        {
+            cCases++;
+            var best = c.GetProperty("mode").GetString() == "best";
+            var mine = new List<(List<int> Route, SubCompare.Check Check, bool Flies, Dictionary<string, double?> Values)>();
+            foreach (var b in c.GetProperty("builds").EnumerateArray())
+            {
+                var letters = b.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+                var rank = b.GetProperty("rank").GetInt32();
+                var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
+                var route = best ? new List<int>() : c.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()).ToList();
+                if (best && stats != null)
+                {
+                    var onMap = byId.Values.Where(x => x.Map == c.GetProperty("mapId").GetInt32()).OrderBy(x => x.Id).ToList();
+                    var allowed = RouteFinder.UsableSectors(onMap, rank, states, new List<int>());
+                    var values = onMap.ToDictionary(x => x.Id, x => RouteFinder.SectorValue(x, data.Find(x.Id), stats, Price));
+                    var must = c.GetProperty("must").EnumerateArray().Select(x => x.GetInt32()).ToList();
+                    var maxHours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
+                    var routes = must.All(id => allowed.Any(a => a.Id == id))
+                        ? RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, must, values, c.GetProperty("rankBy").GetString()!, null, opens, states, false)
+                        : new List<RouteFinder.Route>();
+                    route = routes.Count > 0 ? routes[0].Sectors : new List<int>();
+                }
+                var sectorsHere = route.Select(id => byId[id]).ToList();
+                var check = SubCompare.RouteCheck(sectorsHere, sectorsHere.Count > 0 ? SubRoutes.StartFor(sectorsHere[0].Id, starts) : null, stats, rank);
+                var flies = route.Count > 0 && check.Short == 0 && check.TooHigh.Count == 0;
+                var plan = route.Count > 0 ? SubCalculator.PlanFor(route, stats, letters.Select(l => SubRoutes.PartClass[l]).ToList(), byId, starts, partList, data, Price, kitCost) : null;
+                mine.Add((route, check, flies, SubCompare.RowValues(stats, plan, flies)));
+            }
+            var marks = SubCompare.BestMarks(mine.Select(m => m.Values).ToList());
+            var wrong = new List<string>();
+            var theirs = c.GetProperty("columns").EnumerateArray().ToList();
+            for (var i = 0; i < theirs.Count; i++)
+            {
+                var e = theirs[i];
+                var m = mine[i];
+                if (!m.Route.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))) wrong.Add($"build {i + 1}'s route ({string.Join("-", m.Route)})");
+                if (!Near(m.Check.Used, e.GetProperty("used")) || m.Check.Short != e.GetProperty("short").GetInt32() || m.Flies != e.GetProperty("flies").GetBoolean()
+                    || !m.Check.TooHigh.SequenceEqual(e.GetProperty("tooHigh").EnumerateArray().Select(x => x.GetInt32()))) wrong.Add($"build {i + 1} can fly it ({m.Check.Short} short)");
+                foreach (var (key, _) in SubCompare.Rows)
+                    if (!Near(m.Values[key], e.GetProperty("values").GetProperty(key))) wrong.Add($"build {i + 1}'s {key} ({m.Values[key]})");
+            }
+            var theirMarks = c.GetProperty("marks").EnumerateObject().ToDictionary(x => x.Name, x => x.Value.EnumerateArray().Select(v => v.GetInt32()).ToList());
+            if (marks.Count != theirMarks.Count || marks.Any(kv => !theirMarks.TryGetValue(kv.Key, out var t) || !t.SequenceEqual(kv.Value)))
+                wrong.Add($"the best in each row ({string.Join(", ", marks.Select(kv => $"{kv.Key}:{string.Join("+", kv.Value)}"))})");
+            if (wrong.Count == 0) cGood++;
+            else if (cWrong.Length == 0) cWrong = $" (first wrong: case {cCases}: {string.Join(", ", wrong.Take(4))})";
+        }
+        Check(cCases >= 4 && cGood == cCases, $"Compare: the plugin's columns and best figures match the app's for {cGood} of {cCases} sets of builds{cWrong}");
+
+        // The Levelling Plan (as the app's subs/levelling.js): subs from a rank to a target, with and without the FC's
+        // reading, keeping the build or with swaps suggested; each stage, swap and total.
+        var lvRoot = root.GetProperty("levelling");
+        var lvExp = lvRoot.GetProperty("expToNext").EnumerateArray().ToDictionary(x => x[0].GetInt32(), x => x[1].GetDouble());
+        var lvOwned = lvRoot.GetProperty("owned").EnumerateArray().Select(x => x.GetString()!).ToHashSet();
+        var lvSearches = new Dictionary<string, Levelling.Searches>();
+        Levelling.Searches LvSearch(bool withRead, double? hours)
+        {
+            var k = $"{withRead}|{hours}";
+            if (!lvSearches.TryGetValue(k, out var s))
+                lvSearches[k] = s = new Levelling.Searches(byId, starts, new[] { 1, 2 }, ranks, parts, partList, data, Price, kitCost, withRead ? read : null, hours);
+            return s;
+        }
+        int lCases = 0, lGood = 0;
+        var lvPlaced = new List<string>();
+        var lvPlacedWrong = false;
+        var lWrong = "";
+        foreach (var c in lvRoot.GetProperty("cases").EnumerateArray())
+        {
+            lCases++;
+            var withRead = c.GetProperty("read").GetBoolean();
+            var hours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
+            var search = LvSearch(withRead, hours);
+            var plan = Levelling.LevellingPlan(c.GetProperty("rank").GetInt32(), c.GetProperty("exp").GetDouble(), c.GetProperty("target").GetInt32(), lvExp,
+                c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray(), search.BestAt, search.Score,
+                c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned, Levelling.PartRanks(partList));
+            if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read);
+            var placed = Levelling.SwapsByStage(plan);
+            lvPlaced.Add($"{plan.Swaps.Count}/{placed.Sum(l => l.Count)}");
+            if (placed.Sum(l => l.Count) != plan.Swaps.Count || placed.Select((l, i) => l.Any(x => x.ShowRank != plan.Stages[i].FromRank || x.ShowRank < x.Swap.AtRank
+                    || (i > 0 && plan.Stages[i - 1].FromRank >= x.Swap.AtRank))).Any(bad => bad)) lvPlacedWrong = true;
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            Want(plan.Voyages == c.GetProperty("voyages").GetInt32() && Near(plan.Hours, c.GetProperty("hours")) && plan.Tanks == c.GetProperty("tanks").GetInt32()
+                 && Near(plan.Kits, c.GetProperty("kits")) && Near(plan.ExpNeeded, c.GetProperty("expNeeded")) && plan.Reached == c.GetProperty("reached").GetBoolean()
+                 && Near(plan.StuckAt, c.GetProperty("stuckAt")) && Near(plan.KeepHours, c.GetProperty("keepHours")), $"the totals ({plan.Voyages} voyages, {plan.Hours:0.##}h)");
+            var eSwaps = c.GetProperty("swaps").EnumerateArray().ToList();
+            Want(plan.Swaps.Count == eSwaps.Count && plan.Swaps.Zip(eSwaps).All(z => z.First.AtRank == z.Second.GetProperty("atRank").GetInt32() && z.First.Slot == z.Second.GetProperty("slot").GetInt32()
+                 && z.First.From == z.Second.GetProperty("from").GetString() && z.First.To == z.Second.GetProperty("to").GetString() && z.First.Owned == z.Second.GetProperty("owned").GetBoolean()
+                 && Near(z.First.Gain, z.Second.GetProperty("gain")) && Near(z.First.SavedHours, z.Second.GetProperty("savedHours"))),
+                $"the swaps ({string.Join(", ", plan.Swaps.Select(x => $"{x.AtRank}:{x.Slot}:{x.To}"))})");
+            var eStages = c.GetProperty("stages").EnumerateArray().ToList();
+            Want(plan.Stages.Count == eStages.Count, $"how many stages ({plan.Stages.Count})");
+            for (var i = 0; i < Math.Min(plan.Stages.Count, eStages.Count) && wrong.Count == 0; i++)
+            {
+                var st = plan.Stages[i];
+                var e = eStages[i];
+                var eb = e.GetProperty("better");
+                Want(st.FromRank == e.GetProperty("fromRank").GetInt32() && st.ToRank == e.GetProperty("toRank").GetInt32()
+                     && st.Route.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())) && st.Parts.SequenceEqual(e.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!))
+                     && st.Voyages == e.GetProperty("voyages").GetInt32() && Near(st.Hours, e.GetProperty("hours")) && Near(st.ExpPerVoyage, e.GetProperty("expPerVoyage"))
+                     && Near(st.ExpPerHour, e.GetProperty("expPerHour")) && st.Tanks == e.GetProperty("tanks").GetInt32() && Near(st.Kits, e.GetProperty("kits"))
+                     && (eb.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better == null
+                         : st.Better != null && st.Better.Route.SequenceEqual(eb.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))
+                           && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))),
+                    $"stage {i + 1} ({st.FromRank}-{st.ToRank} {string.Join("-", st.Route)})");
+            }
+            if (wrong.Count == 0) lGood++;
+            else if (lWrong.Length == 0) lWrong = $" (first wrong: case {lCases}: {string.Join(", ", wrong.Take(3))})";
+        }
+        Check(lCases >= 4 && lGood == lCases, $"Levelling Plan: the plugin's stages, swaps and totals match the app's for {lGood} of {lCases} subs{lWrong}");
+        Check(!lvPlacedWrong && lvPlaced.Count >= 4, $"Levelling Plan: every swap shows once, before the first stage that uses it ({string.Join(", ", lvPlaced)} swaps placed)");
+        // No swap fits a part before the rank it needs (the fixture's parts need ranks from 1 to 125).
+        var rankOfPart = Levelling.PartRanks(partList);
+        var swapsSeen = new List<string>();
+        var tooSoon = new List<string>();
+        foreach (var c in lvRoot.GetProperty("cases").EnumerateArray())
+            foreach (var sw in c.GetProperty("swaps").EnumerateArray())
+            {
+                var (at, slot, to) = (sw.GetProperty("atRank").GetInt32(), sw.GetProperty("slot").GetInt32(), sw.GetProperty("to").GetString()!);
+                swapsSeen.Add($"{to}@{at}(needs {rankOfPart(to, slot)})");
+                if (rankOfPart(to, slot) > at) tooSoon.Add($"{to} in slot {slot} at rank {at}");
+            }
+        Check(swapsSeen.Count > 0 && tooSoon.Count == 0, $"Levelling Plan: no suggested part comes before the rank it needs ({string.Join(", ", swapsSeen)}){(tooSoon.Count > 0 ? $"; too soon: {string.Join(", ", tooSoon)}" : "")}");
+
+        // Parts you own (as the app's ownedParts): fitted, or spare in a bag, a retainer or the FC chest; for one character
+        // only its own subs, bags and retainers and its Free Company's chest. Item numbers: bow, bridge, hull, stern from each base.
+        var partsIn = new PartsInputs(
+            new List<PartsCharacter> { new(1, "A", "W", "", null, "9", 4, true), new(2, "B", "W", "", null, "8", 4, true) },
+            new List<PartsSub> { new(1, "S1", 1, 90, 24358, 24359, 24356, 24357, false), new(2, "S2", 1, 50, 21794, 21795, 21792, 21793, false) },
+            new List<PartsRule>(), new List<PartsFightClubRoute>(),
+            new List<PartsSpare> { new(1, null, false, null, null, 0, 0, 21792, 1), new(null, "9", false, null, null, 20000, 0, 24347, 2),
+                                   new(2, null, true, 5, "R", 10000, 0, 21797, 1), new(1, null, false, null, null, 0, 1, 22526, 0) });
+        var fleetOwned = BuildFinder.Owned(partsIn, null);
+        var oneOwned = BuildFinder.Owned(partsIn, 1);
+        Check(oneOwned.SetEquals(new[] { "W+|0", "W+|1", "W+|2", "W+|3", "S|2", "Y|1" })
+              && fleetOwned.SetEquals(new[] { "W+|0", "W+|1", "W+|2", "W+|3", "S|0", "S|1", "S|2", "S|3", "Y|1", "U|3" }),
+            $"Build Finder: parts owned by one character and by the fleet (one: {string.Join(" ", oneOwned)}; fleet: {string.Join(" ", fleetOwned)})");
+    }
+
+    // The market price's outlier checks, with dates (the app's tests/universalis.test.js): sales older than a week don't count.
+    private static void MarketPriceChecks()
+    {
+        var now = new DateTime(2027, 1, 15, 12, 0, 0, DateTimeKind.Utc);
+        long DaysAgo(double d) => new DateTimeOffset(now.AddDays(-d)).ToUnixTimeSeconds();
+        MarketListing L(double p) => new(p, 1, false, "Seller", null);
+        MarketSale S(double p, double daysAgo) => new(p, 1, false, DaysAgo(daysAgo));
+        var low = Universalis.Price(new[] { L(300), L(320), L(350) }, new[] { S(900, 1), S(1000, 2), S(1100, 3), S(50, 10) }, null, null, null, now);
+        var old = Universalis.Price(new[] { L(300), L(320), L(350) }, new[] { S(900, 8), S(1000, 9), S(1100, 10) }, null, null, null, now);
+        var slip = Universalis.Price(new[] { L(1500), L(120), L(1400), L(1600), L(1450) }, null, null, null, null, now);
+        Check(low?.Price == 1000 && low.Adjusted && low.Note == "The cheapest listing (300 gil) is well below the last week's 3 sales, around 1,000. Using 1,000 gil."
+              && old?.Price == 300 && !old.Adjusted
+              && slip?.Price == 1400 && slip.Note == "Ignored 1 listing at 120 gil (well below the others, around 1,450). Using 1,400 gil.",
+            "market price: a lone low listing skipped, the last week's sales checked (older ones left out), as the app");
+    }
+
     // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.
     private static void FcCreditChecks()
     {
@@ -1306,7 +1811,7 @@ internal static partial class Program
         using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(file));
         var root = doc.RootElement;
         var files = DatabaseUpkeep.Files.Embedded();
-        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 16 && files.Updates.Count == 7 && files.Views != null,
+        Check(files.AppVersion == root.GetProperty("appVersion").GetString() && files.Latest == 18 && files.Updates.Count == 9 && files.Views != null,
             $"database: the plugin carries the app's files (app {files.AppVersion}, updates to {files.Latest})");
         var signature = root.GetProperty("signature").EnumerateObject().Select(p => (p.Name, Sql: p.Value.GetString()!)).ToList();
         var given = Environment.GetEnvironmentVariable("FLEET_TEST_DB") ?? "Host=localhost;Username=postgres;Password=postgres;Database=postgres";
@@ -1395,7 +1900,7 @@ internal static partial class Program
                 await Exec(other, $"SELECT pg_advisory_unlock({DatabaseUpkeep.LockKey})");
             }
             var made = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
-            Check(made.Created && made.Version == 16 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
+            Check(made.Created && made.Version == 18 && !made.Busy && made.Applied.Contains("views updated"), "database: then an empty database gets everything: " + made.Text);
             var recorded = await Rows(c, "SELECT app_version FROM companion_views");
             Check((string)recorded[0][0]! == files.AppVersion, "database: the views are recorded with the app version the plugin's files came from");
 
@@ -1416,9 +1921,9 @@ internal static partial class Program
             {
                 await reader.OpenAsync();
                 var fine = await DatabaseUpkeep.EnsureAsync(reader, files, "plugin test");
-                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 16, "database: a login that may only read is fine while nothing needs changing");
-                // As if made by a copy that had only up to update 15: update 16 is still to do.
-                await Exec(c, "UPDATE companion_schema_version SET version = 15");
+                Check(!fine.Busy && fine.Applied.Count == 0 && fine.Version == 18, "database: a login that may only read is fine while nothing needs changing");
+                // As if made by a copy that had only up to update 17: update 18 is still to do.
+                await Exec(c, "UPDATE companion_schema_version SET version = 17");
                 string? message = null;
                 try
                 {
@@ -1431,8 +1936,8 @@ internal static partial class Program
                 Check(message != null && message.Contains("\"pdb_reader\" is not allowed to change the tables"), "database: and says plainly when it can't apply an update: " + message);
             }
             var back = await DatabaseUpkeep.EnsureAsync(c, files, "plugin test");
-            Check(back.Applied.SequenceEqual(new[] { "update 16: pc_last_read" }) && back.Version == 16, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
-            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 16");
+            Check(back.Applied.SequenceEqual(new[] { "update 18: fc_sub_sectors" }) && back.Version == 18, "database: the owner's login applies it (again: nothing changes twice): " + back.Text);
+            var by = await Rows(c, "SELECT app_version FROM companion_schema_version WHERE version = 18");
             Check((string)by[0][0]! == "plugin test", "database: each version records who applied it");
 
             // A newer app or plugin updated it further: left alone, and said.
@@ -1451,11 +1956,11 @@ internal static partial class Program
             var keeper = new DatabaseKeeper(() => files, "plugin 2.1.0", said.Add);
             Check(keeper.StatusText == "Not looked at yet.", "database: nothing said before the first look");
             await keeper.RunIfDueAsync(c);
-            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 16)"),
+            Check(keeper.LastResult is { Created: true } && keeper.Problem == null && said.Count == 1 && said[0].StartsWith("Brought the database up to date (version 18)"),
                 "database: the first read or sync brings it up to date and says so: " + keeper.StatusText);
             var recordedBy = await Rows(c, "SELECT app_version FROM companion_schema_version");
             Check((string)recordedBy[0][0]! == $"{files.AppVersion} (plugin 2.1.0)", "database: recorded as the plugin, with the app version of its files");
-            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 16");
+            await Exec(c, "DELETE FROM companion_schema_version WHERE version = 18");
             await keeper.RunIfDueAsync(c);
             Check(said.Count == 1 && (await Rows(c, "SELECT count(*) FROM companion_schema_version"))[0][0] is 0L, "database: not looked at again until it's due");
         }
@@ -1661,6 +2166,80 @@ internal static partial class Program
             hours.Add(Math.Abs((Db.Time(r, 1) - DateTime.UnixEpoch).TotalMilliseconds - due[0].PredictedAtMs));
         });
         Check(hours.All(h => h < 1), $"file: saved under the hour (on the hour), with the date as given, on both ({string.Join(", ", hours)})");
+
+        // ---- Sub part condition, read in the workshop ----
+        PartCondition.Reading Part(int slot, uint item, int condition, double at) =>
+            new(18014498578000001, 1717000000, "Kestrel", 1, slot, item, condition, nowUnix + 3600, at);
+        var partRows = new List<PartCondition.Row>
+        {
+            new(bigFc, Part(0, 24356, 30000, nowUnix - 600.25)),
+            new(bigFc, Part(1, 24361, 30000, nowUnix - 600.25)),
+            new(bigFc, Part(0, 24356, 30000, nowUnix - 500)),   // the same again (another PC's reading): not kept
+            new(bigFc, Part(0, 24356, 28650, nowUnix - 400)),   // after a voyage
+            new(bigFc, Part(0, 24356, 30000, nowUnix - 300)),   // repaired
+        };
+        var partsSaved = new List<bool>();
+        await Each(async c => partsSaved.Add(await DetailsWriter.WritePartConditionAsync(c, partRows)));
+        await Each(async c => partsSaved.Add(await DetailsWriter.WritePartConditionAsync(c, partRows.Skip(3).ToList())));
+        var partsStored = new List<string>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, @"SELECT fc_id, sub_register, part_slot, item_id, condition, sub_name, read_at, return_at FROM companion_sub_part_condition
+                                                  ORDER BY read_at, part_slot");
+            await using var r = await cmd.ExecuteReaderAsync();
+            var lines = new List<string>();
+            while (await r.ReadAsync())
+                lines.Add($"{Db.Id(r, 0)} {Convert.ToInt64(r.GetValue(1))} {Convert.ToInt64(r.GetValue(2))} {Convert.ToInt64(r.GetValue(3))} {Convert.ToInt64(r.GetValue(4))} {r.GetString(5)} "
+                          + $"{(Db.Time(r, 6) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0.##} {(Db.Time(r, 7) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0}");
+            partsStored.Add(string.Join(" | ", lines));
+        });
+        var partsWanted = $"{bigFc} 1717000000 0 24356 30000 Kestrel -600.25 3600 | {bigFc} 1717000000 1 24361 30000 Kestrel -600.25 3600 | "
+                          + $"{bigFc} 1717000000 0 24356 28650 Kestrel -400 3600 | {bigFc} 1717000000 0 24356 30000 Kestrel -300 3600";
+        Check(partsSaved.All(s => s) && partsStored.All(s => s == partsWanted),
+            $"file: sub part condition keeps only changes (a voyage's drop, a repair's rise), and writing again adds nothing, on both: {string.Join(" / ", partsStored)}");
+
+        // ---- The sectors each FC has unlocked and explored ----
+        SubSectors.Reading Sectors(double at, bool jExplored) => new(18014498578000001,
+            new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(2, true, jExplored), new SubSectors.Sector(3, jExplored, false) }, at);
+        var sectorsSaved = new List<bool>();
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 600.25, false)) })));
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 300, true)) })));
+        // An older reading (another PC's, synced late) doesn't undo a newer one.
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 900, false)) })));
+        var sectorsStored = new List<string>();
+        await Each(async c =>
+        {
+            await using var cmd = Db.Command(c, "SELECT fc_id, sector_id, unlocked, explored, read_at, cid FROM companion_fc_sub_sector ORDER BY sector_id");
+            await using var r = await cmd.ExecuteReaderAsync();
+            var lines = new List<string>();
+            while (await r.ReadAsync())
+                lines.Add($"{Db.Id(r, 0)} {Convert.ToInt64(r.GetValue(1))} {Convert.ToBoolean(r.GetValue(2))} {Convert.ToBoolean(r.GetValue(3))} "
+                          + $"{(Db.Time(r, 4) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0.##} {Db.Id(r, 5)}");
+            sectorsStored.Add(string.Join(" | ", lines));
+        });
+        var sectorsWanted = $"{bigFc} 1 True True -300 18014498578000001 | {bigFc} 2 True True -300 18014498578000001 | {bigFc} 3 True False -300 18014498578000001";
+        Check(sectorsSaved.All(s => s) && sectorsStored.All(s => s == sectorsWanted),
+            $"file: the FC's sub sectors as last read, an older reading not undoing a newer one, on both: {string.Join(" / ", sectorsStored)}");
+        var sectorsRead = new List<string>();
+        await Each(async c =>
+        {
+            var fc = (await FleetReader.ReadSubSectors(c)).FirstOrDefault(f => f.FcId == bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            sectorsRead.Add(fc == null ? "none" : $"{string.Join(",", fc.Sectors.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value.Unlocked}/{x.Value.Explored}"))} at {(fc.ReadAt is double at ? Math.Round(at / 1000 - nowUnix) : double.NaN)}");
+        });
+        Check(sectorsRead.All(x => x == "1:True/True,2:True/True,3:True/False at -300"), $"file: the Route Finder reads them back, on both ({string.Join(" / ", sectorsRead)})");
+        // The top rank: the last with stats, though the game lists experience to the next on it (145 does; 146 is empty).
+        var topRanks = new[] { new SubRank(144, 98, 129, 112765858), new SubRank(145, 100, 130, 46234004), new SubRank(146, 0, 0, 0), new SubRank(150, 0, 0, 0) };
+        var noStats = new[] { new SubRank(1, null, null, 10), new SubRank(2, null, null, 10), new SubRank(3, null, null, 0) };
+        Check(SubRoutes.TopRank(topRanks) == 145 && SubRoutes.TopRank(noStats) == 3,
+            $"the top rank is the last with stats ({SubRoutes.TopRank(topRanks)}), not one past the last with experience to the next; without stats, the first with none ({SubRoutes.TopRank(noStats)})");
+        var fcWho = new List<string>();
+        await Each(async c =>
+        {
+            var fc = (await FleetReader.ReadSubSectors(c)).FirstOrDefault(f => f.FcId == bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            fcWho.Add(fc == null ? "none" : $"{fc.World} | {string.Join(", ", fc.Accounts.OrderBy(a => a.Account, StringComparer.Ordinal).Select(a => $"{a.Account}@{a.SortIndex}"))}");
+        });
+        Check(fcWho.Count == 2 && fcWho[0] == fcWho[1] && !fcWho[0].StartsWith(" |", StringComparison.Ordinal) && fcWho[0].Contains('@'),
+            $"file: the Free Company picker gets the FC's world and account labels, the same on both ({string.Join(" / ", fcWho)})");
 
         // ---- The edits made from the game ----
         var ruleIds = new List<long>();
@@ -2256,6 +2835,10 @@ internal static partial class Program
         await MarketAgainstTheApp();
         MemoChecks();
         FcCreditChecks();
+        SubCalculatorChecks();
+        MarketPriceChecks();
+        PartConditionChecks();
+        SubSectorChecks();
         Check(FleetWriter.StoredItemId(5111, true) == 1_005_111 && FleetWriter.StoredItemId(5111, false) == 5111 && FleetWriter.StoredItemId(1_005_111, true) == 1_005_111,
             "a high-quality stack is stored at its id + 1,000,000, as the game numbers it (so every page can say HQ)");
         RoutesAgainstTheApp();

@@ -68,6 +68,13 @@ public sealed class Plugin : IDalamudPlugin
     // What was last written per character / FC, so unchanged data is not written again every
     // sync. Forgotten once an hour, so everything is rewritten at least hourly.
     private readonly ChangeTracker changes = new(TimeSpan.FromHours(1), DateTime.UtcNow);
+    // Sub part condition, read in the FC workshop and written at the next sync (PartCondition).
+    private readonly PartCondition.Log partConditions = new();
+    private DateTime partConditionsReadAt = DateTime.MinValue;
+    private string? partConditionsSeen;
+    // The sub sectors each FC has unlocked and explored, read in the workshop and written at the next sync (SubSectors).
+    private readonly SubSectors.Log subSectors = new();
+    private string? subSectorsSeen;
     private bool warnedNoCurrentTable = false;
 
     // Characters seen logging in on this setup (cid -> when, UTC), not yet recorded in the database; and the
@@ -322,6 +329,7 @@ public sealed class Plugin : IDalamudPlugin
         NoteLogin();
         UpdateInfoBar();
         Backups.Tick(DateTime.Now);
+        ReadPartConditions();
         // No new sync starts while the fleet is being moved or restored (WaitForSyncAsync).
         if (!Configuration.Enabled || moving) return;
 
@@ -348,6 +356,63 @@ public sealed class Plugin : IDalamudPlugin
                     syncInProgress = false;
                 }
             });
+        }
+    }
+
+    // Every couple of seconds while in the FC workshop (the only place the game has it): each sub part's condition. Only
+    // changes are kept, until the next sync writes them.
+    private void ReadPartConditions()
+    {
+        var now = DateTime.UtcNow;
+        if (!Configuration.Enabled || now - partConditionsReadAt < TimeSpan.FromSeconds(2)) return;
+        partConditionsReadAt = now;
+        try
+        {
+            var look = PartConditionReader.Read(ClientState.IsLoggedIn ? PlayerState.ContentId : 0, Db.Unix(now));
+            // Once per workshop visit (and again if what it sees changes): what was read, or why nothing was.
+            if (look.Readings == null) partConditionsSeen = null;
+            else if (look.Seen != partConditionsSeen)
+            {
+                partConditionsSeen = look.Seen;
+                // Every login at the house sees no sub list yet: only worth a debug line.
+                if (look.Readings.Count == 0) Log.Debug($"Fleet Companion: sub part condition, {look.Seen}.");
+                else Log.Information($"Fleet Companion: sub part condition, {look.Seen}.");
+            }
+            if (look.Readings != null && partConditions.Offer(look.Readings) > 0)
+                Log.Debug($"Fleet Companion: {partConditions.Count} sub part condition reading(s) waiting for the next sync.");
+            lock (warned) warned.Remove("part-condition");
+        }
+        catch (Exception ex)
+        {
+            WarnOnce("part-condition", $"Fleet Companion: could not read sub part condition in the workshop — {ex.Message}");
+        }
+        ReadSubSectors(now);
+    }
+
+    // With the part condition, in the FC workshop: which sectors the FC has unlocked and explored. A reading is kept when it
+    // makes sense and differs from the character's last, until the next sync writes it.
+    private void ReadSubSectors(DateTime now)
+    {
+        try
+        {
+            var game = GameNames.SubGame();
+            if (game == null) return;
+            var look = SubSectorReader.Read(ClientState.IsLoggedIn ? PlayerState.ContentId : 0, Db.Unix(now),
+                game.Sectors.Where(x => !x.Starting).Select(x => x.Id));
+            if (look.Seen == "not in a workshop") subSectorsSeen = null;
+            else if (look.Seen != subSectorsSeen)
+            {
+                subSectorsSeen = look.Seen;
+                if (look.Reading == null) Log.Debug($"Fleet Companion: sub sectors, {look.Seen}.");
+                else Log.Information($"Fleet Companion: sub sectors, {look.Seen}.");
+            }
+            if (look.Reading != null && subSectors.Offer(look.Reading))
+                Log.Debug("Fleet Companion: the FC's sub sectors are waiting for the next sync.");
+            lock (warned) warned.Remove("sub-sectors");
+        }
+        catch (Exception ex)
+        {
+            WarnOnce("sub-sectors", $"Fleet Companion: could not read the FC's sub sectors in the workshop — {ex.Message}");
         }
     }
 
@@ -1433,6 +1498,33 @@ public sealed class Plugin : IDalamudPlugin
                 if (loot.Count > 0) Log.Information($"Fleet Companion: stored {loot.Count} voyage sectors from SubmarineTracker.");
             }
         }
+        // Sub part condition read in the workshop since the last sync, for the characters synced here.
+        var partReadings = partConditions.Take();
+        if (partReadings.Count > 0)
+        {
+            var fcOf = characters.GroupBy(c => c.Snapshot.Cid).ToDictionary(g => g.Key, g => g.First().Snapshot.FcId);
+            var partRows = PartCondition.ToWrite(partReadings, fcOf);
+            bool partsWritten;
+            try { partsWritten = await DetailsWriter.WritePartConditionAsync(conn, partRows); }
+            catch { partConditions.PutBack(partReadings); throw; }
+            // A database without update 17 yet keeps them waiting; the app adds it when it next connects.
+            if (!partsWritten) partConditions.PutBack(partReadings);
+            else if (partRows.Count > 0) Log.Information($"Fleet Companion: stored {partRows.Count} sub part condition reading(s).");
+        }
+        // The sectors each FC has unlocked and explored, read in the workshop since the last sync.
+        var sectorReadings = subSectors.Take();
+        if (sectorReadings.Count > 0)
+        {
+            var fcOf = characters.GroupBy(c => c.Snapshot.Cid).ToDictionary(g => g.Key, g => g.First().Snapshot.FcId);
+            var sectorRows = SubSectors.ToWrite(sectorReadings, fcOf);
+            bool sectorsWritten;
+            try { sectorsWritten = await DetailsWriter.WriteSubSectorsAsync(conn, sectorRows); }
+            catch { subSectors.PutBack(sectorReadings); throw; }
+            // A database without update 18 yet keeps them waiting; the app or this plugin adds it when it next connects.
+            if (!sectorsWritten) subSectors.PutBack(sectorReadings);
+            else if (sectorRows.Count > 0) Log.Information($"Fleet Companion: stored the sub sectors of {sectorRows.Count} Free Company(ies).");
+        }
+
         // Voyages already in its file are still read while it is not running; new ones are not recorded.
         if (!stRunning && characters.Any(c => c.Snapshot.SubmarineCount > 0))
             problems.Add(stFound

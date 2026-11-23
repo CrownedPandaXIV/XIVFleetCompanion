@@ -90,7 +90,19 @@ namespace XIVFleetCompanion
     public sealed record VenturesRead(List<VentureIncomeRow> Rows, int WindowDays);
 
     /// <summary>Every built sub's route answers (SubRoutes), as the app's Subs tab, worked out at At (milliseconds since 1970).</summary>
-    public sealed record RoutesRead(List<SubRoute> Subs, double At);
+    /// <summary>FightClub: Fight Club's rows, as read for the routes (the Route Finder's marks check them against each FC's sectors).</summary>
+    public sealed record RoutesRead(List<SubRoute> Subs, double At, List<FightClubRow>? FightClub = null);
+
+    /// <summary>A Free Company and the sub sectors the plugin last read in its workshop (database update 18), for the Route
+    /// Finder and the Fight Club marks: ReadAt in milliseconds (null: not read yet).</summary>
+    /// <summary>One Free Company's sub sectors as last read in its workshop, for the Sub Calculator's pickers: World and
+    /// Accounts (each account label its characters are on, "" for none, with the Character Roster place of the first of
+    /// them) say where it sits in the Free Company picker.</summary>
+    public sealed record FcSectors(string FcId, string Name, double? ReadAt, Dictionary<int, (bool Unlocked, bool Explored)> Sectors)
+    {
+        public string World { get; init; } = "";
+        public List<(string Account, int SortIndex)> Accounts { get; init; } = new();
+    }
 
     /// <summary>The Income page's read: each character's income, the venture rewards, the window (days) and repair kit cost.</summary>
     public sealed record IncomeRead(List<IncomeRow> Characters, List<VentureIncomeRow> Ventures, int WindowDays, double KitCost);
@@ -178,12 +190,21 @@ namespace XIVFleetCompanion
         public FleetRead<PartsRead> Parts { get; private set; } = new(null, null, null);
         /// <summary>Routes, gil a day and rank-up dates: read with Parts (the Subs page, Route Optimization, the Summary, Income's expected).</summary>
         public FleetRead<RoutesRead> Routes { get; private set; } = new(null, null, null);
+        /// <summary>Each Free Company's sub sectors as last read in its workshop: read with the routes.</summary>
+        public FleetRead<List<FcSectors>> SubSectors { get; private set; } = new(null, null, null);
         /// <summary>How close the Next rank dates came (the Subs page's forecast line): read with the routes.</summary>
         public FleetRead<ForecastAccuracy> Forecasts { get; private set; } = new(null, null, null);
         public FleetRead<MarketRead> Market { get; private set; } = new(null, null, null);
         /// <summary>The shared settings, read with the parts (every 5 minutes) and after an edit.</summary>
         public FleetRead<FleetSettings> Settings { get; private set; } = new(null, null, null);
         public bool Busy => busy;
+        /// <summary>One world, data center or region's market for these items, for the Planner: asked of Universalis
+        /// (answers kept 30 minutes).</summary>
+        public Task<WorldMarket> MarketInAsync(string place, string scope, IEnumerable<int> ids) => universalis.PlaceAsync(place, scope, ids.ToList());
+
+        /// <summary>Every world Universalis knows (lowercase name -> its name, data center and region), else the built-in list.</summary>
+        public Task<Dictionary<string, (string Name, string Dc, string Region)>> MarketPlacesAsync() => universalis.PlacesAsync();
+
         private volatile bool askingUniversalis;
         /// <summary>True while live prices are being asked of Universalis (apart from the database reads).</summary>
         public bool AskingUniversalis => askingUniversalis;
@@ -371,6 +392,7 @@ namespace XIVFleetCompanion
                         if (Db.IsFile(conn) && Routes.Error == null && Routes.Data is { } planned)
                             await SaveForecasts(conn, planned.Subs);
                         Forecasts = await Read(conn, ReadForecasts, Forecasts);
+                        SubSectors = await Read(conn, ReadSubSectors, SubSectors);
                     }
                     if (market) await ReadMarketNow(conn);
                 }
@@ -381,7 +403,7 @@ namespace XIVFleetCompanion
                     if (supplies) { Supplies = Supplies with { Error = text }; Credits = Credits with { Error = text }; Summary = Summary with { Error = text }; Salvage = Salvage with { Error = text }; Ventures = Ventures with { Error = text }; }
                     if (lists) { Roster = Roster with { Error = text }; Retainers = Retainers with { Error = text }; Pcs = Pcs with { Error = text }; Fcs = Fcs with { Error = text }; }
                     if (money) { Salvage = Salvage with { Error = text }; Income = Income with { Error = text }; Loot = Loot with { Error = text }; }
-                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; Forecasts = Forecasts with { Error = text }; }
+                    if (parts) { Parts = Parts with { Error = text }; Routes = Routes with { Error = text }; Settings = Settings with { Error = text }; Forecasts = Forecasts with { Error = text }; SubSectors = SubSectors with { Error = text }; }
                     if (market) Market = Market with { Error = text };
                 }
                 finally
@@ -629,6 +651,50 @@ namespace XIVFleetCompanion
             return FleetOrder.Fcs(list);
         }
 
+        /// <summary>Every Free Company (fleet_fcs_view) with the sub sectors last read in its workshop (companion_fc_sub_sector,
+        /// database update 18: before it, none is read), by name.</summary>
+        public static async Task<List<FcSectors>> ReadSubSectors(DbConnection conn)
+        {
+            var byFc = new Dictionary<string, FcSectors>();
+            foreach (var f in await ReadFcs(conn))
+            {
+                var id = f.FcId.ToString(CultureInfo.InvariantCulture);
+                byFc.TryAdd(id, new FcSectors(id, f.Name.Length > 0 ? f.Name : $"Free Company {id}", null, new()));
+            }
+            try
+            {
+                await using var cmd = Db.Cmd("SELECT fc_id, sector_id, unlocked, explored, read_at FROM companion_fc_sub_sector", conn);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    var id = Text(r, "fc_id");
+                    if (!byFc.TryGetValue(id, out var fc)) byFc[id] = fc = new FcSectors(id, $"Free Company {id}", null, new());
+                    var at = Ms(r, "read_at");
+                    if (fc.ReadAt == null || at > fc.ReadAt) byFc[id] = fc = fc with { ReadAt = at };
+                    fc.Sectors[Int(r, "sector_id")] = (Convert.ToBoolean(r.GetValue(r.GetOrdinal("unlocked")), CultureInfo.InvariantCulture),
+                        Convert.ToBoolean(r.GetValue(r.GetOrdinal("explored")), CultureInfo.InvariantCulture));
+                }
+            }
+            catch (Exception ex) when (ex is PostgresException { SqlState: "42P01" } || ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+            {
+                // A database without update 18 yet: nothing read.
+            }
+            // Who is in each: its world, and the account labels its characters are on (as the app's fcSectors).
+            List<SupplyRow> members;
+            try { members = await ReadSupplies(conn); }
+            catch (DbException) { members = new(); }
+            foreach (var id in byFc.Keys.ToList())
+            {
+                var mine = members.Where(m => m.FcId == id).ToList();
+                byFc[id] = byFc[id] with
+                {
+                    World = mine.Select(m => m.World).FirstOrDefault(w => !string.IsNullOrEmpty(w)) ?? "",
+                    Accounts = mine.GroupBy(m => m.Account ?? "").Select(g => (g.Key, g.Min(m => m.SortIndex))).ToList(),
+                };
+            }
+            return byFc.Values.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
+
         /// <summary>The stacks matching a condition on fleet_holdings_view (for example "owner_cid = ANY(@cids)"), with its
         /// parameters added by addParameters.</summary>
         /// <param name="idColumn">With ids: only the stacks whose idColumn is one of them (owner_cid, fc_id or item_id).</param>
@@ -747,7 +813,8 @@ namespace XIVFleetCompanion
         public static async Task<RoutesRead> ReadRoutes(DbConnection conn, SubGameData? game, double now, PartsInputs? parts = null)
         {
             if (game == null) throw new InvalidOperationException("The game's sea map data couldn't be read.");
-            return new RoutesRead(SubRoutes.Plan(await ReadRoutesInputs(conn, parts), game, now), now);
+            var inputs = await ReadRoutesInputs(conn, parts);
+            return new RoutesRead(SubRoutes.Plan(inputs, game, now), now, inputs.FightClub);
         }
 
         /// <summary>parts: the Parts views as just read (else they're read here).</summary>

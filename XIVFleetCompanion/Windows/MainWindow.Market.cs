@@ -35,9 +35,11 @@ public partial class MainWindow
         var p = l.In(scope);
         if (p == null) { Colored(Dim, "None"); return; }
         var text = Gil(p.Price) + (p.World != null && scope != "world" ? $" ({p.World})" : "");
-        // Amber when someone sells it cheaper there.
-        TableCells.Right(text, p.Price < l.Listing.UnitPrice ? Amber : (Vector4?)null);
-        if (p.World != null) Hover($"On {p.World}");
+        // Amber when someone sells it cheaper there, or when the outlier checks changed it (a lone low listing skipped,
+        // recent sales used): the hover says why.
+        TableCells.Right(text, p.Price < l.Listing.UnitPrice || p.Adjusted ? Amber : (Vector4?)null);
+        var why = string.Join(". ", new[] { p.World != null ? $"On {p.World}" : null, p.Note }.Where(x => x != null));
+        if (why.Length > 0) Hover(why);
     }
 
     private List<FleetColumn<ComparedListing>> ListingColumns(bool rivals, bool cheaperBy) => new List<FleetColumn<ComparedListing>>

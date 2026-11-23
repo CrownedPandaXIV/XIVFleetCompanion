@@ -102,8 +102,8 @@ same one. The plugin keeps it up to date itself.
 - **A damage check** runs once a week (and on **Check now** on the Status page): SQLite's own check that the file is
   whole. If it ever finds damage, the Status page says which backup to go back to, and daily backups pause so the good
   ones aren't pushed out.
-- **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, the repair kit cost, Fight
-  Club's data) are in the plugin's Settings, saved in the file.
+- **Settings** shared by the whole fleet (what you run, the warnings, Live Market Prices, Fight Club's data) are in the
+  plugin's Settings, saved in the file; the repair kit price is on the Supplies page.
 - **Without the app**, the plugin does what the app would: it saves each sub's Next rank date once an hour for Route
   Optimization's forecast line, and the Supplies page's days are changed on that page.
 - **Moving your fleet** between Just this PC and a shared database, either way, is in the plugin's Settings → **Move
@@ -165,6 +165,10 @@ XIV Fleet Companion couldn't work without these plugins. A big thank you to the 
 - **Allagan Tools** by Critical_Impact
 - **FC Tracker** by erdelf
 - **Submarine Tracker** by Infi
+
+The Sub Calculator's loot and breakpoints come from [XIVStats](https://xivstats.com) by Infi (MIT licence), collected
+from players running the Tracky plugin, checked against [Pepper's FFXIV Ship Guide](https://docs.google.com/document/d/1t2cC8-VuSNU2JLrvFFvr1S0-7NirnJiJ3k41UJ56jqE/edit).
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## License
 

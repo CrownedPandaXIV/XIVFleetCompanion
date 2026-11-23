@@ -28,14 +28,21 @@ namespace XIVFleetCompanion
     /// <summary>One sector of a voyage SubmarineTracker recorded, from fleet_voyage_sectors_view (At in milliseconds).</summary>
     public sealed record VoyageSector(string FcId, long Register, string? SubName, double At, int Sector, int? Leg);
 
-    /// <summary>A sector from the game's files (SubmarineExploration): its letter, map, position, experience and survey time.</summary>
-    public sealed record SubSector(int Id, string Location, int Map, double X, double Y, double Z, double ExpReward, double SurveyMinutes, bool Starting);
+    /// <summary>A sector from the game's files (SubmarineExploration): its letter, map, position, experience and survey time;
+    /// for the Sub Calculator also its name, the rank it needs, its survey distance (range) and the ceruleum it takes.</summary>
+    public sealed record SubSector(int Id, string Location, int Map, double X, double Y, double Z, double ExpReward, double SurveyMinutes, bool Starting,
+        string Name = "", int RankReq = 0, int SurveyDistance = 0, int Tanks = 0);
 
-    /// <summary>A rank from the game's files (SubmarineRank): its speed and range before parts, and experience to the next.</summary>
-    public sealed record SubRank(int Id, double? Speed, double? Range, double ExpToNext);
+    /// <summary>A rank from the game's files (SubmarineRank): its stats before parts, and experience to the next.</summary>
+    public sealed record SubRank(int Id, double? Speed, double? Range, double ExpToNext, double? Surveillance = null, double? Retrieval = null, double? Favor = null);
 
-    /// <summary>A part's speed and range from the game's files (SubmarinePart), by class (1 Whale ... 10 Syldra+) and slot (0 hull ... 3 bridge).</summary>
-    public sealed record SubPartStat(int Class, int Slot, double Speed, double Range);
+    /// <summary>A part's stats from the game's files (SubmarinePart), by class (1 Whale ... 10 Syldra+) and slot (0 hull ... 3 bridge);
+    /// for the Sub Calculator also the part's rank (wear) and the repair materials a full repair takes.</summary>
+    public sealed record SubPartStat(int Class, int Slot, double Speed, double Range, double? Surveillance = null, double? Retrieval = null, double? Favor = null,
+        int PartRank = 0, int RepairKits = 0);
+
+    /// <summary>A build's five stats, in the game's order.</summary>
+    public sealed record SubStats(double Surveillance, double Retrieval, double Speed, double Range, double Favor);
 
     /// <summary>The game data the routes need (from the game's files in the plugin; made up in the tests).</summary>
     public sealed record SubGameData(List<SubSector> Sectors, Dictionary<int, string> MapNames, List<SubRank> Ranks, List<SubPartStat> Parts);
@@ -58,8 +65,11 @@ namespace XIVFleetCompanion
     /// <summary>A sub with everything the Subs page shows (gil a day rounded to whole gil, as the app; dates in milliseconds).</summary>
     public sealed record SubRoute(long Cid, string SubName, int? Slot, int Rank, string CurrentSetup, string CurrentRoute, (int Id, string Name)? CurrentMap,
         string TargetRoute, double? TargetGilDay, double? CurrentGilDay, double? Speed, double? Range, int? RankProgressPct, bool CraftEnabled,
-        long? ReturnTime, SubRankUp RankUp)
+        long? ReturnTime, SubRankUp RankUp, int[]? Stops = null)
     {
+        /// <summary>The sectors of its current route, by id (Stops), for the Sub Calculator's Planner.</summary>
+        public int[] Sectors => Stops ?? Array.Empty<int>();
+
         /// <summary>Not on the route Fight Club says is best at its rank (rank 85 and up): the Route Optimization page.</summary>
         public bool Suboptimal => TargetRoute.Length > 0 && TargetRoute != CurrentRoute;
 
@@ -178,7 +188,7 @@ namespace XIVFleetCompanion
 
         // Letter -> SubmarinePart class: Whale, Unkiu, Shark, Coelacanth, Syldra, then the same modified (as the app's
         // LETTER_TO_PART_CLASS_ID, checked against the game's tooltips there).
-        private static readonly Dictionary<string, int> PartClass = new()
+        internal static readonly Dictionary<string, int> PartClass = new()
         {
             ["W"] = 1, ["U"] = 2, ["S"] = 3, ["C"] = 4, ["Y"] = 5, ["W+"] = 6, ["U+"] = 7, ["S+"] = 8, ["C+"] = 9, ["Y+"] = 10,
         };
@@ -188,7 +198,7 @@ namespace XIVFleetCompanion
 
         // JavaScript's Math.hypot as V8 does it (largest first, then a compensated sum), so voyage lengths, cut down to
         // whole seconds, come out the same to the last second.
-        private static double Hypot(double a, double b, double c)
+        internal static double Hypot(double a, double b, double c)
         {
             var values = new[] { Math.Abs(a), Math.Abs(b), Math.Abs(c) };
             var max = values.Max();
@@ -222,13 +232,13 @@ namespace XIVFleetCompanion
             return string.Join("-", tokens);
         }
 
-        private sealed record Option(FightClubRow Row, int Rank, string[] Parts, double Net);
+        internal sealed record Option(FightClubRow Row, int Rank, string[] Parts, double Net);
 
-        private static List<Option> Options(IEnumerable<FightClubRow> rows) => rows
+        internal static List<Option> Options(IEnumerable<FightClubRow> rows) => rows
             .Select(r => PartsPlanner.ParseRankBuild(r.RecBuild) is { } b ? new Option(r, b.Rank, b.Parts, PartsPlanner.NetGilPerDay(r.AsParts, b.Parts)) : null)
             .OfType<Option>().ToList();
 
-        private static Option? BestOf(List<Option> options, int rank)
+        internal static Option? BestOf(List<Option> options, int rank)
         {
             if (rank < 85) return null;
             Option? best = null;
@@ -289,6 +299,21 @@ namespace XIVFleetCompanion
             return total;
         }
 
+        /// <summary>All five stats of a build (the app's buildStats): its rank's plus each part's; null when the rank, a part or
+        /// any of their figures isn't known.</summary>
+        public static SubStats? BuildStats(int rank, string[] parts, Dictionary<int, SubRank> ranks, Dictionary<(int, int), SubPartStat> partStats)
+        {
+            if (!ranks.TryGetValue(rank, out var r) || r.Surveillance is not double sv || r.Retrieval is not double rt || r.Speed is not double sp
+                || r.Range is not double rg || r.Favor is not double fv) return null;
+            for (var i = 0; i < 4; i++)
+            {
+                if (!PartClass.TryGetValue(parts[i], out var cls) || !partStats.TryGetValue((cls, i), out var p)
+                    || p.Surveillance is not double psv || p.Retrieval is not double prt || p.Favor is not double pfv) return null;
+                sv += psv; rt += prt; sp += p.Speed; rg += p.Range; fv += pfv;
+            }
+            return new SubStats(sv, rt, sp, rg, fv);
+        }
+
         // ---- rank-up.js ----
 
         private static double TotalExp(int rank, double exp, Dictionary<int, double> expToNext)
@@ -334,7 +359,7 @@ namespace XIVFleetCompanion
             return (Math.Max(0, gained) / spanDays, spanDays);
         }
 
-        private static (double Exp, double Hours)? Voyage(List<SubSector?> sectors, SubSector? start, double speed)
+        internal static (double Exp, double Hours)? Voyage(List<SubSector?> sectors, SubSector? start, double speed)
         {
             if (sectors.Count == 0 || sectors.Count > 5 || start == null || sectors.Any(s => s == null)) return null;
             var s = Math.Max(1, speed);
@@ -351,7 +376,7 @@ namespace XIVFleetCompanion
             return (exp, seconds / 3600);
         }
 
-        private static SubSector? StartFor(int sectorId, List<SubSector> startingPoints)
+        internal static SubSector? StartFor(int sectorId, List<SubSector> startingPoints)
         {
             SubSector? found = null;
             foreach (var p in startingPoints) if (p.Id <= sectorId && (found == null || p.Id > found.Id)) found = p;
@@ -387,6 +412,17 @@ namespace XIVFleetCompanion
             var r = 1;
             while (expToNext.TryGetValue(r, out var e) && e > 0) r++;
             return r;
+        }
+
+        /// <summary>The top rank a sub can reach: the last rank the game gives stats to (any bonus above 0). The game's
+        /// table also lists experience "to the next rank" on the top rank (145 shows 46,234,004 with 146 an empty row), so
+        /// that can't be used alone; without any stats, the first rank with no experience to the next. As the app's
+        /// rank-up.js topRank.</summary>
+        public static int TopRank(IEnumerable<SubRank> ranks)
+        {
+            var list = ranks.ToList();
+            var top = list.Where(r => new[] { r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor }.Any(v => v > 0)).Select(r => r.Id).DefaultIfEmpty(0).Max();
+            return top > 0 ? top : MaxRank(list.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First().ExpToNext));
         }
 
         private static (int Rank, string[] Build)? NextBuildRank(int rank, int top, Func<int, string[]?> buildAt)
@@ -501,9 +537,9 @@ namespace XIVFleetCompanion
             foreach (var r in game.Ranks) ranks[r.Id] = r;
             var partStats = new Dictionary<(int, int), SubPartStat>();
             foreach (var p in game.Parts) partStats[(p.Class, p.Slot)] = p;
-            var topRank = Math.Max(0, ranks.Values.Where(r => r.Speed != null).Select(r => r.Id).DefaultIfEmpty(0).Max());
+            var topRank = TopRank(ranks.Values);
             var expToNext = ranks.ToDictionary(kv => kv.Key, kv => kv.Value.ExpToNext);
-            var top = MaxRank(expToNext);
+            var top = topRank;
 
             var windowStart = now - MeasureWindowDays * Day;
             var historyStart = now - BonusWindowDays * Day;
@@ -613,7 +649,7 @@ namespace XIVFleetCompanion
                         switchAt?.At is double sa && sa != 0 ? sa : null, switchAt?.Voyages is int sv && sv != 0 ? sv : null, fightClubNext) : null);
 
                 output.Add(new SubRoute(cid, sub.SubName, sub.Slot, rank, string.Join("-", parts), currentRoute, map, targetRoute, targetGil, currentGil,
-                    speed, range, progress, sub.CraftEnabled, sub.ReturnTime, rankUp));
+                    speed, range, progress, sub.CraftEnabled, sub.ReturnTime, rankUp, stops.ToArray()));
             }
             return output;
         }

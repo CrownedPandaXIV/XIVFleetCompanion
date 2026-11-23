@@ -202,6 +202,33 @@ CREATE TABLE companion_voyage_loot (
 );
 CREATE INDEX companion_voyage_loot_returned_idx ON companion_voyage_loot (returned_at);
 
+-- Each sub part's condition, read in the Free Company's workshop; a row only when a part's item or condition changed.
+-- condition: 0 to 30000 (30000 is 100%); part_slot: 0 hull, 1 stern, 2 bow, 3 bridge.
+CREATE TABLE companion_sub_part_condition (
+    fc_id        TEXT    NOT NULL,
+    sub_register INTEGER NOT NULL,
+    part_slot    INTEGER NOT NULL,
+    read_at      REAL    NOT NULL,
+    item_id      INTEGER NOT NULL,
+    condition    INTEGER NOT NULL,
+    sub_name     TEXT,
+    cid          INTEGER,
+    return_at    REAL,
+    PRIMARY KEY (fc_id, sub_register, part_slot, read_at)
+);
+CREATE INDEX companion_sub_part_condition_read_idx ON companion_sub_part_condition (read_at);
+
+-- Which submarine sectors each Free Company has unlocked and explored, as last read in its workshop (1 yes, 0 no).
+CREATE TABLE companion_fc_sub_sector (
+    fc_id     TEXT    NOT NULL,
+    sector_id INTEGER NOT NULL,
+    unlocked  INTEGER NOT NULL,
+    explored  INTEGER NOT NULL,
+    read_at   REAL    NOT NULL,
+    cid       INTEGER,
+    PRIMARY KEY (fc_id, sector_id)
+);
+
 -- Each sub's Next Rank date as the app saved it, once an hour (the Subs tab's forecast line compares them with the real
 -- rank-ups).
 CREATE TABLE companion_rankup_forecast (

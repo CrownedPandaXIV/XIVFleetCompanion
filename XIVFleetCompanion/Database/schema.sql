@@ -222,6 +222,33 @@ CREATE TABLE companion_voyage_loot (
 );
 CREATE INDEX companion_voyage_loot_returned_idx ON companion_voyage_loot (returned_at);
 
+-- Each sub part's condition, read in the Free Company's workshop; a row only when a part's item or condition changed
+-- (update 017). condition: 0 to 30000 (30000 is 100%); part_slot: 0 hull, 1 stern, 2 bow, 3 bridge.
+CREATE TABLE companion_sub_part_condition (
+    fc_id        numeric     NOT NULL,
+    sub_register bigint      NOT NULL,
+    part_slot    int         NOT NULL,
+    read_at      timestamptz NOT NULL,
+    item_id      int         NOT NULL,
+    condition    int         NOT NULL,
+    sub_name     text,
+    cid          numeric,
+    return_at    timestamptz,
+    PRIMARY KEY (fc_id, sub_register, part_slot, read_at)
+);
+CREATE INDEX companion_sub_part_condition_read_idx ON companion_sub_part_condition (read_at);
+
+-- Which submarine sectors each Free Company has unlocked and explored, as last read in its workshop (update 018).
+CREATE TABLE companion_fc_sub_sector (
+    fc_id     numeric     NOT NULL,
+    sector_id int         NOT NULL,
+    unlocked  boolean     NOT NULL,
+    explored  boolean     NOT NULL,
+    read_at   timestamptz NOT NULL,
+    cid       numeric,
+    PRIMARY KEY (fc_id, sector_id)
+);
+
 -- One row per venture reward, from AutoRetainer's statistics files.
 CREATE TABLE companion_venture_result (
     owner_cid     numeric     NOT NULL,

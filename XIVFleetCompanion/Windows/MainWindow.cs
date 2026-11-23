@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends, Planner, BuildFinder, RouteFinder, Compare, Levelling }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -129,6 +129,11 @@ public partial class MainWindow : Window, IDisposable
             case Tab.Summary: DrawSummary(); break;
             case Tab.Subs: DrawSubs(); break;
             case Tab.Routes: DrawRoutes(); break;
+            case Tab.Planner: DrawPlanner(); break;
+            case Tab.BuildFinder: DrawBuildFinder(); break;
+            case Tab.RouteFinder: DrawRouteFinder(); break;
+            case Tab.Compare: DrawCompare(); break;
+            case Tab.Levelling: DrawLevelling(); break;
             case Tab.Supplies: DrawSupplies(); break;
             case Tab.Parts: DrawParts(); break;
             case Tab.Roster: DrawRoster(); break;
@@ -167,11 +172,11 @@ public partial class MainWindow : Window, IDisposable
     {
         [Tab.Summary] = "Summary", [Tab.Trends] = "Trends", [Tab.Subs] = "Subs", [Tab.Routes] = "Route Optimization", [Tab.Parts] = "Parts",
         [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Character Roster", [Tab.Retainers] = "Retainers",
-        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs",
+        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs", [Tab.Planner] = "Voyage Planner", [Tab.RouteFinder] = "Route Finder", [Tab.BuildFinder] = "Build Finder", [Tab.Compare] = "Compare Builds", [Tab.Levelling] = "Levelling Plan",
     };
 
     // The sidebar's groups (the app's sidebar has the same).
-    private static readonly string[] Groups = { "Overview", "Submarines", "Characters", "Gil", "Tools", "System" };
+    private static readonly string[] Groups = { "Overview", "Submarines", "Sub Calculator", "Characters", "Gil", "Tools", "System" };
 
     /// <summary>Whether a page is shown for what the player runs (the app's shared/play-style.js hiddenViews).</summary>
     public static bool PageUsed(Tab tab, bool subs, bool retainers) => tab switch
@@ -231,7 +236,7 @@ public partial class MainWindow : Window, IDisposable
         foreach (var group in Groups)
         {
             // Retainers only: no Submarines group at all.
-            if (group == "Submarines" && !subsOn) continue;
+            if ((group == "Submarines" || group == "Sub Calculator") && !subsOn) continue;
             var open = true;
             if (!folded)
             {
@@ -260,6 +265,13 @@ public partial class MainWindow : Window, IDisposable
                         readyForParts > 0 ? PartsPlanner.ReadyText(readyList) : "What each sub's next build needs");
                     if (subsOn) Entry(Tab.Supplies, FontAwesomeIcon.GasPump, "Supplies", folded, low > 0 ? $"{low} low" : null, p.Warn, low > 0 ? $"{low} character{(low == 1 ? "" : "s")} low" : null);
                     if (subsOn) Entry(Tab.Salvage, FontAwesomeIcon.Recycle, "Salvage", folded, null, p.Dim, "The salvage each character holds");
+                    break;
+                case "Sub Calculator":
+                    Entry(Tab.Planner, FontAwesomeIcon.Calculator, "Voyage Planner", folded, null, p.Dim, "Try a build and a route: stats, voyage, loot, gil and wear");
+                    Entry(Tab.RouteFinder, FontAwesomeIcon.Route, "Route Finder", folded, null, p.Dim, "The best routes for a build, and what your Free Company can explore next");
+                    Entry(Tab.BuildFinder, FontAwesomeIcon.Search, "Build Finder", folded, null, p.Dim, "The builds that get what you want from chosen sectors");
+                    Entry(Tab.Compare, FontAwesomeIcon.Columns, "Compare Builds", folded, null, p.Dim, "Up to three builds side by side, on one route or each on its best");
+                    Entry(Tab.Levelling, FontAwesomeIcon.ChartLine, "Levelling Plan", folded, null, p.Dim, "A sub's routes and time from its rank to a target rank");
                     break;
                 case "Characters":
                     Entry(Tab.Roster, FontAwesomeIcon.Users, "Character Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,
@@ -856,10 +868,12 @@ public partial class MainWindow : Window, IDisposable
             if (r == null || r.TargetRoute.Length == 0) { Colored(Dim, "—"); return; }
             if (r.Suboptimal) { Colored(Amber, r.TargetRoute); Hover("Not on this route now: see Route Optimization."); }
             else Colored(Green, r.TargetRoute);
+            FightClubBlockedCell(sub.Cid, sub.SubName);
         }, sub => RouteOf(sub.Cid, sub.SubName)?.TargetRoute ?? ""),
         new("targetGilDay", "Target gil/day", sub => GilDayCell(RouteOf(sub.Cid, sub.SubName)?.TargetGilDay, NoTargetGil),
             sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay ?? double.MinValue, sub => RouteOf(sub.Cid, sub.SubName)?.TargetGilDay == null),
         // Fight Club builds (once Craft?): follows Fight Club's builds from rank 85 (ticked) or its Sub Rules; changed here or in the app.
+        new("planner", "Voyage Planner", sub => { if (Ui.SmallButton($"Open in Voyage Planner##planner{sub.Cid}{sub.SubName}")) OpenInPlanner(sub.Cid, sub.SubName); Hover("Open this sub's build and route in Sub Calculator → Voyage Planner."); }, New: true),
         new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
 
@@ -930,6 +944,7 @@ public partial class MainWindow : Window, IDisposable
         ReadLine(reader.Supplies, FleetReader.SuppliesEvery); // on its own line, as on every other page
         var supplies = reader.Supplies.Data;
         if (supplies != null && supplies.Count > 0) SupplyDaysEditor(supplies[0].WindowDays, supplies[0].TargetDays);
+        if (reader.Credits.Data is { } priced) RepairKitPriceEditor(priced.RepairKitCost);
         if (supplies == null) return;
         SuppliesSummary(supplies);
         SuppliesTable.Draw(supplies, fitRows: true);
@@ -965,6 +980,34 @@ public partial class MainWindow : Window, IDisposable
     private FleetTable<FcCredits.Total>? creditAccountsTable;
     private FleetTable<FcCredits.FcLine>? creditFcsTable;
     private int tankCostDraft = -1, tankCostShown = -1;
+    private int kitPriceDraft = -1, kitPriceShown = -1;
+
+    // The price of a repair kit (Magitek repair material), as the app's Supplies page: for the gil of what to buy, Fight
+    // Club's gil a day after repairs and the Planner's repairs. Follows a change made elsewhere until it's changed here.
+    private void RepairKitPriceEditor(double saved)
+    {
+        var price = (int)Math.Round(saved);
+        if (kitPriceShown != price) { kitPriceShown = price; kitPriceDraft = price; }
+        ImGui.AlignTextToFramePadding();
+        Ui.Text("Repair kit price");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        Ui.InputInt("##repairKitPrice", ref kitPriceDraft, 0);
+        Hover("What one Magitek repair material (repair kit) costs you: for the cost of what to buy here, Fight Club's gil a day after repairs and the Voyage Planner's repairs.");
+        kitPriceDraft = Math.Max(0, kitPriceDraft);
+        ImGui.SameLine();
+        Tinted(Palette.Gil, "gil");
+        if (kitPriceDraft != price)
+        {
+            ImGui.SameLine();
+            using (ImRaii.Disabled(reader.Editing))
+                if (ImGui.Button("Save##repairKitPrice"))
+                {
+                    var gil = kitPriceDraft;
+                    reader.Edit("the repair kit price", c => FleetEdits.SaveRepairKitCost(c, gil));
+                }
+        }
+    }
     private readonly Memo<FcCredits.Plan> creditPlan = new();
 
     private FleetTable<FcCredits.Total> CreditAccountsTable => creditAccountsTable ??= new FleetTable<FcCredits.Total>("fcCreditAccounts", plugin.Configuration, new List<FleetColumn<FcCredits.Total>>

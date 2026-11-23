@@ -47,8 +47,9 @@ namespace XIVFleetCompanion
             listings.Select(l =>
             {
                 var m = l.World != null && market.TryGetValue(l.World, out var found) ? found : null;
+                // The market price (a lone low listing doesn't count as undercutting; its note says what was skipped).
                 MarketPrice? Rival(string scope) => m == null ? null
-                    : Universalis.Cheapest(m.Listings[scope].TryGetValue(l.ItemId, out var ls) ? ls : null, l.Hq, exclude, scope == "world" ? l.World : null);
+                    : Universalis.PriceIn(m, scope, l.ItemId, l.Hq, exclude, scope == "world" ? l.World : null, DateTime.UtcNow);
                 return new ComparedListing(l, Rival("world"), Rival("dc"), Rival("region"));
             }).ToList();
 
@@ -79,6 +80,27 @@ namespace XIVFleetCompanion
         private readonly Dictionary<List<VentureIncomeRow>, (LiveMarket? Live, Dictionary<long, Dictionary<string, double>>? PerDay)> ventureMarket = new();
         private readonly Dictionary<List<VentureIncomeRow>, List<FleetReader.VentureSummary>> ventureSummaries = new();
         private int working;
+        // Prices the outlier checks changed while working out Income's market values: (world, scope, item) -> note.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<(string World, string Scope, int ItemId), string> adjusted = new();
+        private LiveMarket? adjustedFor;
+
+        /// <summary>The item prices Income's market values used that the outlier checks changed (a lone low listing skipped,
+        /// or recent sales used), with why: for the note on the Income page.</summary>
+        public List<(string World, string Scope, int ItemId, string Note)> Adjusted(MarketRead? m)
+        {
+            var live = m?.Live is { Error: null } l ? l : null;
+            if (!ReferenceEquals(live, adjustedFor)) return new();
+            return adjusted.Select(kv => (kv.Key.World, kv.Key.Scope, kv.Key.ItemId, kv.Value)).OrderBy(x => x.ItemId).ThenBy(x => x.World).ToList();
+        }
+
+        private void NoteAdjusted(LiveMarket live, string world, string scope, Dictionary<int, string> notes)
+        {
+            lock (adjusted)
+            {
+                if (!ReferenceEquals(adjustedFor, live)) { adjusted.Clear(); adjustedFor = live; }
+                foreach (var (id, note) in notes) adjusted[(world, scope, id)] = note;
+            }
+        }
 
         /// <param name="run">Where the working out runs (the background by default; the tests run it at once).</param>
         public MarketCache(Func<Action, Task>? run = null) => this.run = run ?? (a => Task.Run(a));
@@ -159,13 +181,18 @@ namespace XIVFleetCompanion
 
         // As MarketMath.VentureGil for each character, the cheapest prices worked out once per world, scope and quality
         // (the same for every character there) rather than once per character.
-        private static Dictionary<long, Dictionary<string, double>> VentureMarket(List<VentureIncomeRow> rows, int windowDays, LiveMarket live, Dictionary<int, double> vendor)
+        private Dictionary<long, Dictionary<string, double>> VentureMarket(List<VentureIncomeRow> rows, int windowDays, LiveMarket live, Dictionary<int, double> vendor)
         {
             var cheapest = new Dictionary<(string World, string Scope, bool Hq), Dictionary<int, double>>();
+            var wanted = rows.Select(r => r.ItemId).ToHashSet();
             double Price(string world, WorldMarket market, string scope, bool hq, int id)
             {
                 if (!cheapest.TryGetValue((world, scope, hq), out var prices))
-                    cheapest[(world, scope, hq)] = prices = Universalis.CheapestPrices(market, scope, live.Exclude, hq);
+                {
+                    var notes = new Dictionary<int, string>();
+                    cheapest[(world, scope, hq)] = prices = Universalis.CheapestPrices(market, scope, live.Exclude, hq, notes);
+                    NoteAdjusted(live, world, scope, notes.Where(n => wanted.Contains(n.Key)).ToDictionary(n => n.Key, n => n.Value));
+                }
                 return prices.TryGetValue(id, out var p) ? p : vendor.TryGetValue(id, out var v) ? v : 0;
             }
             var result = new Dictionary<long, Dictionary<string, double>>();
@@ -184,8 +211,8 @@ namespace XIVFleetCompanion
         private LiveMarket? lootLive;
         private Dictionary<string, LootMarket>? lootResult;
 
-        /// <summary>Loot per Voyage at market prices by scope ("world", "dc", "region"): each voyage's loot at the cheapest
-        /// listing on its sub's world, data center and region, items not on the market board at what a vendor pays
+        /// <summary>Loot per Voyage at market prices by scope ("world", "dc", "region"): each voyage's loot at the market
+        /// price (Universalis.Price) on its sub's world, data center and region, items not on the market board at what a vendor pays
         /// (vendorOf, asked here). Null without live prices; worked out in the background once per read.</summary>
         public Dictionary<string, LootMarket>? LootMarketFor(MarketRead? m, LootRead loot, IReadOnlyDictionary<int, string> letters, Func<int, double> vendorOf)
         {
@@ -207,7 +234,11 @@ namespace XIVFleetCompanion
                         IReadOnlyDictionary<int, double>? PricesOn(string world)
                         {
                             if (prices.TryGetValue(world, out var known)) return known;
-                            return prices[world] = live.Markets.TryGetValue(world, out var market) ? Universalis.ScopePrices(market, scope, vendor, live.Exclude) : null;
+                            if (!live.Markets.TryGetValue(world, out var market)) return prices[world] = null;
+                            var notes = new Dictionary<int, string>();
+                            prices[world] = Universalis.ScopePrices(market, scope, vendor, live.Exclude, notes: notes);
+                            NoteAdjusted(live, world, scope, notes.Where(n => vendor.ContainsKey(n.Key)).ToDictionary(n => n.Key, n => n.Value));
+                            return prices[world];
                         }
                         return LootMath.Market(loot.Voyages, worldOf, PricesOn, letters, loot.WindowDays);
                     });

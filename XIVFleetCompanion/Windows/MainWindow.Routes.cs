@@ -201,13 +201,14 @@ public partial class MainWindow
         new("rank", "Rank", s => RightNumber(s.Rank), s => s.Rank),
         new("currentRoute", "Current route", s => RouteCell(s.CurrentRoute, s.CurrentMap), s => s.CurrentRoute),
         new("currentGil", "Current gil/day", s => GilDayCell(s.CurrentGilDay, NoCurrentGil), s => s.CurrentGilDay ?? double.MinValue, s => s.CurrentGilDay == null),
-        new("targetRoute", "Target route", s => Ui.Text(s.TargetRoute), s => s.TargetRoute),
+        new("targetRoute", "Target route", s => { Ui.Text(s.TargetRoute); FightClubBlockedCell(s.Cid, s.SubName); }, s => s.TargetRoute),
         new("targetGil", "Target gil/day", s => GilDayCell(s.TargetGilDay, NoTargetGil), s => s.TargetGilDay ?? double.MinValue, s => s.TargetGilDay == null),
         new("gain", "Gil/day gain", s =>
         {
             if (s.Gain is double g) TableCells.Right((g >= 0 ? "+" : "−") + Gil(Math.Abs(g)), g > 0 ? Green : g < 0 ? Red : (Vector4?)null);
             else { Colored(Dim, "—"); Hover("Its current route isn't in Fight Club, so the gain can't be worked out: it should still switch."); }
         }, s => s.Gain ?? double.MinValue, s => s.Gain == null),
+        new("planner", "Voyage Planner", s => { if (Ui.SmallButton($"Open in Voyage Planner##planner{s.Cid}{s.SubName}")) OpenInPlanner(s.Cid, s.SubName); Hover("Open this sub's build and route in Sub Calculator → Voyage Planner."); }, New: true),
     });
 
     // A character's name and world, for the Route Optimization page (from the Parts read's characters).
