@@ -55,7 +55,7 @@ public partial class MainWindow
         }, x => ListingVendor(x.Listing.ItemId)),
     }
     .Concat(cheaperBy ? new List<FleetColumn<ComparedListing>> { new("cheaperBy", "Cheaper by", x => TableCells.Right(Gil(x.UndercutBy ?? 0), Amber), x => x.UndercutBy ?? 0) } : new())
-    .Concat(rivals ? Universalis.Scopes.Select(scope => new FleetColumn<ComparedListing>($"cheapest{scope}", $"Cheapest on {(scope == "world" ? "World" : scope == "dc" ? "DC" : "Region")}",
+    .Concat(rivals ? Universalis.Scopes.Select(scope => new FleetColumn<ComparedListing>($"cheapest{scope}", $"Market on {(scope == "world" ? "World" : scope == "dc" ? "DC" : "Region")}",
         x => RivalCell(x, scope), x => x.In(scope)?.Price ?? double.MaxValue, x => x.In(scope) == null)) : Enumerable.Empty<FleetColumn<ComparedListing>>())
     .Concat(new List<FleetColumn<ComparedListing>>
     {

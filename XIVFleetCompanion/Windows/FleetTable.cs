@@ -269,6 +269,8 @@ public sealed class FleetTable<T>
         // widths saved before columns kept their own width were shares of the window, which don't carry over).
         // A little more room in each row, so long tables read easily.
         using var padding = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(ImGui.GetStyle().CellPadding.X + 2, ImGui.GetStyle().CellPadding.Y + 2) );
+        // The table's right edge (it takes the width left), for the note lines drawn across a row.
+        var tableRight = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
         using var table = Ui.Table($"##{id}|{string.Join(",", shown.Select(c => c.Key))}|w", shown.Count,
             fitRows ? Flags & ~(ImGuiTableFlags.ScrollX | ImGuiTableFlags.ScrollY) : Flags);
         if (!table) return;
@@ -347,16 +349,20 @@ public sealed class FleetTable<T>
                 if (line.Heading != null && line.Note is Vector4 noteColor)
                 {
                     // A note across the whole row, in its colour on a soft patch of it. Drawn past the first column's edge
-                    // (a cell clips its text to its own width), within the window.
+                    // (a cell clips its text to its own width), up to the table's right edge (the window's content, not
+                    // over its scrollbar); cut short there, the whole text shows on hover.
                     Ui.SetColumnIndex(0);
                     Ui.SetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(noteColor with { W = 0.14f }));
                     if (TableCapture.Current != null) { Ui.Text(line.Heading); continue; }
                     var at = ImGui.GetCursorScreenPos();
                     var draw = ImGui.GetWindowDrawList();
-                    var winPos = ImGui.GetWindowPos();
-                    draw.PushClipRect(winPos, winPos + ImGui.GetWindowSize(), false);
+                    var right = Math.Min(tableRight, ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X);
+                    var bottom = at.Y + ImGui.GetTextLineHeight();
+                    draw.PushClipRect(new Vector2(at.X, at.Y), new Vector2(right, bottom), true);
                     draw.AddText(at, ImGui.GetColorU32(noteColor), line.Heading);
                     draw.PopClipRect();
+                    if (at.X + ImGui.CalcTextSize(line.Heading).X > right && ImGui.IsMouseHoveringRect(at, new Vector2(right, bottom)))
+                        ImGui.SetTooltip(line.Heading);
                     ImGui.Dummy(new Vector2(1, ImGui.GetTextLineHeight()));
                     continue;
                 }

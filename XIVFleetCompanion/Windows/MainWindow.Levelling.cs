@@ -35,6 +35,7 @@ public partial class MainWindow
     private sealed record LvResult(bool Every, List<(LvSub Sub, Levelling.Plan Plan)> Plans);
     private string lvKey = "";
     private LvResult? lvResult;
+    private string? lvError; // the last working out's failure, shown instead of an old plan
     private Task<LvResult?>? lvWork;
     private string lvWorkKey = "";
     private System.Threading.CancellationTokenSource? lvCancel;
@@ -56,6 +57,8 @@ public partial class MainWindow
 
     // A sub's default target: its next build's rank (Subs page), else the top rank.
     private int LvDefaultTarget(SubRow s, int top) => Math.Min(top, Math.Max(s.Rank + 1, RouteOf(s.Cid, s.SubName)?.RankUp.NextBuild?.Rank ?? top));
+    // A sub's own target while it's still above its rank (it may have ranked past it since), else the default.
+    private int LvTargetOf(SubRow s, int top) => lvTargets.TryGetValue((s.Cid, s.SubName), out var t) && t > s.Rank ? t : LvDefaultTarget(s, top);
 
     private string? LvFcOf(long cid) => reader.Parts.Data?.Inputs?.Characters?.FirstOrDefault(c => c.Cid == cid)?.FcId;
 
@@ -114,7 +117,7 @@ public partial class MainWindow
             {
                 var letters = s.Build.Split('-');
                 if (letters.Length != 4 || !letters.All(l => SubRoutes.PartClass.ContainsKey(l))) continue;
-                asked.Add(new LvSub((s.Cid, s.SubName), s.Rank, s.CurrentExp, lvTargets.TryGetValue((s.Cid, s.SubName), out var t) ? t : LvDefaultTarget(s, g.MaxRank), letters, s.Cid));
+                asked.Add(new LvSub((s.Cid, s.SubName), s.Rank, s.CurrentExp, LvTargetOf(s, g.MaxRank), letters, s.Cid));
             }
         }
         var fcRead = lvFc == null ? null : fcs.FirstOrDefault(f => f.FcId == lvFc);
@@ -122,14 +125,19 @@ public partial class MainWindow
         var key = $"{lvEveryFc}|{string.Join(";", asked.Select(a => $"{a.Key}|{a.Rank}|{a.Exp}|{a.Target}|{string.Join(",", a.Parts)}"))}|{lvMaxHours}|{lvSuggest}|{lvStandardOnly}|{lvFc}|{lvEverySector}|{fcRead?.ReadAt}|{kitCost}";
         if (lvWork is { IsCompleted: true } done)
         {
-            if (done.IsCompletedSuccessfully) lvResult = done.Result;
+            if (done.IsCompletedSuccessfully) { lvResult = done.Result; lvError = null; }
             else if (!done.IsCanceled && done.Exception?.InnerException is not OperationCanceledException)
+            {
                 Plugin.Log.Warning(done.Exception, "Levelling Plan: the working out failed");
+                lvResult = null;
+                lvError = FailureText(done);
+            }
             if (!done.IsCanceled) lvKey = lvWorkKey;
             lvWork = null;
         }
         // A newer choice stops the plan still being worked out, instead of waiting for it.
-        if (key != lvKey && lvWork != null && lvWorkKey != key) { lvCancel?.Cancel(); lvWork = null; }
+        // (Going back to the choice already shown stops it too: its answer would replace the one asked for.)
+        if (lvWork != null && lvWorkKey != key) { lvCancel?.Cancel(); lvWork = null; }
         if (key != lvKey && lvWork == null)
         {
             var (every, hours, suggest, standard) = (lvEveryFc, lvMaxHours, lvSuggest, lvStandardOnly);
@@ -153,7 +161,7 @@ public partial class MainWindow
                 {
                     var owned = suggest && inputs != null && s.Cid != 0 ? BuildFinder.Owned(inputs, s.Cid) : new HashSet<string>();
                     var plan = Levelling.LevellingPlan(s.Rank, s.Exp, s.Target, expToNext, s.Parts, search.BestAt, search.Score, suggest, standard, owned, partRank);
-                    if (read != null) Levelling.MarkBetter(plan, all, read);
+                    if (read != null) Levelling.MarkBetter(plan, all, read, search);
                     plans.Add((s, plan));
                 }
                 return new LvResult(every, plans);
@@ -223,6 +231,7 @@ public partial class MainWindow
             Choices();
             if (lvRank >= g.MaxRank) { Ui.Wrapped("This sub is at the top rank."); return; }
             Working(working, "Working out the plan…");
+            if (!working) WorkError(lvError, "the plan");
             if (result?.Plans.FirstOrDefault() is not { } one) return;
             using var dim = WorkingDim(working);
             var plan = one.Plan;
@@ -241,11 +250,12 @@ public partial class MainWindow
             Choices();
             if (fcSubs.Count == 0) { Ui.Wrapped("No subs in this Free Company."); return; }
             Working(working, "Working out the plans…");
+            if (!working) WorkError(lvError, "the plans");
             using var dim = WorkingDim(working);
             lvFleetCtx = (g, result);
             LvFleetTable.DrawControls();
             LvFleetTable.Draw(fcSubs.Select(sub => new LvFleetRow(sub, (sub.Cid, sub.SubName), sub.Rank >= g.MaxRank,
-                lvTargets.TryGetValue((sub.Cid, sub.SubName), out var t0) ? t0 : LvDefaultTarget(sub, g.MaxRank))).ToList(), fitRows: true);
+                LvTargetOf(sub, g.MaxRank))).ToList(), fitRows: true);
         }
         ImGui.Spacing();
         using (ImRaii.PushColor(ImGuiCol.Text, Dim))
@@ -346,7 +356,7 @@ public partial class MainWindow
             lvChosen = r.Key;
             lvRank = r.S.Rank;
             lvExp = r.S.CurrentExp;
-            lvTarget = lvTargets.TryGetValue(r.Key, out var tt2) ? tt2 : null;
+            lvTarget = lvTargets.TryGetValue(r.Key, out var tt2) && tt2 > r.S.Rank ? tt2 : null;
             lvEveryFc = false;
         }),
     }) { Title = "Levelling Plan, every sub" };
@@ -367,7 +377,8 @@ public partial class MainWindow
             var before = i > 0 ? plan.Stages[i - 1] : null;
             var opened = before == null ? new List<int>() : st.Route.Where(id => !before.Route.Contains(id) && g.Sectors.TryGetValue(id, out var s) && s.RankReq > before.FromRank).ToList();
             var lines = swapsAt[i].Select(x => $"At rank {x.ShowRank}: {LvSlots[x.Swap.Slot]} → {PlannerPartName(x.Swap.To)} {(x.Swap.Owned ? "(you have one)" : "(to get)")} → " +
-                                               $"{PlannerN(x.Swap.Gain * 100)}% more experience an hour, {LvDays(x.Swap.SavedHours)} sooner in all").ToList();
+                                               (x.Swap.Gain is double gain ? $"{PlannerN(gain * 100)}% more experience an hour, {LvDays(x.Swap.SavedHours ?? 0)} sooner in all"
+                                                   : $"no route fits with the parts it has, {LvDays(plan.Hours)} to the target with this")).ToList();
             return new LvRow(st, i, opened, string.Concat(st.Route.Select(L)), lines);
         }).ToList();
         LvStageTable.Before = r => r.SwapLines;
@@ -410,8 +421,9 @@ public partial class MainWindow
         {
             if (r.St.Better is not { } b || lvGame == null) { Colored(Dim, "—"); return; }
             string L(int id) => lvGame.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
-            Colored(softColor, $"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
-                               $"{string.Join("-", b.Route.Select(L))} gives {PlannerN((b.ExpPerHour / r.St.ExpPerHour - 1) * 100)}% more an hour.");
+            using (ImRaii.PushColor(ImGuiCol.Text, softColor))
+                Ui.Wrapped($"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
+                           $"{string.Join("-", b.Route.Select(L))} gives {PlannerN(b.Gain * 100)}% more an hour{(b.AtRank > r.St.FromRank ? $" from rank {b.AtRank}" : "")}.");
         }),
         new("planner", "Voyage Planner", r =>
         {

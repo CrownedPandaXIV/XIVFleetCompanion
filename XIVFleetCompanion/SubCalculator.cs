@@ -207,13 +207,16 @@ namespace XIVFleetCompanion
                 .OrderByDescending(l => l.Gil).ThenByDescending(l => l.PerVoyage).ToList();
             var gilPerVoyage = loot.Sum(l => l.Gil);
 
-            // Wear: each part's condition lost, and the repair materials that comes to.
+            // Wear: each part's condition lost, and the repair materials that comes to. A part can still sail while its
+            // condition is above 0, so it lasts until the voyage that takes it to 0 (as SubmarineTracker counts), and a
+            // repair is always a full one: the part's repair, spread over the voyages it lasts.
             var wear = partClasses.Select((cls, slot) =>
             {
                 var p = parts.FirstOrDefault(x => x.Class == cls && x.Slot == slot);
                 if (p == null) return null;
                 var lost = sectors.Sum(s => SectorDamage(s.RankReq, p.PartRank));
-                return new Wear(p.Slot, lost, lost > 0 ? (int)Math.Floor(FullCondition / lost) : null, p.RepairKits * lost / FullCondition);
+                int? lasting = lost > 0 ? (int)Math.Ceiling(FullCondition / lost) : null;
+                return new Wear(p.Slot, lost, lasting, lasting is int n && n > 0 ? (double)p.RepairKits / n : 0);
             }).ToList();
             double? kitsPerVoyage = wear.All(w => w != null) ? wear.Sum(w => w!.KitsPerVoyage) : null;
             var perDay = v.Hours > 0 ? 24 / v.Hours : 0;

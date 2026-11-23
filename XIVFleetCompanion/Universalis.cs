@@ -78,6 +78,8 @@ namespace XIVFleetCompanion
         /// <summary>A listing under this share of the typical price is an outlier: of the five cheapest listings' middle
         /// price, then of the last week's middle sale price (as the app's OUTLIER_SHARE).</summary>
         public const double OutlierShare = 0.5;
+        /// <summary>Listings near the cheapest that make it the market price, whatever the sales were.</summary>
+        public const int AgreeingListings = 3;
         private Dictionary<string, (string Name, string Dc, string Region)>? places;
 
         public Universalis(HttpClient? http = null, string baseUrl = "https://universalis.app", Func<DateTime>? now = null)
@@ -120,8 +122,9 @@ namespace XIVFleetCompanion
         /// The market price of an item, the same on every page and as the app's marketPrice (characters/universalis.js):
         /// 1. the cheapest listing someone else sells (not the player's own retainers; hq: that quality only);
         /// 2. with three or more listings, any under half the middle price of the five cheapest is skipped;
-        /// 3. if that's still under half the middle price of the last week's sales (three or more), the sales' middle price
-        ///    is used instead. No listings: the sales' middle price. Neither: null.
+        /// 3. if that's still under half the middle price of the last week's sales (three or more), and fewer than three
+        ///    listings back it up (at most twice its price), the sales' middle price is used instead; three or more agreeing
+        ///    are a real drop in the market and stand. No listings: the sales' middle price. Neither: null.
         /// </summary>
         public static MarketPrice? Price(IEnumerable<MarketListing>? listings, IEnumerable<MarketSale>? sales, bool? hq, ISet<string>? exclude, string? world, DateTime nowUtc)
         {
@@ -154,7 +157,9 @@ namespace XIVFleetCompanion
                 notes.Add($"Ignored {skipped.Count} listing{(skipped.Count == 1 ? "" : "s")} at {string.Join(", ", skipped.Select(l => $"{Gil(l.Price)} gil"))} (well below the others, around {Gil(typical)}).");
             var price = pick.Price;
             var usedWorld = pick.World;
-            if (salesMiddle is double sm && price < sm * OutlierShare)
+            // Listings at the price picked or close to it (at most twice it): three or more agreeing are a real market drop.
+            var agreeing = selling.Count(l => l.Price >= price && l.Price <= price / OutlierShare);
+            if (salesMiddle is double sm && price < sm * OutlierShare && agreeing < AgreeingListings)
             {
                 notes.Add($"The cheapest listing ({Gil(price)} gil) is well below the last week's {sold.Count} sales, around {Gil(sm)}.");
                 price = sm;

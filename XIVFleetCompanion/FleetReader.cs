@@ -668,7 +668,8 @@ namespace XIVFleetCompanion
                 while (await r.ReadAsync())
                 {
                     var id = Text(r, "fc_id");
-                    if (!byFc.TryGetValue(id, out var fc)) byFc[id] = fc = new FcSectors(id, $"Free Company {id}", null, new());
+                    // A Free Company no character is in any more (its characters removed): left out, as the app.
+                    if (!byFc.TryGetValue(id, out var fc)) continue;
                     var at = Ms(r, "read_at");
                     if (fc.ReadAt == null || at > fc.ReadAt) byFc[id] = fc = fc with { ReadAt = at };
                     fc.Sectors[Int(r, "sector_id")] = (Convert.ToBoolean(r.GetValue(r.GetOrdinal("unlocked")), CultureInfo.InvariantCulture),
@@ -679,17 +680,30 @@ namespace XIVFleetCompanion
             {
                 // A database without update 18 yet: nothing read.
             }
-            // Who is in each: its world, and the account labels its characters are on (as the app's fcSectors).
-            List<SupplyRow> members;
-            try { members = await ReadSupplies(conn); }
-            catch (DbException) { members = new(); }
+            // Who is in each: its world, and the account labels its characters are on, from every character (with subs or
+            // not), each account at the roster place of its first character there (as the app's fcSectors).
+            var members = new List<(string FcId, string World, string Account, int SortIndex)>();
+            try
+            {
+                await using var cmd = Db.Cmd(@"SELECT c.fc_id, c.world, c.account_label, so.sort_index
+                    FROM companion_character_current c LEFT JOIN character_sort_order so ON so.cid = c.cid", conn);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    var fc = Text(r, "fc_id");
+                    if (fc.Length == 0 || fc == "0") continue;
+                    var at = r.IsDBNull(r.GetOrdinal("sort_index")) ? 1_000_000_000 : Int(r, "sort_index");
+                    members.Add((fc, Text(r, "world"), Text(r, "account_label"), at));
+                }
+            }
+            catch (DbException) { /* no characters yet: the pickers show names only */ }
             foreach (var id in byFc.Keys.ToList())
             {
                 var mine = members.Where(m => m.FcId == id).ToList();
                 byFc[id] = byFc[id] with
                 {
                     World = mine.Select(m => m.World).FirstOrDefault(w => !string.IsNullOrEmpty(w)) ?? "",
-                    Accounts = mine.GroupBy(m => m.Account ?? "").Select(g => (g.Key, g.Min(m => m.SortIndex))).ToList(),
+                    Accounts = mine.GroupBy(m => m.Account).Select(g => (g.Key, g.Min(m => m.SortIndex))).ToList(),
                 };
             }
             return byFc.Values.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();

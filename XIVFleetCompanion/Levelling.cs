@@ -23,20 +23,21 @@ namespace XIVFleetCompanion
         /// <summary>The voyage a sub would run: its route, length, experience (with the sure bonus), tanks and repair kits.</summary>
         public sealed record Voyage(List<int> Route, double Hours, double Exp, double ExpPerHour, int Range, int Tanks, double Kits);
 
-        public sealed record Better(List<int> Route, double ExpPerHour, List<int> Missing);
+        public sealed record Better(int AtRank, List<int> Route, double ExpPerHour, double Gain, List<int> Missing);
 
         public sealed class Stage
         {
             public int FromRank, ToRank, Voyages, Tanks;
             public List<int> Route = new();
             public string[] Parts = Array.Empty<string>();
-            public double Hours, ExpPerVoyage, ExpPerHour, Kits;
+            public double Hours, Exp, ExpPerVoyage, ExpPerHour, Kits; // ExpPerVoyage, ExpPerHour: the stage's averages
             public Better? Better;
         }
 
-        public sealed record Swap(int AtRank, int Slot, string From, string To, bool Owned, double Gain)
+        /// <summary>Gain and SavedHours are null for a swap that lets a stuck plan fly at all.</summary>
+        public sealed record Swap(int AtRank, int Slot, string From, string To, bool Owned, double? Gain)
         {
-            public double SavedHours { get; set; }
+            public double? SavedHours { get; set; }
         }
 
         public sealed class Plan
@@ -69,11 +70,15 @@ namespace XIVFleetCompanion
                 var stage = last != null && Key(last.Route) == Key(best.Route) && string.Join(",", last.Parts) == string.Join(",", parts) ? last : null;
                 if (stage == null)
                 {
-                    stage = new Stage { FromRank = r, ToRank = r, Route = best.Route, Parts = parts.ToArray(), ExpPerVoyage = best.Exp, ExpPerHour = best.ExpPerHour };
+                    stage = new Stage { FromRank = r, ToRank = r, Route = best.Route, Parts = parts.ToArray() };
                     plan.Stages.Add(stage);
                 }
                 stage.Voyages += 1;
                 stage.Hours += best.Hours;
+                // The stage's own averages: experience a voyage still grows with rank inside a stage.
+                stage.Exp += best.Exp;
+                stage.ExpPerVoyage = stage.Exp / stage.Voyages;
+                stage.ExpPerHour = stage.Exp / stage.Hours;
                 stage.Tanks += best.Tanks;
                 stage.Kits += best.Kits;
                 into += best.Exp;
@@ -127,6 +132,33 @@ namespace XIVFleetCompanion
             foreach (var to in letters) for (var slot = 0; slot < 4; slot++) { var r = partRank(to, slot); if (r > rank && r < target) opens.Add(r); }
             var swaps = new List<Swap>();
             var plan = keep;
+            // A plan stuck where its parts can't fly any route (none could be scored there): the one-part swap at that rank
+            // that gets it to the target soonest, if any does.
+            if (plan.StuckAt is int stuck && !plan.Reached)
+            {
+                var now = PartsWith(parts, swaps)(stuck);
+                Swap? pick = null;
+                Plan? pickPlan = null;
+                for (var slot = 0; slot < 4; slot++)
+                {
+                    foreach (var to in letters)
+                    {
+                        if (to == now[slot] || partRank(to, slot) > stuck) continue;
+                        var tried = now.ToArray();
+                        tried[slot] = to;
+                        if (bestAt(stuck, tried) == null) continue;
+                        var swap = new Swap(stuck, slot, now[slot], to, owned.Contains($"{to}|{slot}"), null);
+                        var next = Simulate(rank, exp, target, expToNext, PartsWith(parts, new List<Swap> { swap }), bestAt);
+                        if (!next.Reached) continue;
+                        if (pickPlan == null || next.Hours < pickPlan.Hours - 1e-9 || (Math.Abs(next.Hours - pickPlan.Hours) <= 1e-9 && swap.Owned && !pick!.Owned))
+                        {
+                            pick = swap;
+                            pickPlan = next;
+                        }
+                    }
+                }
+                if (pick != null) { pick.SavedHours = null; swaps.Add(pick); plan = pickPlan!; }
+            }
             var after = int.MinValue; // the last rank looked at
             while (swaps.Count < MaxSwaps)
             {
@@ -153,7 +185,7 @@ namespace XIVFleetCompanion
                             if (score(at, tried, stage.Route) is not double v) continue;
                             var gain = v / b - 1;
                             var isOwned = owned.Contains($"{to}|{slot}");
-                            if (gain >= MinGain && (pick == null || gain > pick.Gain + 1e-9 || (Math.Abs(gain - pick.Gain) <= 1e-9 && isOwned && !pick.Owned)))
+                            if (gain >= MinGain && (pick == null || gain > pick.Gain!.Value + 1e-9 || (Math.Abs(gain - pick.Gain!.Value) <= 1e-9 && isOwned && !pick.Owned)))
                                 pick = new Swap(at, slot, now[slot], to, isOwned, gain);
                         }
                     }
@@ -292,15 +324,25 @@ namespace XIVFleetCompanion
             return output;
         }
 
-        /// <summary>Each stage told when a sector the FC hasn't discovered would give a better route at that rank (as the
-        /// app's markBetter). every: searches with every sector.</summary>
-        public static void MarkBetter(Plan plan, Searches? every, IReadOnlyDictionary<int, (bool Unlocked, bool Explored)> read)
+        /// <summary>Each stage told when a sector the FC hasn't discovered would give a route at least 1% better at one of
+        /// its ranks (the first rank it happens at; as the app's markBetter). every: searches with every sector; own: through
+        /// the reading.</summary>
+        public static void MarkBetter(Plan plan, Searches? every, IReadOnlyDictionary<int, (bool Unlocked, bool Explored)> read, Searches? own = null)
         {
             foreach (var st in plan.Stages)
             {
-                var better = every?.BestAt(st.FromRank, st.Parts);
-                var missing = better?.Route.Where(id => !(read.TryGetValue(id, out var r) && r.Unlocked)).ToList() ?? new List<int>();
-                st.Better = better != null && missing.Count > 0 && better.ExpPerHour >= st.ExpPerHour * 1.01 ? new Better(better.Route, better.ExpPerHour, missing) : null;
+                st.Better = null;
+                if (every == null) continue;
+                for (var r = st.FromRank; r < Math.Max(st.ToRank, st.FromRank + 1); r++)
+                {
+                    var better = every.BestAt(r, st.Parts);
+                    if (better == null) continue;
+                    var missing = better.Route.Where(id => !(read.TryGetValue(id, out var x) && x.Unlocked)).ToList();
+                    if (missing.Count == 0) continue;
+                    var now = own?.BestAt(r, st.Parts);
+                    var baseRate = now != null ? now.ExpPerHour : st.ExpPerHour;
+                    if (better.ExpPerHour >= baseRate * 1.01) { st.Better = new Better(r, better.Route, better.ExpPerHour, better.ExpPerHour / baseRate - 1, missing); break; }
+                }
             }
         }
     }

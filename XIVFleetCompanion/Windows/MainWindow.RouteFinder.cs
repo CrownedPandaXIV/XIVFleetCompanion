@@ -37,10 +37,13 @@ public partial class MainWindow
     private bool rfExploreFirst;
     private string? rfFc;
 
-    private sealed record RfResult(SubStats? Stats, Dictionary<int, string?> States, Dictionary<int, RouteFinder.Value> Values, List<RouteFinder.Route> Routes, int Total, int NewOnes);
+    // Total: how many fit, known only when every route was looked at (null: at least the ones shown).
+    private sealed record RfResult(SubStats? Stats, Dictionary<int, string?> States, Dictionary<int, RouteFinder.Value> Values, List<RouteFinder.Route> Routes, int? Total, int NewOnes);
     private string rfKey = "";
     private RfResult? rfResult;
+    private string? rfError; // the last search's failure, shown instead of an old answer
     private Task<RfResult?>? rfWork;
+    private System.Threading.CancellationTokenSource? rfCancel;
     private string rfWorkKey = "";
 
     private Vector4 Blue => Palette.Address ?? new Vector4(0.48f, 0.66f, 0.92f, 1f);
@@ -205,23 +208,38 @@ public partial class MainWindow
         }
         RfFcLine(fcs, "Sectors explored by");
 
-        // Worked out in the background when anything changes; the last answer stays shown meanwhile.
+        // Worked out in the background when anything changes; the last answer stays shown meanwhile, and a newer choice
+        // stops the search still running. Gil at market prices when Live Market Prices is on (as the app).
         var fcRead = RfFcRead();
-        var key = $"{rfRank}|{string.Join(",", rfParts)}|{rfMap}|{rfRankBy}|{rfItem}|{rfMaxHours}|{rfMaxStops}|{string.Join(",", rfMust)}|{string.Join(",", rfLeaveOut)}|{rfExploreFirst}|{rfFc}|{fcRead?.ReadAt}";
+        var rfSub = rfChosen is { } rc ? reader.Subs.Data?.FirstOrDefault(x => x.Cid == rc.Cid && x.SubName == rc.SubName) : null;
+        var mapLoot = onMap.Select(s => data.Find(s.Id)).OfType<SubCalculatorData.Sector>().SelectMany(d => d.Pools.Values.SelectMany(p => p.Loot.Select(l => (int)l.ItemId))).ToHashSet();
+        var (rfMarket, rfPlace, rfMarketError) = SubMarketFor("routeFinder", rfSub?.World, mapLoot);
+        var key = $"{rfRank}|{string.Join(",", rfParts)}|{rfMap}|{rfRankBy}|{rfItem}|{rfMaxHours}|{rfMaxStops}|{string.Join(",", rfMust)}|{string.Join(",", rfLeaveOut)}|{rfExploreFirst}|{rfFc}|{fcRead?.ReadAt}"
+                  + $"|{rfPlace}|{(rfMarket == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(rfMarket))}";
         if (rfWork is { IsCompleted: true } done)
         {
-            if (done.IsCompletedSuccessfully) rfResult = done.Result;
-            else Plugin.Log.Warning(done.Exception, "Route Finder: the search failed");
-            rfKey = rfWorkKey;
+            if (done.IsCompletedSuccessfully) { rfResult = done.Result; rfError = null; rfKey = rfWorkKey; }
+            else if (!done.IsCanceled && done.Exception?.InnerException is not OperationCanceledException)
+            {
+                Plugin.Log.Warning(done.Exception, "Route Finder: the search failed");
+                rfResult = null;
+                rfError = FailureText(done);
+                rfKey = rfWorkKey;
+            }
             rfWork = null;
         }
+        if (rfWork != null && rfWorkKey != key) { rfCancel?.Cancel(); rfWork = null; }
         if (key != rfKey && rfWork == null)
         {
             var (map, rank, parts, rankBy, item, hours, stops, must, leaveOut, explore) =
                 (rfMap, rfRank, rfParts.ToArray(), rfRankBy, rfItem, rfMaxHours, rfMaxStops, rfMust.ToList(), rfLeaveOut.ToList(), rfExploreFirst);
             var read = fcRead?.ReadAt != null ? fcRead.Sectors : null;
+            var (market, exclude) = (rfMarket, reader.Market.Data?.Live?.Exclude);
             rfWorkKey = key;
-            rfWork = LowPriority.Run(() => RfFind(g, data, map, rank, parts, rankBy, item, hours, stops, must, leaveOut, explore, read));
+            rfCancel = new System.Threading.CancellationTokenSource();
+            var cancel = rfCancel.Token;
+            rfWork = LowPriority.Run(() => RfFind(g, data, map, rank, parts, rankBy, item, hours, stops, must, leaveOut, explore, read,
+                SubMarketPrices(market, mapLoot, exclude), cancel));
         }
         var result = rfResult;
         var working = key != rfKey;
@@ -232,7 +250,9 @@ public partial class MainWindow
         ImGui.SameLine(0, 14 * scale); Tag("C", Blue); ImGui.SameLine(); Colored(Dim, "could open by chance");
         Flow(ImGui.CalcTextSize("D not yet   E must be in the route").X + 40 * scale);
         Tag("D", Dim); ImGui.SameLine(); Colored(Dim, "not yet");
-        ImGui.SameLine(0, 14 * scale); Tag("E", headingColor ?? softColor); ImGui.SameLine(); Colored(Dim, "must be in the route (click a sector; again to leave it out)");
+        ImGui.SameLine(0, 14 * scale); Tag("E", headingColor ?? softColor); ImGui.SameLine(); Colored(Dim, "must be in the route");
+        Flow(ImGui.CalcTextSize("Click a sector to make it a must, again to leave it out.").X + 10 * scale);
+        Colored(Dim, "Click a sector to make it a must, again to leave it out.");
         RfTiles(onMap, result?.States ?? new(), g, RfOpeners(g, data));
         if (rfMust.Count > 0 || rfLeaveOut.Count > 0)
         {
@@ -258,24 +278,34 @@ public partial class MainWindow
         ImGui.Spacing();
         var order = rfExploreFirst ? "new sectors first, then " : "";
         order += rfRankBy == "gil" ? "most gil a day first" : rfRankBy == "item" && rfItem != 0 ? "most of the item a day first" : "best experience an hour first";
-        HeadingRuns(("Routes", null), ($"   {order}{(working ? " · working out…" : "")}", Dim));
+        HeadingRuns(("Routes", null), ($"   {order}", Dim));
+        Working(working, "Working out the routes…");
+        if (!working) WorkError(rfError, "the routes");
         if (result == null) return;
-        if (result.Stats == null) { Ui.Wrapped("This rank or one of these parts isn't in the game's data."); return; }
-        var tally = new List<(string, Vector4?)> { ($"{PlannerN(result.Total)}", null), ($" route{(result.Total == 1 ? "" : "s")} fit{(rfMaxHours is double h ? $" in {h:0}h" : "")} and in range   ", Dim) };
+        using var dim = WorkingDim(working);
+        if (result.Stats == null) { Ui.Wrapped("This rank or one of these parts isn't in the game data."); return; }
+        var shownCount = Math.Min(RfShown, result.Routes.Count);
+        var tally = result.Total is int total
+            ? new List<(string, Vector4?)> { ($"{PlannerN(total)}", null), ($" route{(total == 1 ? "" : "s")} fit{(rfMaxHours is double h ? $" in {h:0}h" : "")} and in range   ", Dim) }
+            : new List<(string, Vector4?)> { ("The best ", Dim), ($"{PlannerN(shownCount)}", null), ($" routes that fit{(rfMaxHours is double h2 ? $" in {h2:0}h" : "")} and are in range   ", Dim) };
         if (rfMust.Count > 0) { tally.Add(("with ", Dim)); tally.Add((string.Join(", ", rfMust.Select(id => g.Sectors[id].Location)) + "   ", null)); }
-        if (result.NewOnes > 0) { tally.Add(($"{PlannerN(result.NewOnes)}", Amber)); tally.Add((" explore or could open something new   ", Dim)); }
-        tally.Add(("gil at vendor prices", Dim));
+        if (result.NewOnes > 0) { tally.Add(($"{PlannerN(result.NewOnes)}", Amber)); tally.Add(($" {(result.Total == null ? "of these " : "")}explore or could open something new   ", Dim)); }
+        tally.Add((rfMarket != null ? $"gil at market prices ({rfPlace})" : "gil at vendor prices", Dim));
         Runs(tally.ToArray());
+        if (rfMarketError != null) Colored(Amber, $"Universalis: {rfMarketError} Vendor prices are shown.");
         if (result.Routes.Count == 0)
         {
-            Ui.Wrapped($"No route fits{(rfMaxHours is double hh ? $" in {hh:0}h" : "")} with this sub's range{(rfMust.Count > 0 ? " and these musts" : "")}. Try a longer voyage or fewer musts.");
+            var mustBad = result.States.Count > 0 && rfMust.Any(id => !(g.Sectors.TryGetValue(id, out var ms) && ms.RankReq <= rfRank
+                && result.States.GetValueOrDefault(id) is null or "explored" or "discovered" && !rfLeaveOut.Contains(id)));
+            Ui.Wrapped(mustBad ? "A must isn't a sector this sub can go to."
+                : $"No route fits{(rfMaxHours is double hh ? $" in {hh:0}h" : "")} with this sub's range{(rfMust.Count > 0 ? " and these musts" : "")}. Try a longer voyage or fewer musts.");
             return;
         }
         rfDraw = (g, result, rfMust.ToList());
         RfTable.LeaveOut = rfRankBy == "item" ? null : k => k == "item";
         RfTable.DrawControls();
         RfTable.Draw(result.Routes.Take(RfShown).ToList(), fitRows: true);
-        if (result.Total > RfShown) Colored(Dim, $"Showing the best {RfShown} of {PlannerN(result.Total)}.");
+        if (result.Total is int all && all > RfShown) Colored(Dim, $"Showing the best {RfShown} of {PlannerN(all)}.");
         Tag("T3", Green); ImGui.SameLine(); Tag("T2", Amber); ImGui.SameLine(); Colored(Dim, "loot tier this build reaches at each stop (amber: the sources differ, so it might not)");
         Flow(ImGui.CalcTextSize("+11 range to spare").X + 10 * scale);
         Colored(Green, "+11"); ImGui.SameLine(); Colored(Dim, "range to spare");
@@ -346,20 +376,25 @@ public partial class MainWindow
     }
 
     private static RfResult? RfFind(PlannerGame g, SubCalculatorData.Data data, int? mapId, int rank, string[] parts, string rankBy, uint item, double? maxHours,
-        int maxStops, List<int> must, List<int> leaveOut, bool exploreFirst, Dictionary<int, (bool Unlocked, bool Explored)>? read)
+        int maxStops, List<int> must, List<int> leaveOut, bool exploreFirst, Dictionary<int, (bool Unlocked, bool Explored)>? read,
+        Func<uint, double>? price = null, System.Threading.CancellationToken cancel = default)
     {
+        price ??= id => ListingVendor((int)id);
         var stats = SubRoutes.BuildStats(rank, parts, g.Ranks, g.Parts);
         var openers = g.Sectors.Keys.ToDictionary(id => id, id => data.Find(id)?.UnlockedFrom ?? 0);
         var states = RouteFinder.SectorStates(g.Sectors.Keys, read, openers);
         var onMap = g.Sectors.Values.Where(s => s.Map == mapId).OrderBy(s => s.Id).ToList();
         if (stats == null || onMap.Count == 0) return new RfResult(stats, states, new(), new(), 0, 0);
+        // Only the best RfShown are searched for (sooner), unless new sectors come first: then every route, to sort them.
         var allowed = RouteFinder.UsableSectors(onMap, rank, states, leaveOut);
-        var values = onMap.ToDictionary(s => s.Id, s => RouteFinder.SectorValue(s, data.Find(s.Id), stats, id => ListingVendor((int)id)));
+        var values = onMap.ToDictionary(s => s.Id, s => RouteFinder.SectorValue(s, data.Find(s.Id), stats, price));
         var mustOk = must.All(id => allowed.Any(a => a.Id == id));
         var routes = mustOk ? RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, g.Starts), stats, maxStops, maxHours, must, values,
-            rankBy == "item" && item != 0 ? "item" : rankBy == "gil" ? "gil" : "exp", rankBy == "item" && item != 0 ? item : null, RouteFinder.OpensOf(openers), states, exploreFirst)
+            rankBy == "item" && item != 0 ? "item" : rankBy == "gil" ? "gil" : "exp", rankBy == "item" && item != 0 ? item : null, RouteFinder.OpensOf(openers), states, exploreFirst,
+            limit: exploreFirst ? 0 : RfShown, cancel: cancel)
             : new List<RouteFinder.Route>();
-        return new RfResult(stats, states, values, routes, routes.Count, routes.Count(r => r.Explores + r.Chances > 0));
+        int? total = exploreFirst || routes.Count < RfShown ? routes.Count : null;
+        return new RfResult(stats, states, values, routes, total, routes.Take(exploreFirst ? routes.Count : RfShown).Count(r => r.Explores + r.Chances > 0));
     }
 
     // ---- The routes table ----
@@ -583,7 +618,8 @@ public partial class MainWindow
         var chars = reader.Parts.Data?.Inputs.Characters;
         var g = PlannerGameData();
         if (routes?.FightClub == null || fcs == null || chars == null || g == null) return null;
-        var key = $"{routes.At}|{reader.SubSectors.At}";
+        // The parts read too: it says which Free Company each character is in.
+        var key = $"{routes.At}|{reader.SubSectors.At}|{reader.Parts.At}";
         if (key != fcCheckKey)
         {
             fcCheckKey = key;
@@ -615,6 +651,8 @@ public partial class MainWindow
         if (check.AltRoute != null)
         {
             var net = check.AltNet ?? 0;
+            // On the same line: Subs and Route Optimization scroll by one line a row, so every row stays one line tall.
+            ImGui.SameLine(0, 6 * ImGuiHelpers.GlobalScale);
             Colored(Dim, $"now: {SubRoutes.FormatRoute(check.AltRoute, letters)} · {(net >= 1e6 ? $"{net / 1e6:0.0}M" : net >= 1e3 ? $"{Math.Round(net / 1e3):0}k" : $"{Math.Round(net):0}")}/day");
             Hover(alt.Trim());
         }

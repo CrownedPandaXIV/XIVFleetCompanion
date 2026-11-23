@@ -22,15 +22,18 @@ namespace XIVFleetCompanion
             ("kitsPerDay", false), ("netPerDay", true),
         };
 
-        public sealed record Check(int? Used, int Short, List<int> TooHigh);
+        public sealed record Check(int? Used, int Short, List<int> TooHigh, int PartsNeed = 0);
 
         /// <summary>Whether a build can fly a route as given (sectors in route order): the range it uses, the range missing
-        /// (0: in range), and the sectors above the build's rank.</summary>
-        public static Check RouteCheck(IReadOnlyList<SubSector> sectors, SubSector? start, SubStats? stats, int rank)
+        /// (0: in range), the sectors above the build's rank, and the rank its parts need when that's above its rank (0: they
+        /// fit; partRank as Levelling.PartRanks). As the app's routeCheck.</summary>
+        public static Check RouteCheck(IReadOnlyList<SubSector> sectors, SubSector? start, SubStats? stats, int rank,
+            IReadOnlyList<string>? parts = null, Func<string, int, int>? partRank = null)
         {
             var used = sectors.Count > 0 && start != null ? SubCalculator.RangeUsed(sectors, start) : null;
+            var need = partRank != null && parts != null ? parts.Select((l, slot) => partRank(l, slot)).DefaultIfEmpty(0).Max() : 0;
             return new Check(used, used is int u && stats != null ? (int)Math.Max(0, u - stats.Range) : 0,
-                sectors.Where(s => s.RankReq > rank).Select(s => s.Id).ToList());
+                sectors.Where(s => s.RankReq > rank).Select(s => s.Id).ToList(), need > rank ? need : 0);
         }
 
         /// <summary>One build's numbers for the rows: its stats always; the voyage's only when it can fly the route (in

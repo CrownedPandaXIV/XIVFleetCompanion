@@ -13,7 +13,7 @@ namespace XIVFleetCompanion.Windows;
 // flies the one route set here, so the numbers compare the builds alone. Best route each: each build gets its own best
 // route on a map (RouteFinder, through the sectors its Free Company has discovered), so the numbers compare build and
 // route together. The best figure in each row is green. Builds come from your subs, typed in, or Add to compare on the
-// Build Finder and Planner. Worked out away from the game's frame; gil at vendor prices.
+// Build Finder and Planner. Worked out away from the game's frame; gil at market prices with Live Market Prices on.
 public partial class MainWindow
 {
     private sealed class CmpBuild
@@ -23,6 +23,7 @@ public partial class MainWindow
         public int Rank;
         public string[] Parts = { "W+", "C+", "W+", "C+" };
         public string? FcId;
+        public string? World; // the sub's, for market prices
         public bool Changed;
         public string Key => $"{Rank}|{string.Join(",", Parts)}";
     }
@@ -43,6 +44,9 @@ public partial class MainWindow
     private string cmpKey = "";
     private CmpResult? cmpResult;
     private Task<CmpResult?>? cmpWork;
+    private System.Threading.CancellationTokenSource? cmpCancel;
+    private string? cmpError; // the last working out's failure, shown instead of an old answer
+    private bool cmpPricedAtMarket; // the table's gil heading: market or vendor prices
     private string cmpWorkKey = "";
 
     private static readonly (string Key, string Label, bool Gil, string? Hover, int Digits)[] CmpVoyageRows =
@@ -102,7 +106,7 @@ public partial class MainWindow
             {
                 var letters = s.Build.Split('-');
                 if (letters.Length != 4 || !letters.All(l => SubRoutes.PartClass.ContainsKey(l))) return;
-                var b = new CmpBuild { Label = s.SubName, Who = string.Join(" · ", new[] { s.Character, s.World }.Where(x => x.Length > 0)), Rank = s.Rank, Parts = letters,
+                var b = new CmpBuild { Label = s.SubName, Who = string.Join(" · ", new[] { s.Character, s.World }.Where(x => x.Length > 0)), Rank = s.Rank, Parts = letters, World = s.World,
                     FcId = reader.Parts.Data?.Inputs?.Characters?.FirstOrDefault(c => c.Cid == s.Cid)?.FcId };
                 if (cmpBuilds.Count < SubCompare.MaxBuilds && cmpBuilds.All(x => x.Key != b.Key)) cmpBuilds.Add(b);
             });
@@ -220,41 +224,64 @@ public partial class MainWindow
         var kitCost = reader.Credits.Data?.RepairKitCost ?? 0;
         var fcRead = cmpFc == null ? null : fcs.FirstOrDefault(f => f.FcId == cmpFc);
         var mode = cmpBest ? "best" : "same";
-        var key = $"{mode}|{string.Join(";", cmpBuilds.Select(b => b.Key))}|{string.Join(",", cmpRoute)}|{cmpMap}|{cmpRankBy}|{cmpMaxHours}|{string.Join(",", cmpMust)}|{cmpFc}|{fcRead?.ReadAt}|{kitCost}";
+        // Gil at market prices when Live Market Prices is on (as the app): the first build with a world's data center.
+        var cmpLoot = g.Sectors.Values.Where(s => (cmpBest ? s.Map == cmpMap : cmpRoute.Contains(s.Id))).Select(s => data.Find(s.Id)).OfType<SubCalculatorData.Sector>()
+            .SelectMany(d => d.Pools.Values.SelectMany(p => p.Loot.Select(l => (int)l.ItemId))).ToHashSet();
+        var (cmpMarket, cmpPlace, cmpMarketError) = cmpBuilds.Count > 0 ? SubMarketFor("compare", cmpBuilds.FirstOrDefault(b => b.World is { Length: > 0 })?.World, cmpLoot) : (null, null, null);
+        var key = $"{mode}|{string.Join(";", cmpBuilds.Select(b => b.Key))}|{string.Join(",", cmpRoute)}|{cmpMap}|{cmpRankBy}|{cmpMaxHours}|{string.Join(",", cmpMust)}|{cmpFc}|{fcRead?.ReadAt}|{kitCost}"
+                  + $"|{cmpPlace}|{(cmpMarket == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(cmpMarket))}";
         if (cmpWork is { IsCompleted: true } done)
         {
-            if (done.IsCompletedSuccessfully) cmpResult = done.Result;
-            else Plugin.Log.Warning(done.Exception, "Compare: the working out failed");
-            cmpKey = cmpWorkKey;
+            if (done.IsCompletedSuccessfully) { cmpResult = done.Result; cmpError = null; cmpKey = cmpWorkKey; }
+            else if (!done.IsCanceled && done.Exception?.InnerException is not OperationCanceledException)
+            {
+                Plugin.Log.Warning(done.Exception, "Compare: the working out failed");
+                cmpResult = null;
+                cmpError = FailureText(done);
+                cmpKey = cmpWorkKey;
+            }
             cmpWork = null;
         }
+        // A newer choice stops the comparison still being worked out.
+        if (cmpWork != null && cmpWorkKey != key) { cmpCancel?.Cancel(); cmpWork = null; }
         if (key != cmpKey && cmpWork == null)
         {
             var (builds, route, map, rankBy, hours, must) = (cmpBuilds.Select(b => (b.Rank, Parts: b.Parts.ToArray())).ToList(), cmpRoute.ToList(), cmpMap, cmpRankBy, cmpMaxHours, cmpMust.ToList());
             var read = fcRead?.ReadAt != null ? fcRead.Sectors : null;
+            var (market, exclude) = (cmpMarket, reader.Market.Data?.Live?.Exclude);
             cmpWorkKey = key;
-            cmpWork = LowPriority.Run<CmpResult?>(() => CmpWorkOut(g, data, mode, builds, route, map, rankBy, hours, must, read, kitCost));
+            cmpCancel = new System.Threading.CancellationTokenSource();
+            var cancel = cmpCancel.Token;
+            cmpWork = LowPriority.Run<CmpResult?>(() => CmpWorkOut(g, data, mode, builds, route, map, rankBy, hours, must, read, kitCost, SubMarketPrices(market, cmpLoot, exclude), cancel));
         }
         var working = key != cmpKey;
         HeadingRuns(("Side by side", null), ("   green: the best of these builds", Dim));
         if (cmpBuilds.Count == 0) { Ui.Wrapped("Add a build to start: one of your subs, one typed in, or Add to compare on the Build Finder or Voyage Planner."); return; }
         Working(working, "Working out the comparison…");
+        if (!working) WorkError(cmpError, "the comparison");
+        if (cmpMarketError != null) Colored(Amber, $"Universalis: {cmpMarketError} Vendor prices are shown.");
         // Only an answer for these builds in this mode.
         var result = cmpResult is { } r0 && r0.Mode == mode && r0.Columns.Count == cmpBuilds.Count ? r0 : null;
+        cmpPricedAtMarket = cmpMarket != null;
         using (WorkingDim(working)) CmpTable(g, result, mode);
         ImGui.Spacing();
         using (ImRaii.PushColor(ImGuiCol.Text, Dim))
-            Ui.Wrapped("Numbers as the Voyage Planner works them out, gil at vendor prices. Best route each: as the Route Finder ranks them (up to 5 stops), only through " +
+            Ui.Wrapped($"Numbers as the Voyage Planner works them out, gil at {(cmpMarket != null ? $"market prices ({cmpPlace})" : "vendor prices")}. Best route each: as the Route Finder ranks them (up to 5 stops), only through " +
                        "sectors the Free Company has discovered. A build that can't fly the route shows why instead of numbers.");
     }
 
     private static CmpResult CmpWorkOut(PlannerGame g, SubCalculatorData.Data data, string mode, List<(int Rank, string[] Parts)> builds, List<int> sameRoute, int? mapId,
-        string rankBy, double? maxHours, List<int> must, Dictionary<int, (bool Unlocked, bool Explored)>? read, double kitCost)
+        string rankBy, double? maxHours, List<int> must, Dictionary<int, (bool Unlocked, bool Explored)>? read, double kitCost,
+        Func<uint, double>? price = null, System.Threading.CancellationToken cancel = default)
     {
         var openers = g.Sectors.Keys.ToDictionary(id => id, id => data.Find(id)?.UnlockedFrom ?? 0);
         var states = RouteFinder.SectorStates(g.Sectors.Keys, read, openers);
         var onMap = g.Sectors.Values.Where(s => s.Map == mapId).OrderBy(s => s.Id).ToList();
-        double Price(uint id) => ListingVendor((int)id);
+        // Musts on another map (kept from before the map changed) don't count, as the app.
+        must = must.Where(id => onMap.Any(s => s.Id == id)).ToList();
+        var partRank = Levelling.PartRanks(g.Game.Parts);
+        var priceOf = price ?? (id => ListingVendor((int)id));
+        double Price(uint id) => priceOf(id);
         var columns = new List<CmpColumn>();
         foreach (var (rank, parts) in builds)
         {
@@ -267,18 +294,19 @@ public partial class MainWindow
                 var values = onMap.ToDictionary(s => s.Id, s => RouteFinder.SectorValue(s, data.Find(s.Id), stats, Price));
                 var routes = must.All(id => allowed.Any(a => a.Id == id))
                     ? RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, g.Starts), stats, 5, maxHours, must, values, rankBy == "gil" ? "gil" : "exp", null,
-                        RouteFinder.OpensOf(openers), states, false)
+                        RouteFinder.OpensOf(openers), states, false, limit: 1, cancel: cancel)
                     : new List<RouteFinder.Route>();
                 if (routes.Count > 0) route = routes[0].Sectors;
             }
             var sectors = route.Select(id => g.Sectors[id]).ToList();
-            var check = SubCompare.RouteCheck(sectors, sectors.Count > 0 ? SubRoutes.StartFor(sectors[0].Id, g.Starts) : null, stats, rank);
-            var flies = route.Count > 0 && check.Short == 0 && check.TooHigh.Count == 0;
+            var check = SubCompare.RouteCheck(sectors, sectors.Count > 0 ? SubRoutes.StartFor(sectors[0].Id, g.Starts) : null, stats, rank, parts, partRank);
+            var flies = route.Count > 0 && check.Short == 0 && check.TooHigh.Count == 0 && check.PartsNeed == 0;
             var plan = route.Count > 0 && stats != null
                 ? SubCalculator.PlanFor(route, stats, parts.Select(l => SubRoutes.PartClass[l]).ToList(), g.Sectors, g.Starts, g.Game.Parts, data, Price, kitCost) : null;
             columns.Add(new CmpColumn(stats, route, check, flies, plan, SubCompare.RowValues(stats, plan, flies)));
         }
-        return new CmpResult(mode, columns, SubCompare.BestMarks(columns.Select(c => c.Values).ToList()));
+        // A build whose parts can't be fitted at its rank isn't marked best at anything.
+        return new CmpResult(mode, columns, SubCompare.BestMarks(columns.Select(c => c.Check.PartsNeed > 0 ? new Dictionary<string, double?>() : c.Values).ToList()));
     }
 
     private void CmpTable(PlannerGame g, CmpResult? result, string mode)
@@ -375,6 +403,7 @@ public partial class MainWindow
                     Hover(g.Sectors.GetValueOrDefault(c.Route[j])?.Name ?? "");
                 }
             var problem = c.Stats == null ? "This rank or a part isn't in the game data"
+                : c.Check.PartsNeed > 0 ? $"Its parts can't be fitted until rank {c.Check.PartsNeed}"
                 : c.Route.Count == 0 ? (mode == "best" ? "No route fits" : "No route yet")
                 : c.Check.TooHigh.Count > 0 ? $"Rank too low for {string.Join(", ", c.Check.TooHigh.Select(L))}"
                 : c.Check.Short > 0 ? $"Out of range: needs {PlannerN(c.Check.Short)} more" : null;
@@ -392,7 +421,7 @@ public partial class MainWindow
                 c.Check.Short > 0 ? Red : Best("spare", i) ? Green : null);
         }
 
-        Group("Voyage · gil at vendor prices");
+        Group($"Voyage · gil at {(cmpPricedAtMarket ? "market" : "vendor")} prices");
         foreach (var (k, label, gil, hover, digits) in CmpVoyageRows)
         {
             Label(label, hover);

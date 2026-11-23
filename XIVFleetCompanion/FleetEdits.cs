@@ -263,6 +263,15 @@ namespace XIVFleetCompanion
             if (!file)
                 await using (var cmd = Command(conn, "SELECT to_regclass('companion_character_snapshot') IS NOT NULL"))
                     oldHistory = await cmd.ExecuteScalarAsync() is true;
+            // The workshop readings' tables (database updates 17 and 18), when this database has them yet.
+            async Task<bool> HasTable(string name)
+            {
+                await using var cmd = Command(conn, file ? "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $1" : "SELECT to_regclass($1) IS NOT NULL", name);
+                var v = await cmd.ExecuteScalarAsync();
+                return file ? v is not (null or DBNull) : v is true;
+            }
+            var hasPartCondition = await HasTable("companion_sub_part_condition");
+            var hasFcSectors = await HasTable("companion_fc_sub_sector");
 
             await using var tx = await conn.BeginTransactionAsync();
             async Task Run(string sql, params object?[] values)
@@ -295,12 +304,16 @@ namespace XIVFleetCompanion
             })
                 await Run(sql, who);
             if (oldHistory) await Run("DELETE FROM companion_character_snapshot WHERE cid = $1", who);
+            if (hasPartCondition) await Run("DELETE FROM companion_sub_part_condition WHERE cid = $1", who);
             // Free Companies no other character is in (the character's own rows are already gone).
             foreach (var fc in fcIds)
             {
                 if (await Any("SELECT 1 FROM companion_character_current WHERE fc_id = $1 LIMIT 1", Fc(fc))) continue;
                 await Run("DELETE FROM companion_fc_inventory_snapshot WHERE fc_id = $1", Fc(fc));
                 await Run("DELETE FROM companion_metric_latest WHERE subject_type = 'fc' AND subject_id = $1", Fc(fc));
+                // Its explored sectors and part readings: no character left to show them for (as the app).
+                if (hasFcSectors) await Run("DELETE FROM companion_fc_sub_sector WHERE fc_id = $1", Fc(fc));
+                if (hasPartCondition) await Run("DELETE FROM companion_sub_part_condition WHERE fc_id = $1", Fc(fc));
             }
             await tx.CommitAsync();
             return null;

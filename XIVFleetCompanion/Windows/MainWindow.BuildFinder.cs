@@ -38,6 +38,7 @@ public partial class MainWindow
     private string finderKey = "";
     private FinderResult? finderResult;
     private Task<FinderResult?>? finderWork;
+    private string? finderError; // the last search's failure, shown instead of an old answer
     private string finderWorkKey = "";
 
     // ---- Drawing helpers: a tag (text on a soft patch of its colour), a box around a group, a row that wraps ----
@@ -90,6 +91,16 @@ public partial class MainWindow
         ImGui.SameLine(0, 6 * scale);
         Ui.Text(text);
     }
+
+    // A working out that failed, in the error colour, as the app shows it (the old answer is no longer shown).
+    private void WorkError(string? error, string what)
+    {
+        if (error == null) return;
+        using (ImRaii.PushColor(ImGuiCol.Text, Red)) Ui.Wrapped($"Couldn't work out {what}: {error}");
+    }
+
+    // What a background working out's failure says: the innermost error's message.
+    private static string FailureText(Task task) => (task.Exception?.InnerException ?? task.Exception)?.Message ?? "it stopped";
 
     // The old answer dimmed while the new one is worked out (dispose to end).
     private static IDisposable WorkingDim(bool busy) => ImRaii.PushStyle(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * (busy ? 0.4f : 1f));
@@ -228,8 +239,13 @@ public partial class MainWindow
         var key = $"{string.Join(";", finderGoals.Select(x => $"{x.SectorId}:{x.Tier}:{x.Optimal}:{x.DoubleDip}:{string.Join(",", x.Items)}"))}|{finderSort}|{finderSureOnly}|{finderFor}|{inputs?.GetHashCode()}|{string.Join(";", finderSlots.Select(f => f == null ? "-" : f.Own ? "own" : string.Join(",", f.Letters)))}";
         if (finderWork is { IsCompleted: true } done)
         {
-            if (done.IsCompletedSuccessfully) finderResult = done.Result;
-            else Plugin.Log.Warning(done.Exception, "Build Finder: the search failed");
+            if (done.IsCompletedSuccessfully) { finderResult = done.Result; finderError = null; }
+            else
+            {
+                Plugin.Log.Warning(done.Exception, "Build Finder: the search failed");
+                finderResult = null;
+                finderError = FailureText(done);
+            }
             finderKey = finderWorkKey; // not tried again until something changes
             finderWork = null;
         }
@@ -247,13 +263,16 @@ public partial class MainWindow
         // 3. The builds.
         HeadingRuns(("Builds that get it", null));
         Working(working, "Working out the builds…");
+        if (!working) WorkError(finderError, "the builds");
         if (result == null) { FinderFoot(); return; }
         using var dim = WorkingDim(working);
         FinderNeeds(result);
         if (result.Need.Missing.Count > 0) Colored(Amber, $"No loot data yet for {string.Join(", ", result.Need.Missing)}: its goals are left out.");
         ImGui.Spacing();
         FinderSlotFilters();
-        var filtered = finderSlots.Any(f => f != null);
+        var filtered = finderSlots.Any(f => f != null && !(f.Own && inputs == null));
+        if (inputs == null && finderSlots.Any(f => f is { Own: true }))
+            Colored(Amber, "Your parts haven't been read yet: \"Ones I own\" counts any part until they are.");
         var tally = new List<(string, Vector4?)>();
         if (filtered) { tally.Add(($"{PlannerN(result.Unfiltered)}", null)); tally.Add((" builds · ", Dim)); }
         tally.Add(($"{PlannerN(result.Total)}", null));
@@ -281,7 +300,8 @@ public partial class MainWindow
         else
         {
             // Banded by rank ("Rank 144 · 312 builds") while sorted by lowest rank; the Rank column only otherwise.
-            var banded = finderSort == "rank";
+            // A column header's sort drops the bands, so the Rank column comes back then (as the app).
+            var banded = finderSort == "rank" && !FinderTable.Sorted;
             FinderTable.Band = banded
                 ? r => r.RangeShort > 0 ? $"Out of range · {PlannerN(result.OutOfRange)} builds" : $"Rank {r.Rank} · {PlannerN(result.ByRank.GetValueOrDefault(r.Rank))} build{(result.ByRank.GetValueOrDefault(r.Rank) == 1 ? "" : "s")}"
                 : null;
@@ -563,6 +583,8 @@ public partial class MainWindow
         var route = sectors.Count > 1 ? SubCalculator.BestOrder(sectors, start, 100) : sectors;
         var minRank = Math.Max(1, sectors.Max(s => s.RankReq));
         var owned = inputs != null ? BuildFinder.Owned(inputs, forCid) : null;
+        // Your parts not read yet: "Ones I own" can't be told, so it doesn't filter (the page says so).
+        if (owned == null) slots = slots.Select(f => f is { Own: true } ? null : f).ToList();
         var all = BuildFinder.FindBuilds(need, g.Ranks, g.Parts, minRank, g.MaxRank, route, start, owned, sureOnly);
         // The part filter applies before the list is cut, so the counts and rank groups follow it.
         var rows = BuildFinder.SortBuilds(BuildFinder.FilterByParts(all, slots, owned), sort);

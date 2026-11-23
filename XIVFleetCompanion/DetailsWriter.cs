@@ -324,6 +324,8 @@ namespace XIVFleetCompanion
 
         // Each FC's sectors as last read (SubSectors): every sector's row replaced by the reading, unless a newer one
         // (another PC's) is already stored. False (nothing changed) until the database has update 18.
+        // A sector, once unlocked or explored, stays so (the game never takes one back), so readings are merged: whichever
+        // PC's clock is ahead, an older reading can't hide a newer one's sectors. read_at: the newest reading's.
         public static async Task<bool> WriteSubSectorsAsync(DbConnection db, IReadOnlyList<SubSectors.Row> rows)
         {
             if (Db.IsFile(db)) { if (rows.Count > 0) await FileWriteSubSectors(db, rows); return true; }
@@ -340,9 +342,11 @@ namespace XIVFleetCompanion
                         await using var cmd = new NpgsqlCommand(@"
                             INSERT INTO companion_fc_sub_sector (fc_id, sector_id, unlocked, explored, read_at, cid)
                             VALUES (@fc::numeric, @sector::int, @unlocked, @explored, @at::timestamptz, @cid::numeric)
-                            ON CONFLICT (fc_id, sector_id) DO UPDATE SET unlocked = excluded.unlocked, explored = excluded.explored,
-                                read_at = excluded.read_at, cid = excluded.cid
-                            WHERE companion_fc_sub_sector.read_at <= excluded.read_at", conn, tx);
+                            ON CONFLICT (fc_id, sector_id) DO UPDATE SET
+                                unlocked = companion_fc_sub_sector.unlocked OR excluded.unlocked,
+                                explored = companion_fc_sub_sector.explored OR excluded.explored,
+                                cid = CASE WHEN excluded.read_at >= companion_fc_sub_sector.read_at THEN excluded.cid ELSE companion_fc_sub_sector.cid END,
+                                read_at = GREATEST(companion_fc_sub_sector.read_at, excluded.read_at)", conn, tx);
                         cmd.Parameters.AddWithValue("fc", (decimal)row.FcId);
                         cmd.Parameters.AddWithValue("sector", sector.Id);
                         cmd.Parameters.AddWithValue("unlocked", sector.Unlocked);

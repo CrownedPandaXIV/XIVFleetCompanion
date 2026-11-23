@@ -1,4 +1,5 @@
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -28,7 +29,9 @@ namespace XIVFleetCompanion
                 new SubSectors.Sector(id, HousingManager.IsSubmarineExplorationUnlocked((byte)id), HousingManager.IsSubmarineExplorationExplored((byte)id))).ToList();
             var problem = SubSectors.Problem(sectors);
             if (problem != null) return new Look(null, $"in the workshop, sectors not read: {problem}");
-            return new Look(new SubSectors.Reading(cid, sectors, now),
+            // The Free Company the game says the character is in: the workshop's, whatever AutoRetainer has yet.
+            var proxy = InfoProxyFreeCompany.Instance();
+            return new Look(new SubSectors.Reading(cid, sectors, now, proxy == null ? 0UL : proxy->Id),
                 $"in the workshop: {sectors.Count(s => s.Explored)} sector(s) explored, {sectors.Count(s => s.Unlocked && !s.Explored)} unlocked to explore next");
         }
     }
