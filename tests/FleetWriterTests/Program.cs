@@ -1458,6 +1458,8 @@ internal static partial class Program
             return s;
         }
         int lCases = 0, lGood = 0;
+        var lvPlaced = new List<string>();
+        var lvPlacedWrong = false;
         var lWrong = "";
         foreach (var c in lvRoot.GetProperty("cases").EnumerateArray())
         {
@@ -1469,6 +1471,10 @@ internal static partial class Program
                 c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray(), search.BestAt, search.Score,
                 c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned, Levelling.PartRanks(partList));
             if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read);
+            var placed = Levelling.SwapsByStage(plan);
+            lvPlaced.Add($"{plan.Swaps.Count}/{placed.Sum(l => l.Count)}");
+            if (placed.Sum(l => l.Count) != plan.Swaps.Count || placed.Select((l, i) => l.Any(x => x.ShowRank != plan.Stages[i].FromRank || x.ShowRank < x.Swap.AtRank
+                    || (i > 0 && plan.Stages[i - 1].FromRank >= x.Swap.AtRank))).Any(bad => bad)) lvPlacedWrong = true;
             var wrong = new List<string>();
             void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
             Want(plan.Voyages == c.GetProperty("voyages").GetInt32() && Near(plan.Hours, c.GetProperty("hours")) && plan.Tanks == c.GetProperty("tanks").GetInt32()
@@ -1499,6 +1505,7 @@ internal static partial class Program
             else if (lWrong.Length == 0) lWrong = $" (first wrong: case {lCases}: {string.Join(", ", wrong.Take(3))})";
         }
         Check(lCases >= 4 && lGood == lCases, $"Levelling Plan: the plugin's stages, swaps and totals match the app's for {lGood} of {lCases} subs{lWrong}");
+        Check(!lvPlacedWrong && lvPlaced.Count >= 4, $"Levelling Plan: every swap shows once, before the first stage that uses it ({string.Join(", ", lvPlaced)} swaps placed)");
         // No swap fits a part before the rank it needs (the fixture's parts need ranks from 1 to 125).
         var rankOfPart = Levelling.PartRanks(partList);
         var swapsSeen = new List<string>();

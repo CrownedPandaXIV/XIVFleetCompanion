@@ -352,15 +352,17 @@ public partial class MainWindow
         ImGui.TableSetupColumn("##lvR", ImGuiTableColumnFlags.WidthFixed, 130 * scale);
         ImGui.TableSetupColumn("##lvM", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("##lvB", ImGuiTableColumnFlags.WidthFixed, 120 * scale);
+        // Each swap before the first stage that uses it (Levelling.SwapsByStage).
+        var swapsAt = Levelling.SwapsByStage(plan);
         for (var i = 0; i < plan.Stages.Count; i++)
         {
             var st = plan.Stages[i];
-            foreach (var sw in plan.Swaps.Where(x => x.AtRank == st.FromRank))
+            foreach (var (sw, showRank) in swapsAt[i])
             {
                 ImGui.TableNextRow();
                 ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(Amber with { W = 0.12f }));
                 ImGui.TableNextColumn();
-                Colored(Amber, $"At rank {sw.AtRank}");
+                Colored(Amber, $"At rank {showRank}");
                 ImGui.TableNextColumn();
                 Colored(Amber, $"{LvSlots[sw.Slot]} → {PlannerPartName(sw.To)}");
                 ImGui.SameLine();

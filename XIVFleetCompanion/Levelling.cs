@@ -278,6 +278,20 @@ namespace XIVFleetCompanion
             }
         }
 
+        /// <summary>Where each part swap shows: before the first stage that uses it (the first voyage leaving at its rank or
+        /// above; a swap found where a new part opens can fall inside a stage, as when a voyage goes from rank 49 to 51),
+        /// at that stage's rank, when the sub is back in port to change it. As the app's swapsByStage.</summary>
+        public static List<List<(Swap Swap, int ShowRank)>> SwapsByStage(Plan plan)
+        {
+            var output = plan.Stages.Select(_ => new List<(Swap, int)>()).ToList();
+            foreach (var s in plan.Swaps)
+            {
+                var i = plan.Stages.FindIndex(st => st.FromRank >= s.AtRank);
+                if (i >= 0) output[i].Add((s, plan.Stages[i].FromRank));
+            }
+            return output;
+        }
+
         /// <summary>Each stage told when a sector the FC hasn't discovered would give a better route at that rank (as the
         /// app's markBetter). every: searches with every sector.</summary>
         public static void MarkBetter(Plan plan, Searches? every, IReadOnlyDictionary<int, (bool Unlocked, bool Explored)> read)
