@@ -93,6 +93,17 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   optimal retrieval ("1–5 · 5–10 · 10–15 each"), each with the retrieval it needs on hover, instead of one span from
   the lowest to the highest.
 - **Planner: the notes under a tier, retrieval or double dip wrap** inside their column instead of being cut off.
+- **Sub Calculator → Compare (new page, as in the app).** Up to three builds side by side. Add one of your subs, type
+  one in, or use **Add to compare** on the Build Finder and Planner (the builds stay while you move between pages). Two
+  ways to compare:
+  - **Same route:** every build flies the route you set, so the numbers compare the builds alone. A build that can't fly
+    it says why ("Out of range: needs 20 more", "Rank too low for R") instead of numbers.
+  - **Best route each:** each build gets its own best route on a map, for experience or gil, as the Route Finder ranks
+    them (with a longest voyage, musts, and only sectors your Free Company has discovered), so the numbers compare build
+    and route together. Each build's route is shown at the top of its column.
+  Rows: the five stats, range used, voyage, experience and gil a voyage and a day, repair kits a day, gil a day after
+  repairs, and what each build reaches at each stop. The best figure in each row is green. Open in Planner on each.
+  Gil at vendor prices. The plugin's figures are checked against the app's. `/xivfleet compare` opens it.
 
 ## 2.5.0 - 2026-11-21
 

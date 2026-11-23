@@ -1388,6 +1388,60 @@ internal static partial class Program
         }).ToList();
         Check(fcAll.Count >= 4 && fcAll.All(x => x.Ok), $"Route Finder: Fight Club routes checked against the FC's sectors as the app does ({string.Join("; ", fcAll.Select(x => x.Text))})");
 
+        // Compare (as the app's subs/compare.js): builds on one route as given, and each on its own best route on a map
+        // through the FC's reading; whether each can fly it, the numbers for each row, and the best in each row.
+        int cCases = 0, cGood = 0;
+        var cWrong = "";
+        foreach (var c in root.GetProperty("compare").GetProperty("cases").EnumerateArray())
+        {
+            cCases++;
+            var best = c.GetProperty("mode").GetString() == "best";
+            var mine = new List<(List<int> Route, SubCompare.Check Check, bool Flies, Dictionary<string, double?> Values)>();
+            foreach (var b in c.GetProperty("builds").EnumerateArray())
+            {
+                var letters = b.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+                var rank = b.GetProperty("rank").GetInt32();
+                var stats = SubRoutes.BuildStats(rank, letters, ranks, parts);
+                var route = best ? new List<int>() : c.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()).ToList();
+                if (best && stats != null)
+                {
+                    var onMap = byId.Values.Where(x => x.Map == c.GetProperty("mapId").GetInt32()).OrderBy(x => x.Id).ToList();
+                    var allowed = RouteFinder.UsableSectors(onMap, rank, states, new List<int>());
+                    var values = onMap.ToDictionary(x => x.Id, x => RouteFinder.SectorValue(x, data.Find(x.Id), stats, Price));
+                    var must = c.GetProperty("must").EnumerateArray().Select(x => x.GetInt32()).ToList();
+                    var maxHours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
+                    var routes = must.All(id => allowed.Any(a => a.Id == id))
+                        ? RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, must, values, c.GetProperty("rankBy").GetString()!, null, opens, states, false)
+                        : new List<RouteFinder.Route>();
+                    route = routes.Count > 0 ? routes[0].Sectors : new List<int>();
+                }
+                var sectorsHere = route.Select(id => byId[id]).ToList();
+                var check = SubCompare.RouteCheck(sectorsHere, sectorsHere.Count > 0 ? SubRoutes.StartFor(sectorsHere[0].Id, starts) : null, stats, rank);
+                var flies = route.Count > 0 && check.Short == 0 && check.TooHigh.Count == 0;
+                var plan = route.Count > 0 ? SubCalculator.PlanFor(route, stats, letters.Select(l => SubRoutes.PartClass[l]).ToList(), byId, starts, partList, data, Price, kitCost) : null;
+                mine.Add((route, check, flies, SubCompare.RowValues(stats, plan, flies)));
+            }
+            var marks = SubCompare.BestMarks(mine.Select(m => m.Values).ToList());
+            var wrong = new List<string>();
+            var theirs = c.GetProperty("columns").EnumerateArray().ToList();
+            for (var i = 0; i < theirs.Count; i++)
+            {
+                var e = theirs[i];
+                var m = mine[i];
+                if (!m.Route.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))) wrong.Add($"build {i + 1}'s route ({string.Join("-", m.Route)})");
+                if (!Near(m.Check.Used, e.GetProperty("used")) || m.Check.Short != e.GetProperty("short").GetInt32() || m.Flies != e.GetProperty("flies").GetBoolean()
+                    || !m.Check.TooHigh.SequenceEqual(e.GetProperty("tooHigh").EnumerateArray().Select(x => x.GetInt32()))) wrong.Add($"build {i + 1} can fly it ({m.Check.Short} short)");
+                foreach (var (key, _) in SubCompare.Rows)
+                    if (!Near(m.Values[key], e.GetProperty("values").GetProperty(key))) wrong.Add($"build {i + 1}'s {key} ({m.Values[key]})");
+            }
+            var theirMarks = c.GetProperty("marks").EnumerateObject().ToDictionary(x => x.Name, x => x.Value.EnumerateArray().Select(v => v.GetInt32()).ToList());
+            if (marks.Count != theirMarks.Count || marks.Any(kv => !theirMarks.TryGetValue(kv.Key, out var t) || !t.SequenceEqual(kv.Value)))
+                wrong.Add($"the best in each row ({string.Join(", ", marks.Select(kv => $"{kv.Key}:{string.Join("+", kv.Value)}"))})");
+            if (wrong.Count == 0) cGood++;
+            else if (cWrong.Length == 0) cWrong = $" (first wrong: case {cCases}: {string.Join(", ", wrong.Take(4))})";
+        }
+        Check(cCases >= 4 && cGood == cCases, $"Compare: the plugin's columns and best figures match the app's for {cGood} of {cCases} sets of builds{cWrong}");
+
         // Parts you own (as the app's ownedParts): fitted, or spare in a bag, a retainer or the FC chest; for one character
         // only its own subs, bags and retainers and its Free Company's chest. Item numbers: bow, bridge, hull, stern from each base.
         var partsIn = new PartsInputs(

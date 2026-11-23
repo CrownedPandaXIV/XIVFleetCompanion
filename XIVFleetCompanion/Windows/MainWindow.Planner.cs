@@ -251,6 +251,14 @@ public partial class MainWindow
                     Runs(("Surveillance ", Dim), (PlannerN(st.Surveillance), null), ("  ·  Retrieval ", Dim), (PlannerN(st.Retrieval), null),
                         ("  ·  Speed ", Dim), (PlannerN(st.Speed), null), ("  ·  Range ", Dim), (PlannerN(st.Range), null), ("  ·  Favor ", Dim), (PlannerN(st.Favor), null));
                 else Colored(Amber, "This rank or one of these parts isn't in the game data.");
+                if (plannerStats != null)
+                {
+                    // Add to compare: as your sub while its rank and parts are unchanged, else as a build from here.
+                    var mine = plannerChosen is { } ch ? reader.Subs.Data?.FirstOrDefault(x => x.Cid == ch.Cid && x.SubName == ch.SubName) : null;
+                    var same = mine != null && mine.Rank == plannerRank && mine.Build == string.Join("-", plannerParts);
+                    CmpAddButton("planner", same ? mine!.SubName : string.Concat(plannerParts), same ? string.Join(" · ", new[] { mine!.Character, mine.World }.Where(x => x.Length > 0)) : "from the Planner",
+                        plannerRank, plannerParts, plannerRoute, same ? reader.Parts.Data?.Inputs?.Characters?.FirstOrDefault(c => c.Cid == mine!.Cid)?.FcId : null);
+                }
 
                 ImGui.TableNextColumn();
                 Heading($"Route ({plannerRoute.Count} of 5 sectors)");

@@ -629,10 +629,12 @@ public partial class MainWindow
                 Hover(string.Join(", ", r.MissingParts.Select(p => $"{PartName(p.Letter)} {FinderSlots[p.Slot]}")));
             }
         }, r => r.MissingParts?.Count ?? -1),
-        new("planner", "Planner", r =>
+        new("planner", "Planner / Compare", r =>
         {
             if (Ui.SmallButton($"Open in Planner##finder{string.Concat(r.Parts)}")) FinderOpen(r);
             Hover("Open this build and the route in Sub Calculator → Planner.");
+            ImGui.SameLine();
+            CmpAddButton($"finder{string.Concat(r.Parts)}{r.Rank}", string.Concat(r.Parts), "from the Build Finder", r.Rank, r.Parts, finderResult?.Route.Select(x => x.Id).ToList());
         }),
     });
 }
