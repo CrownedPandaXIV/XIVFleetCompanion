@@ -3,6 +3,60 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.6.1 - 2026-11-23
+
+Fixes to the Sub Calculator, the workshop readings and the market price, from a full check of 2.6.0.
+
+### Faster
+- **Voyage Planner** works out market prices only when they change, not every frame: with Live Market Prices on it
+  cost up to 12 ms and 10 MB a frame.
+- **Route Finder** and **Compare Builds** search only for the routes they show: "Any" on a 30-sector map takes a fraction
+  of a second instead of several, with far less memory, and a new choice stops the search still running. With the list
+  cut to the best 100, the count reads "The best 100 routes" (the full count shows when every route fits on the list).
+- Game data that can't be read is tried again every 5 minutes, not every 2 seconds.
+
+### Numbers
+- **Repair kits:** a part can still sail until its condition reaches 0, so it lasts one voyage longer than shown before,
+  and a repair is always a full one. Kits a day and "parts last" were up to 45% too high.
+- **Levelling Plan:** a stage's Exp a voyage and Exp an hour are now its averages, not its first voyage's.
+- **Levelling Plan:** the "not discovered yet" hint looks at every rank of a stage, and says the rank when it's later.
+- **Levelling Plan:** when the parts can't fly any route at all, it suggests the one part swap that lets the sub level.
+- **Compare Builds:** a build whose parts can't be fitted at its rank says so and gets no voyage numbers or green marks.
+- **Market price:** the check against last week's sales no longer overrides three or more listings that agree: that's
+  the market dropping, not a lone low listing. Undercuts show again on Gil & Market.
+- **Route Finder and Compare Builds** price gil on the market with Live Market Prices on (your sub's data center), as
+  the app does.
+- Routes that tie exactly (same time and range) always come in the same order.
+
+### Pages
+- When a page's working out fails it says so in red, instead of showing the last answer as if it were current (Build
+  Finder, Route Finder, Compare, Levelling Plan).
+- Levelling Plan: going back to a choice while another is being worked out no longer shows the other's plan; a sub's
+  target at or below its rank moves to the next rank up; the "not discovered yet" sentence wraps.
+- Build Finder: the Rank column comes back when you sort by a column header; "Ones I own" counts any part (and says so)
+  until your parts have been read, instead of showing no builds.
+- Compare Builds: "must go to" sectors from another map no longer leave every build with "No route fits".
+- Subs and Route Optimization: a "needs …" route stays on one line, so long lists don't lose their last rows.
+- The amber part-swap lines stop at the table's edge, with the whole line on hover.
+- Each page's sub picker keeps its own search.
+- The "needs …" marks follow a character moving to another Free Company.
+- Route Finder: "Working out the routes…" as on the other pages; "A must isn't a sector this sub can go to."; wording as
+  the app's.
+- Gil & Market: the columns read "Market on World/DC/Region"; the Settings hover no longer says the Shopping List uses
+  that price.
+
+### Workshop readings
+- A reading taken before AutoRetainer knows the character's Free Company waits for a later sync instead of being lost
+  for the session.
+- Readings are filed under the Free Company whose workshop they were read in (as the game says), not the one
+  AutoRetainer last had.
+- Part condition isn't read while the game says the parts aren't loaded yet (it could still hold another workshop's).
+- Sector readings from two PCs are merged (a sector, once explored, stays explored), so a PC whose clock is ahead can't
+  hide another's newer reading.
+- Removing a character also removes its part readings, and the sectors and part readings of a Free Company no one is
+  left in. The Free Company pickers take each FC's world and accounts from all its characters, as the app does.
+- Releases ship the Sub Calculator data the tests ran on, the same as the app's.
+
 ## 2.6.0 - 2026-11-23
 
 The Sub Calculator: five new pages for planning sub builds, routes and levelling, under a new Sub Calculator group in

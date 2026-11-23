@@ -19,6 +19,7 @@ namespace XIVFleetCompanion
         private static readonly Dictionary<int, double> VendorPrices = new();
 
         private static SubGameData? subGame;
+        private static DateTime subGameRetryAt = DateTime.MinValue;
         private static ShoppingGame? shopGame;
         private static readonly object ShopLock = new();
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string?> ShopNames = new();
@@ -113,6 +114,9 @@ namespace XIVFleetCompanion
         public static SubGameData? SubGame()
         {
             if (subGame != null) return subGame;
+            // After a failed read, tried again only after a while (it's asked for every few seconds on the game's frame).
+            if (DateTime.UtcNow < subGameRetryAt) return null;
+            subGameRetryAt = DateTime.UtcNow.AddMinutes(5);
             try
             {
                 var sectors = new List<SubSector>();
@@ -126,6 +130,7 @@ namespace XIVFleetCompanion
                 var parts = new List<SubPartStat>();
                 foreach (var r in Plugin.DataManager.GetExcelSheet<SubmarinePart>()) parts.Add(new SubPartStat(r.Class, r.Slot, r.Speed, r.Range, r.Surveillance, r.Retrieval, r.Favor, r.Rank, r.RepairMaterials));
                 if (sectors.Count > 0 && ranks.Count > 0 && parts.Count > 0) subGame = new SubGameData(sectors, maps, ranks, parts);
+                else Plugin.Log.Warning("The sea map data in the game's files is empty: tried again in 5 minutes");
             }
             catch (Exception ex)
             {

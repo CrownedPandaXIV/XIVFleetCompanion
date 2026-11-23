@@ -112,45 +112,9 @@ jobs:
         echo "build=${build}" >> "$GITHUB_OUTPUT"
 
     # No token here: the build runs other people's code (NuGet packages, Dalamud), which must not reach the publishing one.
-    # The Sub Calculator's loot and breakpoints, read again from XIVStats and Pepper's guide (with the app's script, from
-    # its branch of the same name or main) so each build ships the latest. When they can't be read, the copy in the
-    # repository is used and a warning says so; it never stops the build.
-    - name: Which app branch to refresh the Sub Calculator data with
-      id: app
-      if: steps.check.outputs.publish == 'true'
-      shell: bash
-      run: |
-        branch="${GITHUB_REF_NAME}"
-        if git ls-remote --exit-code --heads https://github.com/CrownedPandaXIV/XIVFleetCompanion-App.git "$branch" > /dev/null; then
-          echo "ref=$branch" >> "$GITHUB_OUTPUT"
-        else
-          echo "ref=main" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Get the app
-      if: steps.check.outputs.publish == 'true'
-      uses: actions/checkout@v5
-      with:
-        repository: CrownedPandaXIV/XIVFleetCompanion-App
-        ref: ${{ steps.app.outputs.ref }}
-        path: app
-        persist-credentials: false
-
-    - uses: actions/setup-node@v5
-      if: steps.check.outputs.publish == 'true'
-      with:
-        node-version: 22
-
-    - name: Refresh the Sub Calculator data
-      if: steps.check.outputs.publish == 'true'
-      shell: bash
-      run: |
-        if [ -f app/.github/scripts/refresh-sub-data.js ]; then
-          node app/.github/scripts/refresh-sub-data.js XIVFleetCompanion/SubCalculatorData.json
-        else
-          echo "::warning title=Sub Calculator data::The app's ${{ steps.app.outputs.ref }} has no refresh script yet; the plugin's copy is used."
-        fi
-        rm -rf app
+    # The Sub Calculator's data ships as committed: the copy the tests ran on and the app has too (pr-build.yml checks
+    # they're the same). Newer XIVStats and Pepper data comes in as a change of its own (the app's sub-data.yml says
+    # when there is some).
 
     - name: Build the plugin
       if: steps.check.outputs.publish == 'true'

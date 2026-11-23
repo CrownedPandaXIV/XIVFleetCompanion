@@ -1085,6 +1085,11 @@ internal static partial class Program
             new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 });
         Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 1,
             "part condition: written only for characters synced here that are in a Free Company");
+        var parts = new[] { R(1, 0, 24356, 1, 1) with { FcId = 901 }, R(2, 0, 24356, 1, 1), R(3, 0, 24356, 1, 1) };
+        var fcOf = new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 };
+        Check(PartCondition.ToWrite(parts, fcOf).Select(r => r.FcId).SequenceEqual(new ulong[] { 901 })
+              && PartCondition.Waiting(parts, fcOf).Select(r => r.Cid).SequenceEqual(new ulong[] { 2, 3 }),
+            "part condition: filed under the workshop's own Free Company; one with no Free Company or character known yet waits");
     }
 
     private static void SubSectorChecks()
@@ -1115,6 +1120,15 @@ internal static partial class Program
             new Dictionary<ulong, ulong> { [1] = 900, [2] = 900, [3] = 0 });
         Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 2,
             "sub sectors: written for characters synced here that are in a Free Company, the newest reading per FC");
+        // The workshop's own Free Company (as the game said when it was read) wins over AutoRetainer's, and a reading whose
+        // character or FC isn't known yet waits for a later sync instead of being dropped.
+        var fcOf = new Dictionary<ulong, ulong> { [1] = 900, [3] = 0 };
+        var withFc = new[] { R(1, 1, (1, true, true)) with { FcId = 901 }, R(3, 2, (1, true, true)), R(3, 3, (1, true, true)) with { FcId = 902 }, R(5, 4, (1, true, true)) };
+        var written = SubSectors.ToWrite(withFc, fcOf);
+        var waiting = SubSectors.Waiting(withFc, fcOf);
+        Check(written.Select(r => $"{r.FcId}:{r.Reading.Cid}").OrderBy(x => x).SequenceEqual(new[] { "901:1", "902:3" })
+              && waiting.Select(r => $"{r.Cid}@{r.At}").SequenceEqual(new[] { "3@2", "5@4" }),
+            "sub sectors: filed under the workshop's own Free Company; one with no Free Company or character known yet waits");
     }
 
     // The Sub Calculator: its data file (the app's, copied by its fixture script) and a build's five stats, with the app's
@@ -1413,17 +1427,17 @@ internal static partial class Program
                     var must = c.GetProperty("must").EnumerateArray().Select(x => x.GetInt32()).ToList();
                     var maxHours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
                     var routes = must.All(id => allowed.Any(a => a.Id == id))
-                        ? RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, must, values, c.GetProperty("rankBy").GetString()!, null, opens, states, false)
+                        ? RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, must, values, c.GetProperty("rankBy").GetString()!, null, opens, states, false, limit: 1)
                         : new List<RouteFinder.Route>();
                     route = routes.Count > 0 ? routes[0].Sectors : new List<int>();
                 }
                 var sectorsHere = route.Select(id => byId[id]).ToList();
-                var check = SubCompare.RouteCheck(sectorsHere, sectorsHere.Count > 0 ? SubRoutes.StartFor(sectorsHere[0].Id, starts) : null, stats, rank);
-                var flies = route.Count > 0 && check.Short == 0 && check.TooHigh.Count == 0;
+                var check = SubCompare.RouteCheck(sectorsHere, sectorsHere.Count > 0 ? SubRoutes.StartFor(sectorsHere[0].Id, starts) : null, stats, rank, letters, Levelling.PartRanks(partList));
+                var flies = route.Count > 0 && check.Short == 0 && check.TooHigh.Count == 0 && check.PartsNeed == 0;
                 var plan = route.Count > 0 ? SubCalculator.PlanFor(route, stats, letters.Select(l => SubRoutes.PartClass[l]).ToList(), byId, starts, partList, data, Price, kitCost) : null;
                 mine.Add((route, check, flies, SubCompare.RowValues(stats, plan, flies)));
             }
-            var marks = SubCompare.BestMarks(mine.Select(m => m.Values).ToList());
+            var marks = SubCompare.BestMarks(mine.Select(m => m.Check.PartsNeed > 0 ? new Dictionary<string, double?>() : m.Values).ToList());
             var wrong = new List<string>();
             var theirs = c.GetProperty("columns").EnumerateArray().ToList();
             for (var i = 0; i < theirs.Count; i++)
@@ -1432,7 +1446,8 @@ internal static partial class Program
                 var m = mine[i];
                 if (!m.Route.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))) wrong.Add($"build {i + 1}'s route ({string.Join("-", m.Route)})");
                 if (!Near(m.Check.Used, e.GetProperty("used")) || m.Check.Short != e.GetProperty("short").GetInt32() || m.Flies != e.GetProperty("flies").GetBoolean()
-                    || !m.Check.TooHigh.SequenceEqual(e.GetProperty("tooHigh").EnumerateArray().Select(x => x.GetInt32()))) wrong.Add($"build {i + 1} can fly it ({m.Check.Short} short)");
+                    || !m.Check.TooHigh.SequenceEqual(e.GetProperty("tooHigh").EnumerateArray().Select(x => x.GetInt32()))
+                    || m.Check.PartsNeed != e.GetProperty("partsNeed").GetInt32()) wrong.Add($"build {i + 1} can fly it ({m.Check.Short} short, parts need {m.Check.PartsNeed})");
                 foreach (var (key, _) in SubCompare.Rows)
                     if (!Near(m.Values[key], e.GetProperty("values").GetProperty(key))) wrong.Add($"build {i + 1}'s {key} ({m.Values[key]})");
             }
@@ -1442,7 +1457,7 @@ internal static partial class Program
             if (wrong.Count == 0) cGood++;
             else if (cWrong.Length == 0) cWrong = $" (first wrong: case {cCases}: {string.Join(", ", wrong.Take(4))})";
         }
-        Check(cCases >= 4 && cGood == cCases, $"Compare: the plugin's columns and best figures match the app's for {cGood} of {cCases} sets of builds{cWrong}");
+        Check(cCases >= 5 && cGood == cCases, $"Compare: the plugin's columns and best figures match the app's for {cGood} of {cCases} sets of builds{cWrong}");
 
         // The Levelling Plan (as the app's subs/levelling.js): subs from a rank to a target, with and without the FC's
         // reading, keeping the build or with swaps suggested; each stage, swap and total.
@@ -1470,7 +1485,7 @@ internal static partial class Program
             var plan = Levelling.LevellingPlan(c.GetProperty("rank").GetInt32(), c.GetProperty("exp").GetDouble(), c.GetProperty("target").GetInt32(), lvExp,
                 c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray(), search.BestAt, search.Score,
                 c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned, Levelling.PartRanks(partList));
-            if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read);
+            if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read, search);
             var placed = Levelling.SwapsByStage(plan);
             lvPlaced.Add($"{plan.Swaps.Count}/{placed.Sum(l => l.Count)}");
             if (placed.Sum(l => l.Count) != plan.Swaps.Count || placed.Select((l, i) => l.Any(x => x.ShowRank != plan.Stages[i].FromRank || x.ShowRank < x.Swap.AtRank
@@ -1498,6 +1513,7 @@ internal static partial class Program
                      && Near(st.ExpPerHour, e.GetProperty("expPerHour")) && st.Tanks == e.GetProperty("tanks").GetInt32() && Near(st.Kits, e.GetProperty("kits"))
                      && (eb.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better == null
                          : st.Better != null && st.Better.Route.SequenceEqual(eb.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))
+                           && st.Better.AtRank == eb.GetProperty("atRank").GetInt32() && Near(st.Better.Gain, eb.GetProperty("gain"))
                            && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))),
                     $"stage {i + 1} ({st.FromRank}-{st.ToRank} {string.Join("-", st.Route)})");
             }
@@ -1541,13 +1557,16 @@ internal static partial class Program
         long DaysAgo(double d) => new DateTimeOffset(now.AddDays(-d)).ToUnixTimeSeconds();
         MarketListing L(double p) => new(p, 1, false, "Seller", null);
         MarketSale S(double p, double daysAgo) => new(p, 1, false, DaysAgo(daysAgo));
-        var low = Universalis.Price(new[] { L(300), L(320), L(350) }, new[] { S(900, 1), S(1000, 2), S(1100, 3), S(50, 10) }, null, null, null, now);
-        var old = Universalis.Price(new[] { L(300), L(320), L(350) }, new[] { S(900, 8), S(1000, 9), S(1100, 10) }, null, null, null, now);
+        // Fewer than three listings near the cheapest: the sales' middle price (as the app's test).
+        var low = Universalis.Price(new[] { L(300), L(320), L(900) }, new[] { S(900, 1), S(1000, 2), S(1100, 3), S(50, 10) }, null, null, null, now);
+        var old = Universalis.Price(new[] { L(300), L(320), L(900) }, new[] { S(900, 8), S(1000, 9), S(1100, 10) }, null, null, null, now);
+        // Three or more agreeing: the market has dropped, the listings stand.
+        var moved = Universalis.Price(new[] { L(400), L(400), L(410), L(420), L(430), L(440) }, new[] { S(1000, 1), S(1000, 2), S(1000, 3) }, null, null, null, now);
         var slip = Universalis.Price(new[] { L(1500), L(120), L(1400), L(1600), L(1450) }, null, null, null, null, now);
         Check(low?.Price == 1000 && low.Adjusted && low.Note == "The cheapest listing (300 gil) is well below the last week's 3 sales, around 1,000. Using 1,000 gil."
-              && old?.Price == 300 && !old.Adjusted
+              && old?.Price == 300 && !old.Adjusted && moved?.Price == 400 && !moved.Adjusted
               && slip?.Price == 1400 && slip.Note == "Ignored 1 listing at 120 gil (well below the others, around 1,450). Using 1,400 gil.",
-            "market price: a lone low listing skipped, the last week's sales checked (older ones left out), as the app");
+            "market price: a lone low listing skipped, the last week's sales checked (older ones left out) unless three listings agree, as the app");
     }
 
     // Ceruleum from FC credits: the app's own cases (tests/fc-credits.test.js), with the same answers.
@@ -2206,6 +2225,9 @@ internal static partial class Program
         await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 300, true)) })));
         // An older reading (another PC's, synced late) doesn't undo a newer one.
         await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, Sectors(nowUnix - 900, false)) })));
+        // One stamped older (a PC whose clock is behind) still adds what it found: sectors are merged, not replaced.
+        await Each(async c => sectorsSaved.Add(await DetailsWriter.WriteSubSectorsAsync(c, new[] { new SubSectors.Row(bigFc, new SubSectors.Reading(18014498578000002,
+            new[] { new SubSectors.Sector(1, true, true), new SubSectors.Sector(3, true, true) }, nowUnix - 1200)) })));
         var sectorsStored = new List<string>();
         await Each(async c =>
         {
@@ -2217,16 +2239,16 @@ internal static partial class Program
                           + $"{(Db.Time(r, 4) - DateTime.UnixEpoch).TotalSeconds - nowUnix:0.##} {Db.Id(r, 5)}");
             sectorsStored.Add(string.Join(" | ", lines));
         });
-        var sectorsWanted = $"{bigFc} 1 True True -300 18014498578000001 | {bigFc} 2 True True -300 18014498578000001 | {bigFc} 3 True False -300 18014498578000001";
+        var sectorsWanted = $"{bigFc} 1 True True -300 18014498578000001 | {bigFc} 2 True True -300 18014498578000001 | {bigFc} 3 True True -300 18014498578000001";
         Check(sectorsSaved.All(s => s) && sectorsStored.All(s => s == sectorsWanted),
-            $"file: the FC's sub sectors as last read, an older reading not undoing a newer one, on both: {string.Join(" / ", sectorsStored)}");
+            $"file: the FC's sub sectors merged, an older reading not undoing a newer one but adding what it found, on both: {string.Join(" / ", sectorsStored)}");
         var sectorsRead = new List<string>();
         await Each(async c =>
         {
             var fc = (await FleetReader.ReadSubSectors(c)).FirstOrDefault(f => f.FcId == bigFc.ToString(System.Globalization.CultureInfo.InvariantCulture));
             sectorsRead.Add(fc == null ? "none" : $"{string.Join(",", fc.Sectors.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value.Unlocked}/{x.Value.Explored}"))} at {(fc.ReadAt is double at ? Math.Round(at / 1000 - nowUnix) : double.NaN)}");
         });
-        Check(sectorsRead.All(x => x == "1:True/True,2:True/True,3:True/False at -300"), $"file: the Route Finder reads them back, on both ({string.Join(" / ", sectorsRead)})");
+        Check(sectorsRead.All(x => x == "1:True/True,2:True/True,3:True/True at -300"), $"file: the Route Finder reads them back, on both ({string.Join(" / ", sectorsRead)})");
         // The top rank: the last with stats, though the game lists experience to the next on it (145 does; 146 is empty).
         var topRanks = new[] { new SubRank(144, 98, 129, 112765858), new SubRank(145, 100, 130, 46234004), new SubRank(146, 0, 0, 0), new SubRank(150, 0, 0, 0) };
         var noStats = new[] { new SubRank(1, null, null, 10), new SubRank(2, null, null, 10), new SubRank(3, null, null, 0) };

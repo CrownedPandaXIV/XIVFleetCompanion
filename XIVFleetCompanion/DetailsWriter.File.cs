@@ -103,9 +103,11 @@ namespace XIVFleetCompanion
                     await Db.Exec(conn, @"
                         INSERT INTO companion_fc_sub_sector (fc_id, sector_id, unlocked, explored, read_at, cid)
                         VALUES (@fc, @sector, @unlocked, @explored, @at, @cid)
-                        ON CONFLICT (fc_id, sector_id) DO UPDATE SET unlocked = excluded.unlocked, explored = excluded.explored,
-                            read_at = excluded.read_at, cid = excluded.cid
-                        WHERE companion_fc_sub_sector.read_at <= excluded.read_at", tx,
+                        ON CONFLICT (fc_id, sector_id) DO UPDATE SET
+                            unlocked = max(companion_fc_sub_sector.unlocked, excluded.unlocked),
+                            explored = max(companion_fc_sub_sector.explored, excluded.explored),
+                            cid = CASE WHEN excluded.read_at >= companion_fc_sub_sector.read_at THEN excluded.cid ELSE companion_fc_sub_sector.cid END,
+                            read_at = max(companion_fc_sub_sector.read_at, excluded.read_at)", tx,
                         ("fc", Db.FcText(row.FcId)), ("sector", (long)sector.Id), ("unlocked", sector.Unlocked ? 1L : 0L),
                         ("explored", sector.Explored ? 1L : 0L), ("at", row.Reading.At), ("cid", (long)row.Reading.Cid));
             await tx.CommitAsync();

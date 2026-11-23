@@ -26,8 +26,9 @@ public partial class MainWindow
     private readonly List<int> plannerRoute = new();
     private int plannerAdding;
     private (long Cid, string SubName)? plannerChosen;
-    private string plannerSearch = "";
-    private readonly HashSet<string> plannerFolded = new();
+    // Each sub picker's own search and folded groups, by its id (one page's search doesn't show on another).
+    private readonly Dictionary<string, string> pickerSearches = new();
+    private readonly Dictionary<string, HashSet<string>> pickerFolded = new();
     private string fcPickerSearch = "";
     private readonly HashSet<string> fcPickerFolded = new();
     private string plannerPlanKey = "";
@@ -45,6 +46,12 @@ public partial class MainWindow
     private sealed record PlannerMarketAnswer(string World, HashSet<int> Ids, WorldMarket? Market, string? Error);
     private volatile PlannerMarketAnswer? plannerMarket;
     private Task? plannerMarketWork;
+    // The prices last worked out from a market answer, and what for (MainWindow.Planner: priced again only on a change).
+    private WorldMarket? plannerPricedMarket;
+    private string? plannerPricedScope;
+    private ISet<string>? plannerPricedExclude;
+    private HashSet<int>? plannerPricedIds;
+    private Func<uint, double>? plannerPriceOf;
     private Dictionary<int, string> plannerNotes = new();
     private Func<int, double> plannerPrice = _ => 0; // the price each used for the plan (market or vendor)
 
@@ -225,8 +232,11 @@ public partial class MainWindow
         if (!popup) return;
         ImGui.SetNextItemWidth(560 * scale);
         if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+        var plannerSearch = pickerSearches.GetValueOrDefault(id, "");
+        if (!pickerFolded.TryGetValue(id, out var plannerFolded)) pickerFolded[id] = plannerFolded = new HashSet<string>();
         ImGui.InputTextWithHint("##plannerSearch", "Search character, world, account, FC or sub", ref plannerSearch, 64);
         if (plannerSearch.Length > 0) { ImGui.SameLine(); if (ImGui.SmallButton("Clear##plannerSearchClear")) plannerSearch = ""; }
+        pickerSearches[id] = plannerSearch;
         var fcOf = (reader.Roster.Data ?? new List<RosterRow>()).GroupBy(r => r.Cid).ToDictionary(g => g.Key, g => g.First().FcName ?? "");
         var searching = plannerSearch.Trim().Length > 0;
         var shownSubs = subs.Where(s => Matches(plannerSearch, s.SubName, s.Character, s.World, s.Account, fcOf.GetValueOrDefault(s.Cid))).ToList();
@@ -437,16 +447,28 @@ public partial class MainWindow
             });
         }
         var market = plannerMarket is { } pm && pm.World == placeKey && pm.Market != null ? pm.Market : null;
-        Func<uint, double> price = id => ListingVendor((int)id);
-        if (market != null)
+        // Priced again only when the answer, the scope, the route's loot or your own retainers change (not every frame:
+        // the outlier check over every listing is the costly part).
+        var exclude = reader.Market.Data?.Live?.Exclude;
+        if (!ReferenceEquals(market, plannerPricedMarket) || plannerPricedScope != plannerPriceScope || !ReferenceEquals(exclude, plannerPricedExclude)
+            || plannerPricedIds == null || !plannerPricedIds.SetEquals(lootIds))
         {
-            var vendor = lootIds.ToDictionary(id => id, id => ListingVendor(id));
-            var notes = new Dictionary<int, string>();
-            var prices = Universalis.ScopePrices(market, plannerPriceScope, vendor, reader.Market.Data?.Live?.Exclude, notes: notes);
-            plannerNotes = notes;
-            price = id => prices.TryGetValue((int)id, out var p) ? p : ListingVendor((int)id);
+            (plannerPricedMarket, plannerPricedScope, plannerPricedExclude, plannerPricedIds) = (market, plannerPriceScope, exclude, lootIds);
+            if (market != null)
+            {
+                var vendor = lootIds.ToDictionary(id => id, id => ListingVendor(id));
+                var notes = new Dictionary<int, string>();
+                var prices = Universalis.ScopePrices(market, plannerPriceScope, vendor, exclude, notes: notes);
+                plannerNotes = notes;
+                plannerPriceOf = id => prices.TryGetValue((int)id, out var p) ? p : ListingVendor((int)id);
+            }
+            else
+            {
+                plannerNotes = new();
+                plannerPriceOf = id => ListingVendor((int)id);
+            }
         }
-        else plannerNotes = new();
+        var price = plannerPriceOf!;
         plannerPrice = id => price((uint)id);
 
         // The plan, worked out again only when the build, the route, the prices or the repair kit price change.

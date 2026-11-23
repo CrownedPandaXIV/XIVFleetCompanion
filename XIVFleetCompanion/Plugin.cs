@@ -1509,7 +1509,12 @@ public sealed class Plugin : IDalamudPlugin
             catch { partConditions.PutBack(partReadings); throw; }
             // A database without update 17 yet keeps them waiting; the app adds it when it next connects.
             if (!partsWritten) partConditions.PutBack(partReadings);
-            else if (partRows.Count > 0) Log.Information($"Fleet Companion: stored {partRows.Count} sub part condition reading(s).");
+            else
+            {
+                if (partRows.Count > 0) Log.Information($"Fleet Companion: stored {partRows.Count} sub part condition reading(s).");
+                // Those whose character or Free Company isn't known yet wait for a later sync.
+                partConditions.PutBack(PartCondition.Waiting(partReadings, fcOf));
+            }
         }
         // The sectors each FC has unlocked and explored, read in the workshop since the last sync.
         var sectorReadings = subSectors.Take();
@@ -1522,7 +1527,12 @@ public sealed class Plugin : IDalamudPlugin
             catch { subSectors.PutBack(sectorReadings); throw; }
             // A database without update 18 yet keeps them waiting; the app or this plugin adds it when it next connects.
             if (!sectorsWritten) subSectors.PutBack(sectorReadings);
-            else if (sectorRows.Count > 0) Log.Information($"Fleet Companion: stored the sub sectors of {sectorRows.Count} Free Company(ies).");
+            else
+            {
+                if (sectorRows.Count > 0) Log.Information($"Fleet Companion: stored the sub sectors of {sectorRows.Count} Free Company(ies).");
+                // Those whose character or Free Company isn't known yet wait for a later sync.
+                subSectors.PutBack(SubSectors.Waiting(sectorReadings, fcOf));
+            }
         }
 
         // Voyages already in its file are still read while it is not running; new ones are not recorded.

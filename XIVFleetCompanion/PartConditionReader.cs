@@ -1,4 +1,5 @@
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -27,6 +28,10 @@ namespace XIVFleetCompanion
             var inventory = InventoryManager.Instance();
             var container = inventory == null ? null : inventory->GetInventoryContainer(InventoryType.HousingInteriorPlacedItems2);
             if (container == null) return new Look(new(), "in the workshop, but the game has no parts container");
+            // Not loaded yet, it may still hold another workshop's parts (a character switch on the same account): nothing read.
+            if (!container->IsLoaded) return new Look(null, "in the workshop, but the game says the parts container isn't loaded yet");
+            var proxy = InfoProxyFreeCompany.Instance();
+            var fcId = proxy == null ? 0UL : proxy->Id;
 
             var readings = new List<PartCondition.Reading>();
             var subs = housing->WorkshopTerritory->Submersible.Data;
@@ -44,13 +49,12 @@ namespace XIVFleetCompanion
                     var part = place < container->Size ? container->GetInventorySlot(place) : null;
                     if (part == null) { other.Add($"{place}: none"); continue; }
                     if (!PartsPlanner.IsSubPart(part->ItemId)) { other.Add($"{place}: item {part->ItemId}"); continue; }
-                    readings.Add(new PartCondition.Reading(cid, sub.RegisterTime, name, i + 1, slot, part->ItemId, part->Condition, sub.ReturnTime, now));
+                    readings.Add(new PartCondition.Reading(cid, sub.RegisterTime, name, i + 1, slot, part->ItemId, part->Condition, sub.ReturnTime, now, fcId));
                 }
             }
             if (registered == 0)
                 return new Look(readings, "in the workshop, no sub list yet (the game loads it when the Voyage Control Panel's submarines are opened)");
             var seen = $"in the workshop: {registered} sub(s), {readings.Count} part(s) read"
-                + (container->IsLoaded ? "" : " (the game says the parts container isn't loaded)")
                 + (other.Count > 0 ? $"; places without a sub part: {string.Join(", ", other.Take(8))}" : "");
             return new Look(readings, seen);
         }

@@ -19,8 +19,9 @@ namespace XIVFleetCompanion
         /// <summary>One sector, as read.</summary>
         public sealed record Sector(int Id, bool Unlocked, bool Explored);
 
-        /// <summary>Every sector, read on one character at one time (At: Unix seconds).</summary>
-        public sealed record Reading(ulong Cid, IReadOnlyList<Sector> Sectors, double At);
+        /// <summary>Every sector, read on one character at one time (At: Unix seconds), in the workshop of the Free Company
+        /// the game says the character is in (FcId; 0 when it didn't say).</summary>
+        public sealed record Reading(ulong Cid, IReadOnlyList<Sector> Sectors, double At, ulong FcId = 0);
 
         /// <summary>A reading ready to write: with the Free Company the character is in.</summary>
         public sealed record Row(ulong FcId, Reading Reading);
@@ -83,10 +84,21 @@ namespace XIVFleetCompanion
                 string.Join(",", sectors.OrderBy(s => s.Id).Select(s => $"{s.Id}{(s.Unlocked ? "u" : "")}{(s.Explored ? "e" : "")}"));
         }
 
-        /// <summary>The readings to write: those of characters this setup syncs and that are in a Free Company (fcOf: each
-        /// one's FC, 0 for none), the newest per FC.</summary>
+        /// <summary>The Free Company a reading is filed under: the workshop's own, as the game said when it was read, else the
+        /// one AutoRetainer has for the character (fcOf; 0 for none). 0: not known yet.</summary>
+        public static ulong FcFor(ulong readFc, ulong cid, IReadOnlyDictionary<ulong, ulong> fcOf) =>
+            readFc != 0 ? readFc : fcOf.TryGetValue(cid, out var fc) ? fc : 0;
+
+        /// <summary>The readings to write: those of characters this setup syncs (fcOf: each one's FC, 0 for none) whose Free
+        /// Company is known, the newest per FC.</summary>
         public static List<Row> ToWrite(IEnumerable<Reading> readings, IReadOnlyDictionary<ulong, ulong> fcOf) =>
-            readings.Where(r => fcOf.TryGetValue(r.Cid, out var fc) && fc != 0)
-                .GroupBy(r => fcOf[r.Cid]).Select(g => new Row(g.Key, g.OrderBy(r => r.At).Last())).ToList();
+            readings.Where(r => fcOf.ContainsKey(r.Cid) && FcFor(r.FcId, r.Cid, fcOf) != 0)
+                .GroupBy(r => FcFor(r.FcId, r.Cid, fcOf)).Select(g => new Row(g.Key, g.OrderBy(r => r.At).Last())).ToList();
+
+        /// <summary>The readings to keep waiting for a later sync: their character isn't synced in this one (not set up in
+        /// AutoRetainer yet, or synced from another PC), or no Free Company is known for it yet. Kept so a reading isn't
+        /// lost for the session while its character's unchanged sectors aren't offered again.</summary>
+        public static List<Reading> Waiting(IEnumerable<Reading> readings, IReadOnlyDictionary<ulong, ulong> fcOf) =>
+            readings.Where(r => !fcOf.ContainsKey(r.Cid) || FcFor(r.FcId, r.Cid, fcOf) == 0).ToList();
     }
 }

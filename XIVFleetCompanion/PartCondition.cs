@@ -17,8 +17,9 @@ namespace XIVFleetCompanion
         public const int Full = 30000;
 
         /// <summary>One part of one sub, as read. SubIndex: the sub's place in the workshop (1 to 4); PartSlot: 0 hull, 1 stern,
-        /// 2 bow, 3 bridge; ReturnAt and At in Unix seconds (ReturnAt 0: not sent out).</summary>
-        public sealed record Reading(ulong Cid, uint Register, string SubName, int SubIndex, int PartSlot, uint ItemId, int Condition, long ReturnAt, double At);
+        /// 2 bow, 3 bridge; ReturnAt and At in Unix seconds (ReturnAt 0: not sent out); FcId: the Free Company whose workshop
+        /// it was read in, as the game said (0 when it didn't).</summary>
+        public sealed record Reading(ulong Cid, uint Register, string SubName, int SubIndex, int PartSlot, uint ItemId, int Condition, long ReturnAt, double At, ulong FcId = 0);
 
         /// <summary>A reading ready to write: with the Free Company the character is in.</summary>
         public sealed record Row(ulong FcId, Reading Reading);
@@ -82,9 +83,15 @@ namespace XIVFleetCompanion
             }
         }
 
-        /// <summary>The readings to write: those of characters this setup syncs and that are in a Free Company (fcOf: each
-        /// one's FC, 0 for none). Others are left out: another setup syncs them, or there's no FC to file them under.</summary>
+        /// <summary>The readings to write: those of characters this setup syncs (fcOf: each one's FC, 0 for none) whose Free
+        /// Company is known: the workshop's own as the game said, else AutoRetainer's (SubSectors.FcFor).</summary>
         public static List<Row> ToWrite(IEnumerable<Reading> readings, IReadOnlyDictionary<ulong, ulong> fcOf) =>
-            readings.Where(r => fcOf.TryGetValue(r.Cid, out var fc) && fc != 0).Select(r => new Row(fcOf[r.Cid], r)).ToList();
+            readings.Where(r => fcOf.ContainsKey(r.Cid) && SubSectors.FcFor(r.FcId, r.Cid, fcOf) != 0)
+                .Select(r => new Row(SubSectors.FcFor(r.FcId, r.Cid, fcOf), r)).ToList();
+
+        /// <summary>The readings to keep waiting for a later sync: their character isn't synced in this one, or no Free
+        /// Company is known for it yet (as SubSectors.Waiting).</summary>
+        public static List<Reading> Waiting(IEnumerable<Reading> readings, IReadOnlyDictionary<ulong, ulong> fcOf) =>
+            readings.Where(r => !fcOf.ContainsKey(r.Cid) || SubSectors.FcFor(r.FcId, r.Cid, fcOf) == 0).ToList();
     }
 }
