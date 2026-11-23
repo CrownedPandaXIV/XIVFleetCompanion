@@ -176,6 +176,12 @@ public partial class MainWindow
                 lvTarget = null;
                 if (LvFcOf(s.Cid) is { } fc) lvFc = fc;
             });
+            if (lvChosen != null)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Clear sub##lvClearSub")) { lvChosen = null; lvTarget = null; }
+                Hover("Stop starting from this sub; the build stays as it is.");
+            }
             ImGui.SameLine(0, 14 * scale);
             Tag($"Rank {lvRank}", softColor);
             foreach (var p in lvParts) { ImGui.SameLine(0, 4 * scale); Tag(p, softColor); }
@@ -207,6 +213,7 @@ public partial class MainWindow
                         for (var rr = lvRank + 1; rr <= g.MaxRank; rr++)
                             if (ImGui.Selectable($"{Label(rr)}##lvT{rr}", rr == goal)) lvTarget = rr;
                 }
+                if (lvTarget != null) { ImGui.SameLine(); if (ImGui.SmallButton("Reset target##lvResetTarget")) lvTarget = null; }
             }
             FcLine();
 
@@ -230,58 +237,20 @@ public partial class MainWindow
         {
             HeadingRuns(("Every sub in a Free Company", null), ("   each to its next build's rank (else the top rank)", Dim));
             FcLine();
+            if (lvTargets.Count > 0) { ImGui.SameLine(); if (ImGui.SmallButton("Reset targets##lvResetTargets")) lvTargets.Clear(); }
             Choices();
             if (fcSubs.Count == 0) { Ui.Wrapped("No subs in this Free Company."); return; }
             Working(working, "Working out the plans…");
             using var dim = WorkingDim(working);
-            using var table = ImRaii.Table("##lvFleet", 6, ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.PadOuterX | ImGuiTableFlags.SizingStretchProp);
-            if (table)
-            {
-                foreach (var h in new[] { "Sub", "Level to", "Route now", "Voyages", "Reaches it", "" }) ImGui.TableSetupColumn(h);
-                ImGui.TableHeadersRow();
-                foreach (var s in fcSubs)
-                {
-                    var k = (s.Cid, s.SubName);
-                    var p = result?.Plans.FirstOrDefault(x => x.Sub.Key == k).Plan;
-                    var top = s.Rank >= g.MaxRank;
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    Ui.Text(s.SubName); ImGui.SameLine(); Colored(Dim, s.Character);
-                    ImGui.TableNextColumn();
-                    if (top) Colored(Dim, "top rank");
-                    else
-                    {
-                        var t = lvTargets.TryGetValue(k, out var tt) ? tt : LvDefaultTarget(s, g.MaxRank);
-                        Ui.Text($"{s.Rank} →"); ImGui.SameLine();
-                        ImGui.SetNextItemWidth(70 * scale);
-                        using var combo = ImRaii.Combo($"##lvT{s.Cid}{s.SubName}", t.ToString(CultureInfo.CurrentCulture), ImGuiComboFlags.HeightLarge);
-                        if (combo) for (var rr = s.Rank + 1; rr <= g.MaxRank; rr++) if (ImGui.Selectable($"{rr}##lvFT{s.Cid}{s.SubName}{rr}", rr == t)) lvTargets[k] = rr;
-                    }
-                    ImGui.TableNextColumn();
-                    if (p?.Stages.FirstOrDefault() is { } first) LvRoute(g, first.Route); else Colored(Dim, "—");
-                    ImGui.TableNextColumn();
-                    TableCells.Right(p == null ? "—" : PlannerN(p.Voyages));
-                    ImGui.TableNextColumn();
-                    if (p == null) TableCells.Right("—");
-                    else if (p.Reached) TableCells.Right($"about {LvDays(p.Hours)} · {LvDate(LvStart(s).AddHours(p.Hours))}");
-                    else TableCells.Right($"stops at rank {p.StuckAt}", Amber);
-                    ImGui.TableNextColumn();
-                    if (!top && Ui.SmallButton($"Stages##lvOpen{s.Cid}{s.SubName}"))
-                    {
-                        var letters = s.Build.Split('-');
-                        if (letters.Length == 4 && letters.All(l => SubRoutes.PartClass.ContainsKey(l))) for (var i = 0; i < 4; i++) lvParts[i] = letters[i];
-                        lvChosen = k;
-                        lvRank = s.Rank;
-                        lvExp = s.CurrentExp;
-                        lvTarget = lvTargets.TryGetValue(k, out var tt2) ? tt2 : null;
-                        lvEveryFc = false;
-                    }
-                }
-            }
+            lvFleetCtx = (g, result);
+            LvFleetTable.DrawControls();
+            LvFleetTable.Draw(fcSubs.Select(sub => new LvFleetRow(sub, (sub.Cid, sub.SubName), sub.Rank >= g.MaxRank,
+                lvTargets.TryGetValue((sub.Cid, sub.SubName), out var t0) ? t0 : LvDefaultTarget(sub, g.MaxRank))).ToList(), fitRows: true);
         }
         ImGui.Spacing();
-        Colored(Dim, "Experience with the bonus each sub is sure of (Pepper's guide); routes as the Route Finder ranks them for experience (up to 5 stops, any map); " +
-                     "rank-up experience from the game data. A sub out now starts when it's back. Part swaps are tried at the start of each stage, one part at a time.");
+        using (ImRaii.PushColor(ImGuiCol.Text, Dim))
+            Ui.Wrapped("Experience with the bonus each sub is sure of (Pepper's guide); routes as the Route Finder ranks them for experience (up to 5 stops, any map); " +
+                       "rank-up experience from the game data. A sub out now starts when it's back. Part swaps are tried at the start of each stage, one part at a time.");
     }
 
     private void LvRoute(PlannerGame g, List<int> route)
@@ -342,74 +311,121 @@ public partial class MainWindow
         Colored(Dim, end);
     }
 
-    // A row per stage (its ranks and time, route, figures), with each part swap before the stage it starts.
+    // Every sub in a Free Company as the shared table: each sub's target, the route it starts on, voyages and when it gets
+    // there, and Stages to see its plan. As the app's LvFleet.
+    private sealed record LvFleetRow(SubRow S, (long, string) Key, bool Top, int Target);
+    private (PlannerGame G, LvResult? Result) lvFleetCtx;
+    private FleetTable<LvFleetRow>? lvFleetTable;
+    private Levelling.Plan? LvPlanOf(LvFleetRow r) => lvFleetCtx.Result?.Plans.FirstOrDefault(x => x.Sub.Key == r.Key).Plan;
+
+    private FleetTable<LvFleetRow> LvFleetTable => lvFleetTable ??= new FleetTable<LvFleetRow>("levellingFleet", plugin.Configuration, new List<FleetColumn<LvFleetRow>>
+    {
+        new("sub", "Sub", r => { Ui.Text(r.S.SubName); ImGui.SameLine(); Colored(Dim, r.S.Character); }, r => r.S.SubName, Locked: true),
+        new("target", "Level to", r =>
+        {
+            if (r.Top) { Colored(Dim, "top rank"); return; }
+            Ui.Text($"{r.S.Rank} →"); ImGui.SameLine();
+            ImGui.SetNextItemWidth(70 * ImGuiHelpers.GlobalScale);
+            using var combo = ImRaii.Combo($"##lvT{r.S.Cid}{r.S.SubName}", r.Target.ToString(CultureInfo.CurrentCulture), ImGuiComboFlags.HeightLarge);
+            if (combo) for (var rr = r.S.Rank + 1; rr <= lvFleetCtx.G.MaxRank; rr++) if (ImGui.Selectable($"{rr}##lvFT{r.S.Cid}{r.S.SubName}{rr}", rr == r.Target)) lvTargets[r.Key] = rr;
+        }, r => r.Target),
+        new("route", "Route now", r => { if (LvPlanOf(r)?.Stages.FirstOrDefault() is { } first) LvRoute(lvFleetCtx.G, first.Route); else Colored(Dim, "—"); }),
+        new("voyages", "Voyages", r => TableCells.Right(LvPlanOf(r) is { } p ? PlannerN(p.Voyages) : "—"), r => LvPlanOf(r)?.Voyages ?? int.MaxValue),
+        new("reaches", "Reaches it", r =>
+        {
+            var p = LvPlanOf(r);
+            if (p == null) TableCells.Right("—");
+            else if (p.Reached) TableCells.Right($"about {LvDays(p.Hours)} · {LvDate(LvStart(r.S).AddHours(p.Hours))}");
+            else TableCells.Right($"stops at rank {p.StuckAt}", Amber);
+        }, r => LvPlanOf(r) is { Reached: true } p ? p.Hours : double.MaxValue),
+        new("stages", "Stages", r =>
+        {
+            if (r.Top || !Ui.SmallButton($"Stages##lvOpen{r.S.Cid}{r.S.SubName}")) return;
+            var letters = r.S.Build.Split('-');
+            if (letters.Length == 4 && letters.All(l => SubRoutes.PartClass.ContainsKey(l))) for (var i = 0; i < 4; i++) lvParts[i] = letters[i];
+            lvChosen = r.Key;
+            lvRank = r.S.Rank;
+            lvExp = r.S.CurrentExp;
+            lvTarget = lvTargets.TryGetValue(r.Key, out var tt2) ? tt2 : null;
+            lvEveryFc = false;
+        }),
+    }) { Title = "Levelling Plan, every sub" };
+
+    // The stages as the shared table (columns to size, move, sort and choose, remembered), each part swap as an amber line
+    // before the first stage that uses it while the table is in plan order. As the app's LvStages.
+    private sealed record LvRow(Levelling.Stage St, int Index, List<int> Opened, string RouteLetters, IReadOnlyList<string> SwapLines);
+    private PlannerGame? lvGame;
+    private FleetTable<LvRow>? lvStageTable;
+
     private void LvStages(PlannerGame g, Levelling.Plan plan)
     {
-        var scale = ImGuiHelpers.GlobalScale;
+        lvGame = g;
         string L(int id) => g.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
-        using var table = ImRaii.Table("##lvStages", 3, ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.PadOuterX | ImGuiTableFlags.SizingStretchProp);
-        if (!table) return;
-        ImGui.TableSetupColumn("##lvR", ImGuiTableColumnFlags.WidthFixed, 130 * scale);
-        ImGui.TableSetupColumn("##lvM", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("##lvB", ImGuiTableColumnFlags.WidthFixed, 120 * scale);
-        // Each swap before the first stage that uses it (Levelling.SwapsByStage).
         var swapsAt = Levelling.SwapsByStage(plan);
-        for (var i = 0; i < plan.Stages.Count; i++)
+        var rows = plan.Stages.Select((st, i) =>
         {
-            var st = plan.Stages[i];
-            foreach (var (sw, showRank) in swapsAt[i])
-            {
-                ImGui.TableNextRow();
-                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(Amber with { W = 0.12f }));
-                ImGui.TableNextColumn();
-                Colored(Amber, $"At rank {showRank}");
-                ImGui.TableNextColumn();
-                Colored(Amber, $"{LvSlots[sw.Slot]} → {PlannerPartName(sw.To)}");
-                ImGui.SameLine();
-                Colored(Dim, sw.Owned ? "(you have one)" : "(to get)");
-                ImGui.SameLine();
-                Ui.Text($"{PlannerN(sw.Gain * 100)}% more experience an hour, {LvDays(sw.SavedHours)} sooner in all");
-                ImGui.TableNextColumn();
-            }
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            Ui.Text($"{st.FromRank} → {st.ToRank}");
-            Colored(Dim, $"{LvDays(st.Hours)} · {st.Voyages} voyage{(st.Voyages == 1 ? "" : "s")}");
-            ImGui.TableNextColumn();
-            LvRoute(g, st.Route);
             var before = i > 0 ? plan.Stages[i - 1] : null;
-            if (before != null)
-                foreach (var id in st.Route.Where(id => !before.Route.Contains(id) && g.Sectors.TryGetValue(id, out var s) && s.RankReq > before.FromRank))
-                { ImGui.SameLine(0, 8 * scale); Tag($"{L(id)} from rank {g.Sectors[id].RankReq}", Blue); }
-            if (plan.Swaps.Count > 0)
+            var opened = before == null ? new List<int>() : st.Route.Where(id => !before.Route.Contains(id) && g.Sectors.TryGetValue(id, out var s) && s.RankReq > before.FromRank).ToList();
+            var lines = swapsAt[i].Select(x => $"At rank {x.ShowRank}: {LvSlots[x.Swap.Slot]} → {PlannerPartName(x.Swap.To)} {(x.Swap.Owned ? "(you have one)" : "(to get)")} → " +
+                                               $"{PlannerN(x.Swap.Gain * 100)}% more experience an hour, {LvDays(x.Swap.SavedHours)} sooner in all").ToList();
+            return new LvRow(st, i, opened, string.Concat(st.Route.Select(L)), lines);
+        }).ToList();
+        LvStageTable.Before = r => r.SwapLines;
+        LvStageTable.BeforeColor = Amber;
+        LvStageTable.DrawControls();
+        LvStageTable.Draw(rows, fitRows: true);
+        if (LvStageTable.Sorted && plan.Swaps.Count > 0) Colored(Dim, "The part swaps show between the stages in plan order: Reset Sort goes back to it.");
+    }
+
+    private FleetTable<LvRow> LvStageTable => lvStageTable ??= new FleetTable<LvRow>("levellingStages", plugin.Configuration, new List<FleetColumn<LvRow>>
+    {
+        new("ranks", "Ranks", r => Ui.Text($"{r.St.FromRank} → {r.St.ToRank}"), r => r.St.FromRank, Locked: true),
+        new("days", "Time", r => TableCells.Right(LvDays(r.St.Hours)), r => r.St.Hours),
+        new("voyages", "Voyages", r => RightNumber(r.St.Voyages), r => r.St.Voyages),
+        new("route", "Route", r =>
+        {
+            if (lvGame == null) return;
+            LvRoute(lvGame, r.St.Route);
+            foreach (var id in r.Opened)
             {
-                // The parts, set apart from the route: a line, a "PARTS" label, outlined letters.
-                ImGui.SameLine(0, 14 * scale);
-                var top = ImGui.GetCursorScreenPos();
-                ImGui.GetWindowDrawList().AddLine(top, top + new Vector2(0, ImGui.GetTextLineHeight() + 2 * scale), ImGui.GetColorU32(Dim with { W = 0.6f * ImGui.GetStyle().Alpha }), 1 * scale);
-                ImGui.Dummy(new Vector2(1, 1));
-                ImGui.SameLine(0, 10 * scale);
-                Colored(Dim, "PARTS");
-                Hover("This stage's parts: Hull, Stern, Bow, Bridge.");
-                foreach (var p in st.Parts) { ImGui.SameLine(0, 4 * scale); OutlineTag(p, Blue); Hover(PlannerPartName(p)); }
+                ImGui.SameLine(0, 8 * ImGuiHelpers.GlobalScale);
+                Tag($"{(lvGame.Sectors.TryGetValue(id, out var s) ? s.Location : "?")} from rank {s?.RankReq}", Blue);
             }
-            Runs(($"{PlannerHours(st.Hours / st.Voyages)}", null), (" a voyage   ", Dim), ($"{PlannerN(st.ExpPerVoyage)}", null), (" exp a voyage   ", Dim),
-                ($"{PlannerN(st.ExpPerHour)}", null), (" exp an hour", Dim));
-            if (st.Better is { } b)
-                Colored(softColor, $"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
-                                   $"{string.Join("-", b.Route.Select(L))} gives {PlannerN((b.ExpPerHour / st.ExpPerHour - 1) * 100)}% more an hour.");
-            ImGui.TableNextColumn();
-            if (Ui.SmallButton($"Open in Voyage Planner##lvOpen{i}"))
+        }, r => r.RouteLetters),
+        new("parts", "Parts", r =>
+        {
+            for (var j = 0; j < r.St.Parts.Length; j++)
+            {
+                if (j > 0) ImGui.SameLine(0, 4 * ImGuiHelpers.GlobalScale);
+                OutlineTag(r.St.Parts[j], Blue);
+                Hover($"{LvSlots[j]}: {PlannerPartName(r.St.Parts[j])}");
+            }
+        }, r => string.Join("", r.St.Parts)),
+        new("voyage", "Voyage", r => TableCells.Right(PlannerHours(r.St.Hours / r.St.Voyages)), r => r.St.Hours / r.St.Voyages),
+        new("expVoyage", "Exp a voyage", r => TableCells.Right(PlannerN(r.St.ExpPerVoyage)), r => r.St.ExpPerVoyage),
+        new("expHour", "Exp an hour", r => TableCells.Right(PlannerN(r.St.ExpPerHour)), r => r.St.ExpPerHour),
+        new("tanks", "Ceruleum", r => TableCells.Right(PlannerN(r.St.Tanks)), r => r.St.Tanks, Hidden: true),
+        new("kits", "Repair kits", r => TableCells.Right(PlannerN(r.St.Kits)), r => r.St.Kits, Hidden: true),
+        new("better", "Not discovered yet", r =>
+        {
+            if (r.St.Better is not { } b || lvGame == null) { Colored(Dim, "—"); return; }
+            string L(int id) => lvGame.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
+            Colored(softColor, $"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
+                               $"{string.Join("-", b.Route.Select(L))} gives {PlannerN((b.ExpPerHour / r.St.ExpPerHour - 1) * 100)}% more an hour.");
+        }),
+        new("planner", "Voyage Planner", r =>
+        {
+            if (Ui.SmallButton($"Open in Voyage Planner##lvOpen{r.Index}"))
             {
                 plannerChosen = null;
-                plannerRank = st.FromRank;
-                for (var s = 0; s < 4; s++) plannerParts[s] = st.Parts[s];
+                plannerRank = r.St.FromRank;
+                for (var s = 0; s < 4; s++) plannerParts[s] = r.St.Parts[s];
                 plannerRoute.Clear();
-                plannerRoute.AddRange(st.Route);
-                if (st.Route.Count > 0 && g.Sectors.TryGetValue(st.Route[0], out var first)) plannerMap = first.Map;
+                plannerRoute.AddRange(r.St.Route);
+                if (r.St.Route.Count > 0 && lvGame != null && lvGame.Sectors.TryGetValue(r.St.Route[0], out var first)) plannerMap = first.Map;
                 shown = Tab.Planner;
             }
             Hover("Open this stage's build and route in Sub Calculator → Voyage Planner.");
-        }
-    }
+        }),
+    }) { Title = "Levelling Plan" };
 }

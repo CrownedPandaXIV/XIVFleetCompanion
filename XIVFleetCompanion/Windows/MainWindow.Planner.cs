@@ -150,6 +150,7 @@ public partial class MainWindow
         ImGui.SetNextItemWidth(420 * scale);
         if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
         ImGui.InputTextWithHint("##fcPickerSearch", "Search Free Company, world or account", ref fcPickerSearch, 64);
+        if (fcPickerSearch.Length > 0) { ImGui.SameLine(); if (ImGui.SmallButton("Clear##fcPickerSearchClear")) fcPickerSearch = ""; }
         var searching = fcPickerSearch.Trim().Length > 0;
         var shown = fcs.Where(f => Matches(fcPickerSearch, new[] { f.Name, f.World }.Concat(f.Accounts.Select(a => a.Account)).ToArray())).ToList();
         string? picked = null;
@@ -225,6 +226,7 @@ public partial class MainWindow
         ImGui.SetNextItemWidth(560 * scale);
         if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
         ImGui.InputTextWithHint("##plannerSearch", "Search character, world, account, FC or sub", ref plannerSearch, 64);
+        if (plannerSearch.Length > 0) { ImGui.SameLine(); if (ImGui.SmallButton("Clear##plannerSearchClear")) plannerSearch = ""; }
         var fcOf = (reader.Roster.Data ?? new List<RosterRow>()).GroupBy(r => r.Cid).ToDictionary(g => g.Key, g => g.First().FcName ?? "");
         var searching = plannerSearch.Trim().Length > 0;
         var shownSubs = subs.Where(s => Matches(plannerSearch, s.SubName, s.Character, s.World, s.Account, fcOf.GetValueOrDefault(s.Cid))).ToList();
@@ -309,6 +311,9 @@ public partial class MainWindow
         if (plannerChosen != null)
         {
             ImGui.SameLine();
+            if (ImGui.SmallButton("Clear sub##plannerClearSub")) plannerChosen = null;
+            Hover("Stop starting from this sub; the build and route stay as they are.");
+            ImGui.SameLine();
             Colored(Dim, "Change anything below to try other builds; your sub isn't changed.");
         }
         ImGui.Spacing();
@@ -385,6 +390,8 @@ public partial class MainWindow
                     if (ImGui.SmallButton($"×##plannerRemove{id}")) { plannerRoute.RemoveAt(i); break; }
                     Hover("Remove");
                 }
+                if (plannerRoute.Count > 0 && ImGui.SmallButton("Clear route##plannerClearRoute")) plannerRoute.Clear();
+                if (plannerRoute.Count > 1) ImGui.SameLine();
                 if (plannerRoute.Count > 1 && plannerStats is { } speedFrom && ImGui.Button("Best order##plannerBest"))
                 {
                     var sectors = plannerRoute.Select(id => g.Sectors.GetValueOrDefault(id)).OfType<SubSector>().ToList();

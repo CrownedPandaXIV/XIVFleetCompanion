@@ -138,6 +138,12 @@ public partial class MainWindow
             if (RouteOf(s.Cid, s.SubName) is { } r && r.Sectors.Length > 0 && g.Sectors.TryGetValue(r.Sectors[0], out var first) && first.Map != rfMap)
             { rfMap = first.Map; rfMust.Clear(); rfLeaveOut.Clear(); }
         });
+        if (rfChosen != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear sub##rfClearSub")) rfChosen = null;
+            Hover("Stop starting from this sub; the build stays as it is.");
+        }
         ImGui.SameLine(0, 14 * scale);
         Tag($"Rank {rfRank}", softColor);
         foreach (var p in rfParts) { ImGui.SameLine(0, 4 * scale); Tag(p, softColor); }
@@ -228,6 +234,13 @@ public partial class MainWindow
         Tag("D", Dim); ImGui.SameLine(); Colored(Dim, "not yet");
         ImGui.SameLine(0, 14 * scale); Tag("E", headingColor ?? softColor); ImGui.SameLine(); Colored(Dim, "must be in the route (click a sector; again to leave it out)");
         RfTiles(onMap, result?.States ?? new(), g, RfOpeners(g, data));
+        if (rfMust.Count > 0 || rfLeaveOut.Count > 0)
+        {
+            string L(int id) => g.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
+            if (rfMust.Count > 0) { Colored(Dim, $"Must go to {string.Join(", ", rfMust.Select(L))}."); ImGui.SameLine(); }
+            if (rfLeaveOut.Count > 0) { Colored(Dim, $"Left out: {string.Join(", ", rfLeaveOut.Select(L))}."); ImGui.SameLine(); }
+            if (ImGui.SmallButton("Clear marks##rfClearMarks")) { rfMust.Clear(); rfLeaveOut.Clear(); }
+        }
 
         // What's next on this map, and new sectors first.
         var states = result?.States ?? new();

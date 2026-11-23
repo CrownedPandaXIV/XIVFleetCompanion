@@ -146,6 +146,7 @@ public partial class MainWindow
 
         // 1. What you want: the map, add a sector, then a card for each sector with its goals.
         HeadingRuns(("What you want", null), ($"   {finderGoals.Count} of 5 sectors", Dim));
+        if (finderGoals.Count > 0) { ImGui.SameLine(0, 12 * scale); if (ImGui.SmallButton("Clear goals##finderClearGoals")) finderGoals.Clear(); }
         FinderItemSearch(g, data);
         if (finderSwitchTo is { } sw)
         {
@@ -348,7 +349,7 @@ public partial class MainWindow
         var scale = ImGuiHelpers.GlobalScale;
         ImGui.SetNextItemWidth(360 * scale);
         ImGui.InputTextWithHint("##finderSearch", "Find an item, e.g. Cocobolo Lumber", ref finderSearch, 64);
-        if (finderSearch.Length > 0) { ImGui.SameLine(); if (ImGui.SmallButton("×##finderSearchClear")) finderSearch = ""; }
+        if (finderSearch.Length > 0) { ImGui.SameLine(); if (ImGui.SmallButton("Clear##finderSearchClear")) finderSearch = ""; }
         if (finderSearch.Trim().Length < 2) return;
         var found = FinderItems(g, data).Where(x => Matches(finderSearch, x.Name)).GroupBy(x => x.ItemId)
             .OrderBy(x => x.First().Name, StringComparer.CurrentCulture).ToList();

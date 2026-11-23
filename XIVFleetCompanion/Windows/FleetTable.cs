@@ -75,6 +75,13 @@ public sealed class FleetTable<T>
     /// column, a heading wherever a row's band differs from the row above. Null: none.</summary>
     public Func<T, string>? Band { get; set; }
 
+    /// <summary>Lines across the whole table before a row, in the table's own order (the Levelling Plan's part swaps before
+    /// the stage that uses them), in a colour on a soft patch of it; left out while a column sorts it. Null: none.</summary>
+    public Func<T, IReadOnlyList<string>>? Before { get; set; }
+
+    /// <summary>The colour of the <see cref="Before"/> lines.</summary>
+    public Vector4 BeforeColor { get; set; } = new(1f, 0.75f, 0.3f, 1f);
+
     /// <summary>Columns left out for now, by key (the Build Finder's Rank while its rows are banded by rank); they stay
     /// chosen in the Columns list. Null: none.</summary>
     public Func<string, bool>? LeaveOut { get; set; }
@@ -249,7 +256,7 @@ public sealed class FleetTable<T>
     }
 
     // One line of the table: a row, or an account's heading.
-    private readonly record struct Line(T Row, string? Heading);
+    private readonly record struct Line(T Row, string? Heading, Vector4? Note = null);
 
     /// <summary>Draws the table: rows in its own order, sorted by a clicked column or grouped by account. fitRows: only as
     /// tall as its rows, for a page with several tables one under another (the page scrolls instead); otherwise it fills
@@ -303,15 +310,19 @@ public sealed class FleetTable<T>
                 lines.AddRange(groupRows.Select(r => new Line(r, null)));
             }
         }
-        else if (Band != null)
+        else if (Band != null || Before != null)
         {
             lines = new List<Line>();
             string? was = null;
             foreach (var r in rows)
             {
-                var band = Band(r);
-                if (band != was) lines.Add(new Line(default!, band));
-                was = band;
+                if (Band != null)
+                {
+                    var band = Band(r);
+                    if (band != was) lines.Add(new Line(default!, band));
+                    was = band;
+                }
+                if (Before != null) foreach (var note in Before(r)) lines.Add(new Line(default!, note, BeforeColor));
                 lines.Add(new Line(r, null));
             }
         }
@@ -333,6 +344,15 @@ public sealed class FleetTable<T>
             {
                 var line = lines[i];
                 Ui.NextRow(rowHeight);
+                if (line.Heading != null && line.Note is Vector4 noteColor)
+                {
+                    // A note across the whole row, in its colour on a soft patch of it.
+                    Ui.SetColumnIndex(0);
+                    Ui.SetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(noteColor with { W = 0.14f }));
+                    using (ImRaii.PushColor(ImGuiCol.Text, noteColor))
+                        Ui.Text(line.Heading);
+                    continue;
+                }
                 if (line.Heading != null)
                 {
                     // A band in the look's accent across the whole row.

@@ -95,6 +95,7 @@ public partial class MainWindow
 
         // 1. The builds.
         HeadingRuns(("Builds", null), ($"   {cmpBuilds.Count} of {SubCompare.MaxBuilds}", Dim));
+        if (cmpBuilds.Count > 0) { ImGui.SameLine(0, 12 * scale); if (ImGui.SmallButton("Remove all builds##cmpRemoveAll")) { cmpBuilds.Clear(); cmpEditing = null; } }
         if (!full)
         {
             SubPicker("cmp", null, s =>
@@ -168,6 +169,7 @@ public partial class MainWindow
                 if (ImGui.SmallButton($"×##cmpRemove{cmpRoute[i]}")) { cmpRoute.RemoveAt(i); break; }
                 Hover("Remove");
             }
+            if (cmpRoute.Count > 0) { ImGui.SameLine(0, 12 * scale); if (ImGui.SmallButton("Clear route##cmpClearRoute")) cmpRoute.Clear(); }
             // Best order: the fastest the build with the most range can fly (time doesn't depend on the build).
             if (cmpRoute.Count > 1 && cmpBuilds.Count > 0)
             {
@@ -241,8 +243,9 @@ public partial class MainWindow
         var result = cmpResult is { } r0 && r0.Mode == mode && r0.Columns.Count == cmpBuilds.Count ? r0 : null;
         using (WorkingDim(working)) CmpTable(g, result, mode);
         ImGui.Spacing();
-        Colored(Dim, "Numbers as the Voyage Planner works them out, gil at vendor prices. Best route each: as the Route Finder ranks them (up to 5 stops), only through " +
-                     "sectors the Free Company has discovered. A build that can't fly the route shows why instead of numbers.");
+        using (ImRaii.PushColor(ImGuiCol.Text, Dim))
+            Ui.Wrapped("Numbers as the Voyage Planner works them out, gil at vendor prices. Best route each: as the Route Finder ranks them (up to 5 stops), only through " +
+                       "sectors the Free Company has discovered. A build that can't fly the route shows why instead of numbers.");
     }
 
     private static CmpResult CmpWorkOut(PlannerGame g, SubCalculatorData.Data data, string mode, List<(int Rank, string[] Parts)> builds, List<int> sameRoute, int? mapId,

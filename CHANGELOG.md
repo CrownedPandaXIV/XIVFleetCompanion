@@ -110,10 +110,11 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   Experience carries over into the next rank as the game gives it.
   - **The plan:** ranks and experience needed, voyages, about how many days and the date it gets there, ceruleum tanks
     and repair kits, and a strip showing how long each stage takes.
-  - **Stages:** a card per route, with its ranks, days and voyages, voyage length, experience a voyage and an hour, the
+  - **Stages:** a table like every other page's (columns to size, move, sort and choose), a row per route, with its ranks, days and voyages, voyage length, experience a voyage and an hour, the
     sectors a new rank opens, and, when a sector your FC hasn't discovered yet would do at least 1% better, by how much. Open in
     Voyage Planner on each.
-  - **Plan for one sub, or every sub in a Free Company** (one line each, with when it gets there; Stages opens it).
+  - **Plan for one sub, or every sub in a Free Company** (a table, one row each, with when it gets there; Stages opens it).
+    Each part swap is a line across the table before the first stage that uses it.
   - **Keep this build, or suggest changes on the way:** at the start of each stage, the one-part swap that makes the
     route at least 3% faster for experience and the whole plan shorter, saying whether you have the part and how much
     sooner it gets there. **Standard parts only** leaves Modified parts out, for their cost and repairs. Only parts the
@@ -137,6 +138,10 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   line says so and the old answer is dimmed until the new one is in.
 - **Choosing a Free Company** (Levelling Plan, Route Finder, Compare Builds) works like choosing a sub: a panel grouped
   by account label, each Free Company with its world, in Character Roster order, with a search.
+- **Clear buttons on the Sub Calculator's pages.** Each search (subs, Free Companies, items) has a Clear. The Voyage
+  Planner has Clear sub and Clear route; the Route Finder Clear sub and Clear marks; the Build Finder Clear goals; Compare
+  Builds Remove all builds and Clear route; the Levelling Plan Clear sub, Reset target and Reset targets. Each shows only
+  while there's something to clear.
 - **The top rank is the game's (145), not one past it.** The game's rank table lists experience "to the next rank" on the
   top rank too, so the top was taken as 146. It's now the last rank the game gives stats to, on the Sub Calculator's pages
   and for the next build on the Subs page.
