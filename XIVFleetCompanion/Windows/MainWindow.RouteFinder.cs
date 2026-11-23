@@ -215,7 +215,7 @@ public partial class MainWindow
                 (rfMap, rfRank, rfParts.ToArray(), rfRankBy, rfItem, rfMaxHours, rfMaxStops, rfMust.ToList(), rfLeaveOut.ToList(), rfExploreFirst);
             var read = fcRead?.ReadAt != null ? fcRead.Sectors : null;
             rfWorkKey = key;
-            rfWork = Task.Run(() => RfFind(g, data, map, rank, parts, rankBy, item, hours, stops, must, leaveOut, explore, read));
+            rfWork = LowPriority.Run(() => RfFind(g, data, map, rank, parts, rankBy, item, hours, stops, must, leaveOut, explore, read));
         }
         var result = rfResult;
         var working = key != rfKey;

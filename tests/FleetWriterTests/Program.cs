@@ -1465,7 +1465,7 @@ internal static partial class Program
             var search = LvSearch(withRead, hours);
             var plan = Levelling.LevellingPlan(c.GetProperty("rank").GetInt32(), c.GetProperty("exp").GetDouble(), c.GetProperty("target").GetInt32(), lvExp,
                 c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray(), search.BestAt, search.Score,
-                c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned);
+                c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned, Levelling.PartRanks(partList));
             if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read);
             var wrong = new List<string>();
             void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
@@ -1497,6 +1497,18 @@ internal static partial class Program
             else if (lWrong.Length == 0) lWrong = $" (first wrong: case {lCases}: {string.Join(", ", wrong.Take(3))})";
         }
         Check(lCases >= 4 && lGood == lCases, $"Levelling Plan: the plugin's stages, swaps and totals match the app's for {lGood} of {lCases} subs{lWrong}");
+        // No swap fits a part before the rank it needs (the fixture's parts need ranks from 1 to 125).
+        var rankOfPart = Levelling.PartRanks(partList);
+        var swapsSeen = new List<string>();
+        var tooSoon = new List<string>();
+        foreach (var c in lvRoot.GetProperty("cases").EnumerateArray())
+            foreach (var sw in c.GetProperty("swaps").EnumerateArray())
+            {
+                var (at, slot, to) = (sw.GetProperty("atRank").GetInt32(), sw.GetProperty("slot").GetInt32(), sw.GetProperty("to").GetString()!);
+                swapsSeen.Add($"{to}@{at}(needs {rankOfPart(to, slot)})");
+                if (rankOfPart(to, slot) > at) tooSoon.Add($"{to} in slot {slot} at rank {at}");
+            }
+        Check(swapsSeen.Count > 0 && tooSoon.Count == 0, $"Levelling Plan: no suggested part comes before the rank it needs ({string.Join(", ", swapsSeen)}){(tooSoon.Count > 0 ? $"; too soon: {string.Join(", ", tooSoon)}" : "")}");
 
         // Parts you own (as the app's ownedParts): fitted, or spare in a bag, a retainer or the FC chest; for one character
         // only its own subs, bags and retainers and its Free Company's chest. Item numbers: bow, bridge, hull, stern from each base.

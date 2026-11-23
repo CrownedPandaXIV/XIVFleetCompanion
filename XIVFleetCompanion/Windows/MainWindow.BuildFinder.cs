@@ -238,7 +238,7 @@ public partial class MainWindow
             var (sort, sureOnly, forCid) = (finderSort, finderSureOnly, finderFor?.Cid);
             var slots = finderSlots.ToList();
             finderWorkKey = key;
-            finderWork = Task.Run(() => FindBuilds(g, data, goals, sort, sureOnly, inputs, forCid, slots));
+            finderWork = LowPriority.Run(() => FindBuilds(g, data, goals, sort, sureOnly, inputs, forCid, slots));
         }
         var result = finderResult;
         var working = key != finderKey;

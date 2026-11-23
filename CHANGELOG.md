@@ -116,8 +116,15 @@ The Sub Calculator, built in steps. This entry grows until 2.6.0 is released.
   - **Plan for one sub, or every sub in a Free Company** (one line each, with when it gets there; Stages opens it).
   - **Keep this build, or suggest changes on the way:** at the start of each stage, the one-part swap that makes the
     route at least 3% faster for experience and the whole plan shorter, saying whether you have the part and how much
-    sooner it gets there. **Standard parts only** leaves Modified parts out, for their cost and repairs. With swaps,
-    each stage's parts sit apart from its route, after a "Parts" label.
+    sooner it gets there. **Standard parts only** leaves Modified parts out, for their cost and repairs. Only parts the
+    sub's rank allows are suggested (Unkiu from rank 15, Whale 25, Coelacanth 35, Syldra 45, Modified parts 50), and
+    each rank a part opens at is looked at too. With swaps, each stage's parts sit apart from its route, after a "Parts"
+    label.
+  - **Quick on any voyage length:** the route search only follows routes that could still beat the best found, so a
+    plan from rank 1 to 145 on "Any" takes about a second instead of minutes, with the same answers. Changing a choice
+    stops the plan being worked out and starts the new one.
+    The working out runs below the game's priority, so the framerate holds (also on Compare Builds, the Build Finder
+    and the Route Finder).
   - **Use every sector:** the plan as if every sector were discovered, to see how long it takes once your Free
     Company has found them.
   The plugin's plans are checked against the app's. `/xivfleet levelling` opens it.

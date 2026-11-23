@@ -231,7 +231,7 @@ public partial class MainWindow
             var (builds, route, map, rankBy, hours, must) = (cmpBuilds.Select(b => (b.Rank, Parts: b.Parts.ToArray())).ToList(), cmpRoute.ToList(), cmpMap, cmpRankBy, cmpMaxHours, cmpMust.ToList());
             var read = fcRead?.ReadAt != null ? fcRead.Sectors : null;
             cmpWorkKey = key;
-            cmpWork = Task.Run<CmpResult?>(() => CmpWorkOut(g, data, mode, builds, route, map, rankBy, hours, must, read, kitCost));
+            cmpWork = LowPriority.Run<CmpResult?>(() => CmpWorkOut(g, data, mode, builds, route, map, rankBy, hours, must, read, kitCost));
         }
         var working = key != cmpKey;
         HeadingRuns(("Side by side", null), ("   green: the best of these builds", Dim));

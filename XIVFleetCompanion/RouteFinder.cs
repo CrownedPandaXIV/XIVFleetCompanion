@@ -85,6 +85,7 @@ namespace XIVFleetCompanion
             public int Range;
             public int Last;
             public Label? Before;
+            public double Exp;
         }
 
         internal static (double Seconds, int Range) Leg(SubSector from, SubSector to, double speed)
@@ -97,8 +98,11 @@ namespace XIVFleetCompanion
         /// <summary>The routes, best first (as the app's findRoutes). rankBy "exp", "gil" or "item" (itemId).</summary>
         public static List<Route> FindRoutes(IReadOnlyList<SubSector> sectors, SubSector? start, SubStats? stats, int maxStops, double? maxHours,
             IReadOnlyCollection<int> must, IReadOnlyDictionary<int, Value> values, string rankBy, uint? itemId,
-            IReadOnlyDictionary<int, List<int>> opens, IReadOnlyDictionary<int, string?> states, bool exploreFirst)
+            IReadOnlyDictionary<int, List<int>> opens, IReadOnlyDictionary<int, string?> states, bool exploreFirst, bool bestOnly = false, double atLeast = 0)
         {
+            // bestOnly (ranking by experience): only the best route is wanted (the Levelling Plan), so an order that can't
+            // beat the best found so far however it goes on is not followed; atLeast: experience an hour already had on
+            // another map, a route below it may be left out. As the app's findRoutes.
             if (start == null || stats == null || sectors.Count == 0) return new();
             var list = sectors.OrderBy(s => s.Id).ToList();
             var n = list.Count;
@@ -109,6 +113,60 @@ namespace XIVFleetCompanion
             for (var i = 0; i < n; i++) if (must.Contains(list[i].Id)) mustMask |= 1 << i;
             var first = list.Select(s => Leg(start, s, stats.Speed)).ToArray();
             var legs = list.Select(a => list.Select(b => Leg(a, b, stats.Speed)).ToArray()).ToArray();
+
+            // bestOnly: the most experience an hour any order could still reach: with m more stops, at most the m best
+            // sectors' experience, and at least the m shortest ways into a sector in time.
+            var pruning = bestOnly && rankBy == "exp" && !exploreFirst;
+            var expOf = list.Select(s => values.TryGetValue(s.Id, out var v) ? v.Exp : 0).ToArray();
+            var top = new List<double> { 0 };
+            foreach (var e in expOf.OrderByDescending(e => e)) top.Add(top[^1] + Math.Max(0, e));
+            var into = new double[n];
+            for (var j = 0; j < n; j++)
+            {
+                var m = double.PositiveInfinity;
+                for (var i = 0; i < n; i++) if (i != j) m = Math.Min(m, legs[i][j].Seconds);
+                into[j] = double.IsFinite(m) ? m : 0;
+            }
+            var least = new List<double> { 0 };
+            foreach (var c in into.OrderBy(c => c)) least.Add(least[^1] + c);
+            var bestRate = pruning && atLeast > 0 ? atLeast / 3600 : double.NegativeInfinity;
+            bool CouldBeat(double exp, double seconds, int size)
+            {
+                if (!pruning || bestRate <= 0) return true;
+                for (var m = 0; m <= stops - size && m < top.Count; m++)
+                    if ((exp + top[m]) / (seconds + least[m]) >= bestRate * (1 - 1e-9)) return true;
+                return false;
+            }
+            // A good route to start from: from each sector, the next stop giving the most experience an hour so far.
+            if (pruning && mustMask == 0)
+            {
+                for (var i = 0; i < n; i++)
+                {
+                    var at = i;
+                    var seconds = FixedVoyageSeconds + first[i].Seconds;
+                    double range = first[i].Range;
+                    var exp = expOf[i];
+                    var used = 1 << i;
+                    if (range > stats.Range || seconds > secondsMax) continue;
+                    bestRate = Math.Max(bestRate, exp / seconds);
+                    for (var size = 1; size < stops; size++)
+                    {
+                        var pick = -1;
+                        var pickRate = double.NegativeInfinity;
+                        for (var j = 0; j < n; j++)
+                        {
+                            if ((used & (1 << j)) != 0) continue;
+                            var l = legs[at][j];
+                            if (range + l.Range > stats.Range || seconds + l.Seconds > secondsMax) continue;
+                            var rate = (exp + expOf[j]) / (seconds + l.Seconds);
+                            if (rate > pickRate) { pickRate = rate; pick = j; }
+                        }
+                        if (pick < 0) break;
+                        seconds += legs[at][pick].Seconds; range += legs[at][pick].Range; exp += expOf[pick]; used |= 1 << pick; at = pick;
+                        bestRate = Math.Max(bestRate, exp / seconds);
+                    }
+                }
+            }
 
             var layer = new Dictionary<long, List<Label>>();
             var best = new Dictionary<int, Label>();
@@ -121,11 +179,12 @@ namespace XIVFleetCompanion
             }
             void Keep(int mask, Label label)
             {
+                if (pruning && (mask & mustMask) == mustMask) bestRate = Math.Max(bestRate, label.Exp / label.Seconds);
                 if (!best.TryGetValue(mask, out var was) || label.Seconds < was.Seconds || (label.Seconds == was.Seconds && label.Range < was.Range)) best[mask] = label;
             }
             for (var i = 0; i < n; i++)
             {
-                var label = new Label { Seconds = FixedVoyageSeconds + first[i].Seconds, Range = first[i].Range, Last = i };
+                var label = new Label { Seconds = FixedVoyageSeconds + first[i].Seconds, Range = first[i].Range, Last = i, Exp = expOf[i] };
                 if (label.Range > stats.Range || label.Seconds > secondsMax) continue;
                 Offer(layer, (long)(1 << i) * 32 + i, label);
             }
@@ -144,8 +203,9 @@ namespace XIVFleetCompanion
                         {
                             if ((mask & (1 << j)) != 0) continue;
                             var l = legs[last][j];
-                            var grown = new Label { Seconds = label.Seconds + l.Seconds, Range = label.Range + l.Range, Last = j, Before = label };
+                            var grown = new Label { Seconds = label.Seconds + l.Seconds, Range = label.Range + l.Range, Last = j, Before = label, Exp = label.Exp + expOf[j] };
                             if (grown.Range > stats.Range || grown.Seconds > secondsMax) continue;
+                            if (!CouldBeat(grown.Exp, grown.Seconds, size + 1)) continue;
                             Offer(next, (long)(mask | (1 << j)) * 32 + j, grown);
                         }
                     }
@@ -185,7 +245,7 @@ namespace XIVFleetCompanion
                 if ((x = a.Sectors.Count.CompareTo(b.Sectors.Count)) != 0) return x;
                 return string.CompareOrdinal(string.Join(",", a.Sectors), string.Join(",", b.Sectors));
             });
-            return routes;
+            return pruning && routes.Count > 1 ? routes.GetRange(0, 1) : routes;
         }
 
         // ---- Unlocks ----

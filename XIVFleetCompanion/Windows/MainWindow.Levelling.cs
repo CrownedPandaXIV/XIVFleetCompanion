@@ -37,6 +37,7 @@ public partial class MainWindow
     private LvResult? lvResult;
     private Task<LvResult?>? lvWork;
     private string lvWorkKey = "";
+    private System.Threading.CancellationTokenSource? lvCancel;
 
     private static string LvDays(double hours)
     {
@@ -122,10 +123,13 @@ public partial class MainWindow
         if (lvWork is { IsCompleted: true } done)
         {
             if (done.IsCompletedSuccessfully) lvResult = done.Result;
-            else Plugin.Log.Warning(done.Exception, "Levelling Plan: the working out failed");
-            lvKey = lvWorkKey;
+            else if (!done.IsCanceled && done.Exception?.InnerException is not OperationCanceledException)
+                Plugin.Log.Warning(done.Exception, "Levelling Plan: the working out failed");
+            if (!done.IsCanceled) lvKey = lvWorkKey;
             lvWork = null;
         }
+        // A newer choice stops the plan still being worked out, instead of waiting for it.
+        if (key != lvKey && lvWork != null && lvWorkKey != key) { lvCancel?.Cancel(); lvWork = null; }
         if (key != lvKey && lvWork == null)
         {
             var (every, hours, suggest, standard) = (lvEveryFc, lvMaxHours, lvSuggest, lvStandardOnly);
@@ -134,18 +138,21 @@ public partial class MainWindow
             var inputs = reader.Parts.Data?.Inputs;
             var list = asked.ToList();
             lvWorkKey = key;
-            lvWork = Task.Run<LvResult?>(() =>
+            lvCancel = new System.Threading.CancellationTokenSource();
+            var cancel = lvCancel.Token;
+            lvWork = LowPriority.Run<LvResult?>(() =>
             {
                 var expToNext = g.Ranks.ToDictionary(kv => kv.Key, kv => kv.Value.ExpToNext);
+                var partRank = Levelling.PartRanks(g.Game.Parts);
                 Levelling.Searches For(IReadOnlyDictionary<int, (bool Unlocked, bool Explored)>? r) =>
-                    new(g.Sectors, g.Starts, g.Maps.Select(m => m.Id), g.Ranks, g.Parts, g.Game.Parts, data, id => ListingVendor((int)id), kitCost, r, hours);
+                    new(g.Sectors, g.Starts, g.Maps.Select(m => m.Id), g.Ranks, g.Parts, g.Game.Parts, data, id => ListingVendor((int)id), kitCost, r, hours, cancel);
                 var search = For(read);
                 var all = read != null ? For(null) : null;
                 var plans = new List<(LvSub, Levelling.Plan)>();
                 foreach (var s in list)
                 {
                     var owned = suggest && inputs != null && s.Cid != 0 ? BuildFinder.Owned(inputs, s.Cid) : new HashSet<string>();
-                    var plan = Levelling.LevellingPlan(s.Rank, s.Exp, s.Target, expToNext, s.Parts, search.BestAt, search.Score, suggest, standard, owned);
+                    var plan = Levelling.LevellingPlan(s.Rank, s.Exp, s.Target, expToNext, s.Parts, search.BestAt, search.Score, suggest, standard, owned, partRank);
                     if (read != null) Levelling.MarkBetter(plan, all, read);
                     plans.Add((s, plan));
                 }

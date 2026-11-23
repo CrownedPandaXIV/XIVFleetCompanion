@@ -101,22 +101,43 @@ namespace XIVFleetCompanion
             return o;
         };
 
-        /// <summary>The plan, and with suggestions the part swaps on the way (as the app's levellingPlan). score(rank, parts,
-        /// route): experience an hour on that route, null when it can't fly it. owned: "letter|slot".</summary>
-        public static Plan LevellingPlan(int rank, double exp, int target, IReadOnlyDictionary<int, double> expToNext, string[] parts,
-            Func<int, string[], Voyage?> bestAt, Func<int, string[], List<int>, double?>? score, bool suggest, bool standardOnly, IReadOnlySet<string> owned)
+        /// <summary>The rank each part needs, from the game's parts: (letter, slot) -> rank (0 when unknown). As the app's
+        /// partRanks.</summary>
+        public static Func<string, int, int> PartRanks(IEnumerable<SubPartStat> gameParts)
         {
+            var byKey = new Dictionary<(int, int), int>();
+            foreach (var p in gameParts) byKey.TryAdd((p.Class, p.Slot), p.PartRank);
+            return (letter, slot) => SubRoutes.PartClass.TryGetValue(letter, out var c) && byKey.TryGetValue((c, slot), out var r) ? r : 0;
+        }
+
+        /// <summary>The plan, and with suggestions the part swaps on the way (as the app's levellingPlan): looked at the start
+        /// of each stage and at each rank a part can first be fitted from, only parts the sub's rank allows (partRank).
+        /// score(rank, parts, route): experience an hour on that route, null when it can't fly it. owned: "letter|slot".</summary>
+        public static Plan LevellingPlan(int rank, double exp, int target, IReadOnlyDictionary<int, double> expToNext, string[] parts,
+            Func<int, string[], Voyage?> bestAt, Func<int, string[], List<int>, double?>? score, bool suggest, bool standardOnly, IReadOnlySet<string> owned,
+            Func<string, int, int>? partRank = null)
+        {
+            partRank ??= (_, _) => 0;
             var keep = Simulate(rank, exp, target, expToNext, _ => parts, bestAt);
             keep.KeepHours = keep.Hours;
             if (!suggest || score == null) return keep;
             var letters = standardOnly ? Standard : AllParts;
+            // The ranks a part becomes possible at, on the way.
+            var opens = new HashSet<int>();
+            foreach (var to in letters) for (var slot = 0; slot < 4; slot++) { var r = partRank(to, slot); if (r > rank && r < target) opens.Add(r); }
             var swaps = new List<Swap>();
             var plan = keep;
-            var from = 0;
-            while (swaps.Count < MaxSwaps && from < plan.Stages.Count)
+            var after = int.MinValue; // the last rank looked at
+            while (swaps.Count < MaxSwaps)
             {
-                var stage = plan.Stages[from];
-                var at = stage.FromRank;
+                var points = plan.Stages.Select(st => st.FromRank).Concat(opens).Distinct().Where(r => r > after && r < target).OrderBy(r => r).ToList();
+                if (points.Count == 0) break;
+                var at = points[0];
+                after = at;
+                // The stage being run at that rank.
+                Stage? stage = null;
+                foreach (var st in plan.Stages) if (st.FromRank <= at) stage = st;
+                if (stage == null) continue;
                 var now = PartsWith(parts, swaps)(at);
                 var baseScore = score(at, now, stage.Route);
                 Swap? pick = null;
@@ -126,7 +147,7 @@ namespace XIVFleetCompanion
                     {
                         foreach (var to in letters)
                         {
-                            if (to == now[slot]) continue;
+                            if (to == now[slot] || partRank(to, slot) > at) continue;
                             var tried = now.ToArray();
                             tried[slot] = to;
                             if (score(at, tried, stage.Route) is not double v) continue;
@@ -137,14 +158,12 @@ namespace XIVFleetCompanion
                         }
                     }
                 }
-                if (pick == null) { from += 1; continue; }
+                if (pick == null) continue;
                 var next = Simulate(rank, exp, target, expToNext, PartsWith(parts, swaps.Append(pick).ToList()), bestAt);
-                if (!(next.Reached && (!plan.Reached || next.Hours < plan.Hours - 1e-9))) { from += 1; continue; }
+                if (!(next.Reached && (!plan.Reached || next.Hours < plan.Hours - 1e-9))) continue;
                 pick.SavedHours = plan.Hours - next.Hours;
                 swaps.Add(pick);
                 plan = next;
-                from = plan.Stages.FindIndex(s => s.FromRank > at);
-                if (from < 0) break;
             }
             plan.Swaps = swaps;
             plan.KeepHours = keep.Hours;
@@ -166,14 +185,19 @@ namespace XIVFleetCompanion
             private readonly double kitCost;
             private readonly double? maxHours;
             private readonly Dictionary<int, List<int>> opens;
-            private readonly Dictionary<string, RouteFinder.Route?> searches = new();
+            // A map's search, kept for whatever doesn't change it: the best route (or null), and Below: the rate it was asked
+            // to beat when it found none at least that good (0: the true best).
+            private readonly Dictionary<string, (RouteFinder.Route? Route, double Below)> searches = new();
             private readonly Dictionary<string, Voyage?> answers = new();
+            private int? lead; // the map that gave the last answer, searched first so the others can stop sooner
+            private readonly System.Threading.CancellationToken cancel;
             public readonly Dictionary<int, string?> States;
 
             public Searches(IReadOnlyDictionary<int, SubSector> sectors, List<SubSector> starts, IEnumerable<int> mapIds, Dictionary<int, SubRank> ranks,
                 Dictionary<(int, int), SubPartStat> partStats, IReadOnlyList<SubPartStat> partList, SubCalculatorData.Data data, Func<uint, double> price, double kitCost,
-                IReadOnlyDictionary<int, (bool Unlocked, bool Explored)>? read, double? maxHours)
+                IReadOnlyDictionary<int, (bool Unlocked, bool Explored)>? read, double? maxHours, System.Threading.CancellationToken cancel = default)
             {
+                this.cancel = cancel;
                 (this.sectors, this.starts, this.ranks, this.partStats, this.partList, this.data, this.price, this.kitCost, this.maxHours) =
                     (sectors, starts, ranks, partStats, partList, data, price, kitCost, maxHours);
                 var openerOf = sectors.Keys.ToDictionary(id => id, id => data.Find(id)?.UnlockedFrom ?? 0);
@@ -186,25 +210,43 @@ namespace XIVFleetCompanion
             {
                 var key = $"{rank}|{string.Join(",", parts)}";
                 if (answers.TryGetValue(key, out var had)) return had;
+                cancel.ThrowIfCancellationRequested();
                 var stats = SubRoutes.BuildStats(rank, parts, ranks, partStats);
                 RouteFinder.Route? best = null;
+                var bestIndex = -1;
                 if (stats != null)
                 {
-                    foreach (var onMap in maps)
+                    // The maps in their order, the last answer's first; the answer is the same as in map order (a later map
+                    // only wins when it is better, an earlier one when it is at least as good).
+                    var order = Enumerable.Range(0, maps.Count).ToList();
+                    if (lead is int l0) { order.Remove(l0); order.Insert(0, l0); }
+                    foreach (var i in order)
                     {
+                        var onMap = maps[i];
                         var allowed = RouteFinder.UsableSectors(onMap, rank, States);
                         if (allowed.Count == 0) continue;
                         var values = allowed.ToDictionary(x => x.Id, x => RouteFinder.SectorValue(x, data.Find(x.Id), stats, price));
                         var searchKey = $"{onMap[0].Map}|{string.Join(",", allowed.Select(x => x.Id))}|{stats.Speed}|{stats.Range}|{string.Join(",", allowed.Select(x => values[x.Id].Exp))}";
-                        if (!searches.TryGetValue(searchKey, out var r))
+                        // To matter here, this map's route must beat the best so far (or tie it, from an earlier map).
+                        var atLeast = best != null ? best.ExpPerHour * (1 - 1e-6) : 0;
+                        RouteFinder.Route? r;
+                        if (searches.TryGetValue(searchKey, out var was) && (was.Below == 0 || was.Below <= atLeast)) r = was.Route;
+                        else
                         {
-                            r = RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, Array.Empty<int>(), values, "exp", null, opens, States, false)
-                                .FirstOrDefault();
-                            searches[searchKey] = r;
+                            var found = RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, Array.Empty<int>(), values, "exp", null, opens, States, false,
+                                bestOnly: true, atLeast: atLeast).FirstOrDefault();
+                            var sure = found != null && found.ExpPerHour >= atLeast;
+                            r = sure ? found : null;
+                            searches[searchKey] = (r, sure || atLeast == 0 ? 0 : atLeast);
                         }
-                        if (r != null && (best == null || r.ExpPerHour > best.ExpPerHour + 1e-9)) best = r;
+                        if (r != null && (best == null || r.ExpPerHour > best.ExpPerHour + 1e-9 || (Math.Abs(r.ExpPerHour - best.ExpPerHour) <= 1e-9 && i < bestIndex)))
+                        {
+                            best = r;
+                            bestIndex = i;
+                        }
                     }
                 }
+                if (best != null) lead = bestIndex;
                 Voyage? answer = null;
                 if (best != null)
                 {
