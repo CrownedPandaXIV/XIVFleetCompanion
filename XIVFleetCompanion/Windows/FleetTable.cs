@@ -346,11 +346,18 @@ public sealed class FleetTable<T>
                 Ui.NextRow(rowHeight);
                 if (line.Heading != null && line.Note is Vector4 noteColor)
                 {
-                    // A note across the whole row, in its colour on a soft patch of it.
+                    // A note across the whole row, in its colour on a soft patch of it. Drawn past the first column's edge
+                    // (a cell clips its text to its own width), within the window.
                     Ui.SetColumnIndex(0);
                     Ui.SetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(noteColor with { W = 0.14f }));
-                    using (ImRaii.PushColor(ImGuiCol.Text, noteColor))
-                        Ui.Text(line.Heading);
+                    if (TableCapture.Current != null) { Ui.Text(line.Heading); continue; }
+                    var at = ImGui.GetCursorScreenPos();
+                    var draw = ImGui.GetWindowDrawList();
+                    var winPos = ImGui.GetWindowPos();
+                    draw.PushClipRect(winPos, winPos + ImGui.GetWindowSize(), false);
+                    draw.AddText(at, ImGui.GetColorU32(noteColor), line.Heading);
+                    draw.PopClipRect();
+                    ImGui.Dummy(new Vector2(1, ImGui.GetTextLineHeight()));
                     continue;
                 }
                 if (line.Heading != null)
