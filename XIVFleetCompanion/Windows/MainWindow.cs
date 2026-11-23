@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? subTrackerRunning;
 
     /// <summary>The main window's pages, chosen in its sidebar (2.x: one window for everything).</summary>
-    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends, Planner, BuildFinder, RouteFinder, Compare }
+    public enum Tab { Summary, Subs, Supplies, Parts, Roster, Retainers, Fcs, Inventory, Salvage, Income, Market, Pcs, Check, SpeedTest, Status, Settings, Routes, Trends, Planner, BuildFinder, RouteFinder, Compare, Levelling }
 
     private readonly SettingsTab settings;
     private readonly FleetReader reader;
@@ -133,6 +133,7 @@ public partial class MainWindow : Window, IDisposable
             case Tab.BuildFinder: DrawBuildFinder(); break;
             case Tab.RouteFinder: DrawRouteFinder(); break;
             case Tab.Compare: DrawCompare(); break;
+            case Tab.Levelling: DrawLevelling(); break;
             case Tab.Supplies: DrawSupplies(); break;
             case Tab.Parts: DrawParts(); break;
             case Tab.Roster: DrawRoster(); break;
@@ -171,7 +172,7 @@ public partial class MainWindow : Window, IDisposable
     {
         [Tab.Summary] = "Summary", [Tab.Trends] = "Trends", [Tab.Subs] = "Subs", [Tab.Routes] = "Route Optimization", [Tab.Parts] = "Parts",
         [Tab.Supplies] = "Supplies", [Tab.Salvage] = "Salvage", [Tab.Roster] = "Character Roster", [Tab.Retainers] = "Retainers",
-        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs", [Tab.Planner] = "Planner", [Tab.RouteFinder] = "Route Finder", [Tab.BuildFinder] = "Build Finder", [Tab.Compare] = "Compare",
+        [Tab.Fcs] = "Free Companies", [Tab.Inventory] = "Inventory", [Tab.Income] = "Income", [Tab.Market] = "Gil & Market", [Tab.Pcs] = "PCs", [Tab.Planner] = "Planner", [Tab.RouteFinder] = "Route Finder", [Tab.BuildFinder] = "Build Finder", [Tab.Compare] = "Compare Builds", [Tab.Levelling] = "Levelling Plan",
     };
 
     // The sidebar's groups (the app's sidebar has the same).
@@ -269,7 +270,8 @@ public partial class MainWindow : Window, IDisposable
                     Entry(Tab.Planner, FontAwesomeIcon.Calculator, "Planner", folded, null, p.Dim, "Try a build and a route: stats, voyage, loot, gil and wear");
                     Entry(Tab.RouteFinder, FontAwesomeIcon.Route, "Route Finder", folded, null, p.Dim, "The best routes for a build, and what your Free Company can explore next");
                     Entry(Tab.BuildFinder, FontAwesomeIcon.Search, "Build Finder", folded, null, p.Dim, "The builds that get what you want from chosen sectors");
-                    Entry(Tab.Compare, FontAwesomeIcon.Columns, "Compare", folded, null, p.Dim, "Up to three builds side by side, on one route or each on its best");
+                    Entry(Tab.Compare, FontAwesomeIcon.Columns, "Compare Builds", folded, null, p.Dim, "Up to three builds side by side, on one route or each on its best");
+                    Entry(Tab.Levelling, FontAwesomeIcon.ChartLine, "Levelling Plan", folded, null, p.Dim, "A sub's routes and time from its rank to a target rank");
                     break;
                 case "Characters":
                     Entry(Tab.Roster, FontAwesomeIcon.Users, "Character Roster", folded, notSynced > 0 ? $"{notSynced} not synced" : null, p.Warn,

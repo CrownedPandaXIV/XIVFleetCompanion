@@ -87,7 +87,7 @@ namespace XIVFleetCompanion
             public Label? Before;
         }
 
-        private static (double Seconds, int Range) Leg(SubSector from, SubSector to, double speed)
+        internal static (double Seconds, int Range) Leg(SubSector from, SubSector to, double speed)
         {
             var s = Math.Max(1, speed);
             var d = SubRoutes.Hypot(from.X - to.X, from.Y - to.Y, from.Z - to.Z);

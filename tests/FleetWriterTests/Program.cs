@@ -1442,6 +1442,62 @@ internal static partial class Program
         }
         Check(cCases >= 4 && cGood == cCases, $"Compare: the plugin's columns and best figures match the app's for {cGood} of {cCases} sets of builds{cWrong}");
 
+        // The Levelling Plan (as the app's subs/levelling.js): subs from a rank to a target, with and without the FC's
+        // reading, keeping the build or with swaps suggested; each stage, swap and total.
+        var lvRoot = root.GetProperty("levelling");
+        var lvExp = lvRoot.GetProperty("expToNext").EnumerateArray().ToDictionary(x => x[0].GetInt32(), x => x[1].GetDouble());
+        var lvOwned = lvRoot.GetProperty("owned").EnumerateArray().Select(x => x.GetString()!).ToHashSet();
+        var lvSearches = new Dictionary<string, Levelling.Searches>();
+        Levelling.Searches LvSearch(bool withRead, double? hours)
+        {
+            var k = $"{withRead}|{hours}";
+            if (!lvSearches.TryGetValue(k, out var s))
+                lvSearches[k] = s = new Levelling.Searches(byId, starts, new[] { 1, 2 }, ranks, parts, partList, data, Price, kitCost, withRead ? read : null, hours);
+            return s;
+        }
+        int lCases = 0, lGood = 0;
+        var lWrong = "";
+        foreach (var c in lvRoot.GetProperty("cases").EnumerateArray())
+        {
+            lCases++;
+            var withRead = c.GetProperty("read").GetBoolean();
+            var hours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
+            var search = LvSearch(withRead, hours);
+            var plan = Levelling.LevellingPlan(c.GetProperty("rank").GetInt32(), c.GetProperty("exp").GetDouble(), c.GetProperty("target").GetInt32(), lvExp,
+                c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray(), search.BestAt, search.Score,
+                c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned);
+            if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read);
+            var wrong = new List<string>();
+            void Want(bool ok, string what) { if (!ok) wrong.Add(what); }
+            Want(plan.Voyages == c.GetProperty("voyages").GetInt32() && Near(plan.Hours, c.GetProperty("hours")) && plan.Tanks == c.GetProperty("tanks").GetInt32()
+                 && Near(plan.Kits, c.GetProperty("kits")) && Near(plan.ExpNeeded, c.GetProperty("expNeeded")) && plan.Reached == c.GetProperty("reached").GetBoolean()
+                 && Near(plan.StuckAt, c.GetProperty("stuckAt")) && Near(plan.KeepHours, c.GetProperty("keepHours")), $"the totals ({plan.Voyages} voyages, {plan.Hours:0.##}h)");
+            var eSwaps = c.GetProperty("swaps").EnumerateArray().ToList();
+            Want(plan.Swaps.Count == eSwaps.Count && plan.Swaps.Zip(eSwaps).All(z => z.First.AtRank == z.Second.GetProperty("atRank").GetInt32() && z.First.Slot == z.Second.GetProperty("slot").GetInt32()
+                 && z.First.From == z.Second.GetProperty("from").GetString() && z.First.To == z.Second.GetProperty("to").GetString() && z.First.Owned == z.Second.GetProperty("owned").GetBoolean()
+                 && Near(z.First.Gain, z.Second.GetProperty("gain")) && Near(z.First.SavedHours, z.Second.GetProperty("savedHours"))),
+                $"the swaps ({string.Join(", ", plan.Swaps.Select(x => $"{x.AtRank}:{x.Slot}:{x.To}"))})");
+            var eStages = c.GetProperty("stages").EnumerateArray().ToList();
+            Want(plan.Stages.Count == eStages.Count, $"how many stages ({plan.Stages.Count})");
+            for (var i = 0; i < Math.Min(plan.Stages.Count, eStages.Count) && wrong.Count == 0; i++)
+            {
+                var st = plan.Stages[i];
+                var e = eStages[i];
+                var eb = e.GetProperty("better");
+                Want(st.FromRank == e.GetProperty("fromRank").GetInt32() && st.ToRank == e.GetProperty("toRank").GetInt32()
+                     && st.Route.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())) && st.Parts.SequenceEqual(e.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!))
+                     && st.Voyages == e.GetProperty("voyages").GetInt32() && Near(st.Hours, e.GetProperty("hours")) && Near(st.ExpPerVoyage, e.GetProperty("expPerVoyage"))
+                     && Near(st.ExpPerHour, e.GetProperty("expPerHour")) && st.Tanks == e.GetProperty("tanks").GetInt32() && Near(st.Kits, e.GetProperty("kits"))
+                     && (eb.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better == null
+                         : st.Better != null && st.Better.Route.SequenceEqual(eb.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))
+                           && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))),
+                    $"stage {i + 1} ({st.FromRank}-{st.ToRank} {string.Join("-", st.Route)})");
+            }
+            if (wrong.Count == 0) lGood++;
+            else if (lWrong.Length == 0) lWrong = $" (first wrong: case {lCases}: {string.Join(", ", wrong.Take(3))})";
+        }
+        Check(lCases >= 4 && lGood == lCases, $"Levelling Plan: the plugin's stages, swaps and totals match the app's for {lGood} of {lCases} subs{lWrong}");
+
         // Parts you own (as the app's ownedParts): fitted, or spare in a bag, a retainer or the FC chest; for one character
         // only its own subs, bags and retainers and its Free Company's chest. Item numbers: bow, bridge, hull, stern from each base.
         var partsIn = new PartsInputs(

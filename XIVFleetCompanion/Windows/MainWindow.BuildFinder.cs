@@ -364,7 +364,7 @@ public partial class MainWindow
 
     // ---- Only these parts ----
 
-    private static readonly string[] FinderPlain = { "S", "U", "W", "C", "Y" };
+    private static readonly string[] FinderStandard = { "S", "U", "W", "C", "Y" };
     private static readonly string[] FinderModified = { "S+", "U+", "W+", "C+", "Y+" };
 
     private string FinderSlotText(BuildFinder.SlotFilter? f)
@@ -372,13 +372,13 @@ public partial class MainWindow
         if (f == null) return "Any";
         if (f.Own) return "Ones I own";
         var l = f.Letters;
-        if (l.Count == 5 && FinderPlain.All(l.Contains)) return "Plain only";
+        if (l.Count == 5 && FinderStandard.All(l.Contains)) return "Standard only";
         if (l.Count == 5 && FinderModified.All(l.Contains)) return "Modified only";
         if (l.Count > 3) return $"{l.Count} parts";
         return string.Join(", ", l.Select(x => PlannerClassNames[x[..1]] + (x.EndsWith('+') ? "+" : "")));
     }
 
-    // Four dropdowns (hull, stern, bow, bridge): Any, Plain only, Modified only, Ones I own, or ticked parts.
+    // Four dropdowns (hull, stern, bow, bridge): Any, Standard only, Modified only, Ones I own, or ticked parts.
     private void FinderSlotFilters()
     {
         var scale = ImGuiHelpers.GlobalScale;
@@ -396,15 +396,19 @@ public partial class MainWindow
                 if (!combo) continue;
                 using (ImRaii.PushColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.Text], finderSlots[i] != null))
                 {
-                    if (ImGui.SmallButton("Any")) finderSlots[i] = null;
+                    // Any clears the slot's filter: lit while there is one, so it's plain how to clear it.
+                    var filtered = finderSlots[i] != null;
+                    using (ImRaii.PushColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive), filtered))
+                        if (ImGui.SmallButton("Any")) finderSlots[i] = null;
+                    if (filtered) Hover("Clear this slot's filter");
                     ImGui.SameLine();
-                    if (ImGui.SmallButton("Plain only")) finderSlots[i] = new BuildFinder.SlotFilter(false, FinderPlain.ToList());
+                    if (ImGui.SmallButton("Standard only")) finderSlots[i] = new BuildFinder.SlotFilter(false, FinderStandard.ToList());
                     if (ImGui.SmallButton("Modified only")) finderSlots[i] = new BuildFinder.SlotFilter(false, FinderModified.ToList());
                     ImGui.SameLine();
                     if (ImGui.SmallButton("Ones I own")) finderSlots[i] = new BuildFinder.SlotFilter(true, Array.Empty<string>());
                     ImGui.Separator();
                     var letters = finderSlots[i] is { Own: false } f ? f.Letters.ToList() : new List<string>();
-                    foreach (var l in FinderPlain.Concat(FinderModified))
+                    foreach (var l in FinderStandard.Concat(FinderModified))
                     {
                         var on = letters.Contains(l);
                         if (ImGui.Checkbox($"{PartName(l)}##finderSlot{i}{l}", ref on))

@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace XIVFleetCompanion.Windows;
 
-// Sub Calculator → Compare, as the app's page: up to three builds side by side (SubCompare). Same route: every build
+// Sub Calculator → Compare Builds, as the app's page: up to three builds side by side (SubCompare). Same route: every build
 // flies the one route set here, so the numbers compare the builds alone. Best route each: each build gets its own best
 // route on a map (RouteFinder, through the sectors its Free Company has discovered), so the numbers compare build and
 // route together. The best figure in each row is green. Builds come from your subs, typed in, or Add to compare on the
@@ -64,7 +64,7 @@ public partial class MainWindow
         if (cmpBuilds.Any(b => b.Key == key))
         {
             if (Ui.SmallButton($"In Compare ({cmpBuilds.Count}) ›##cmpIn{id}")) shown = Tab.Compare;
-            Hover("This build is in Compare: open it.");
+            Hover("This build is in Compare Builds: open it.");
             return;
         }
         var full = cmpBuilds.Count >= SubCompare.MaxBuilds;
@@ -76,14 +76,14 @@ public partial class MainWindow
                 if (cmpRoute.Count == 0 && route is { Count: > 0 }) { cmpRoute.AddRange(route.Take(5)); cmpMap = null; }
             }
         }
-        Hover(full ? "Compare holds 3 builds: take one out there first." : "Add this build to Sub Calculator → Compare, to see it beside others.");
+        Hover(full ? "Compare Builds holds 3 builds: take one out there first." : "Add this build to Sub Calculator → Compare Builds, to see it beside others.");
     }
 
     private void DrawCompare()
     {
         reader.ReadIfDue(withLists: true); // your subs, their Free Companies, and each FC's sectors
         var g = PlannerGameData();
-        if (g == null) { Ui.Wrapped("Compare needs the game's sub data, which couldn't be read."); return; }
+        if (g == null) { Ui.Wrapped("Compare Builds needs the game's sub data, which couldn't be read."); return; }
         var data = SubCalculatorData.Shipped();
         var scale = ImGuiHelpers.GlobalScale;
         // The map: the route's, else the one picked, else the last.
