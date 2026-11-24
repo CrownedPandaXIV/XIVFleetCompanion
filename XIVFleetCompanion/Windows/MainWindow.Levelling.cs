@@ -67,7 +67,7 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // your subs, their next builds, Free Companies, and each FC's sectors
         var g = PlannerGameData();
         if (g == null) { Ui.Wrapped("The Levelling Plan needs the game's sub data, which couldn't be read."); return; }
-        var data = SubCalculatorData.Shipped();
+        var data = SubCalculatorData.Current();
         var scale = ImGuiHelpers.GlobalScale;
         var fcs = reader.SubSectors.Data ?? new List<FcSectors>();
         lvFc ??= fcs.FirstOrDefault(f => f.ReadAt != null)?.FcId ?? fcs.FirstOrDefault()?.FcId;
@@ -366,13 +366,26 @@ public partial class MainWindow
     private sealed record LvRow(Levelling.Stage St, int Index, List<int> Opened, string RouteLetters, IReadOnlyList<string> SwapLines);
     private PlannerGame? lvGame;
     private FleetTable<LvRow>? lvStageTable;
+    // The rows of the last plan shown, made again only when the plan or the game data changes (not every frame).
+    private (Levelling.Plan Plan, PlannerGame Game, List<LvRow> Rows)? lvRowsCache;
 
     private void LvStages(PlannerGame g, Levelling.Plan plan)
     {
         lvGame = g;
+        var rows = lvRowsCache is { } c && ReferenceEquals(c.Plan, plan) && ReferenceEquals(c.Game, g) ? c.Rows : LvStageRows(g, plan);
+        lvRowsCache = (plan, g, rows);
+        LvStageTable.Before = r => r.SwapLines;
+        LvStageTable.BeforeColor = Amber;
+        LvStageTable.DrawControls();
+        LvStageTable.Draw(rows, fitRows: true);
+        if (LvStageTable.Sorted && plan.Swaps.Count > 0) Colored(Dim, "The part swaps show between the stages in plan order: Reset Sort goes back to it.");
+    }
+
+    private static List<LvRow> LvStageRows(PlannerGame g, Levelling.Plan plan)
+    {
         string L(int id) => g.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
         var swapsAt = Levelling.SwapsByStage(plan);
-        var rows = plan.Stages.Select((st, i) =>
+        return plan.Stages.Select((st, i) =>
         {
             var before = i > 0 ? plan.Stages[i - 1] : null;
             var opened = before == null ? new List<int>() : st.Route.Where(id => !before.Route.Contains(id) && g.Sectors.TryGetValue(id, out var s) && s.RankReq > before.FromRank).ToList();
@@ -381,11 +394,6 @@ public partial class MainWindow
                                                    : $"no route fits with the parts it has, {LvDays(plan.Hours)} to the target with this")).ToList();
             return new LvRow(st, i, opened, string.Concat(st.Route.Select(L)), lines);
         }).ToList();
-        LvStageTable.Before = r => r.SwapLines;
-        LvStageTable.BeforeColor = Amber;
-        LvStageTable.DrawControls();
-        LvStageTable.Draw(rows, fitRows: true);
-        if (LvStageTable.Sorted && plan.Swaps.Count > 0) Colored(Dim, "The part swaps show between the stages in plan order: Reset Sort goes back to it.");
     }
 
     private FleetTable<LvRow> LvStageTable => lvStageTable ??= new FleetTable<LvRow>("levellingStages", plugin.Configuration, new List<FleetColumn<LvRow>>

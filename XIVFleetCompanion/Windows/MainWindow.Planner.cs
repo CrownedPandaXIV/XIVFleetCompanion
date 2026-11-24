@@ -311,7 +311,7 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // the subs to choose from, and their Free Companies
         var g = PlannerGameData();
         if (g == null) { Ui.Wrapped("The Voyage Planner needs the game's sub data, which couldn't be read."); return; }
-        var data = SubCalculatorData.Shipped();
+        var data = SubCalculatorData.Current();
         plannerRank = Math.Clamp(plannerRank, 1, g.MaxRank);
         plannerMap ??= g.Maps.Count > 0 ? g.Maps[^1].Id : null;
 

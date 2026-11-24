@@ -85,7 +85,7 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // your subs, their Free Companies, and each FC's sectors (read with the routes)
         var g = PlannerGameData();
         if (g == null) { Ui.Wrapped("The Route Finder needs the game's sub data, which couldn't be read."); return; }
-        var data = SubCalculatorData.Shipped();
+        var data = SubCalculatorData.Current();
         rfMap ??= g.Maps.Count > 0 ? g.Maps[0].Id : null;
         rfRank = Math.Clamp(rfRank, 1, g.MaxRank);
         var fcs = reader.SubSectors.Data ?? new List<FcSectors>();
@@ -414,7 +414,7 @@ public partial class MainWindow
     // from E: each voyage there is about a 20–30% chance (Pepper's guess); stats don't change the odds."
     private static string RfChancesText(RouteFinder.Route r, PlannerGame g, Dictionary<int, string?> states)
     {
-        var data = SubCalculatorData.Shipped();
+        var data = SubCalculatorData.Current();
         var parts = new List<string>();
         foreach (var id in r.Sectors)
         {
@@ -641,7 +641,7 @@ public partial class MainWindow
     private void FightClubBlockedCell(long cid, string subName)
     {
         if (FightClubBlocked(cid, subName) is not { } check || PlannerGameData() is not { } g) return;
-        var openers = g.Sectors.Keys.ToDictionary(id => id, id => SubCalculatorData.Shipped().Find(id)?.UnlockedFrom ?? 0);
+        var openers = g.Sectors.Keys.ToDictionary(id => id, id => SubCalculatorData.Current().Find(id)?.UnlockedFrom ?? 0);
         string L(int id) => g.Sectors.TryGetValue(id, out var s) ? s.Location : id.ToString(CultureInfo.InvariantCulture);
         var letters = new HashSet<string>(g.Sectors.Values.Select(s => s.Location).Where(l => l.Length > 0));
         var alt = check.AltRoute == null ? "" : $" Best your FC can run now: {SubRoutes.FormatRoute(check.AltRoute, letters)}, {PlannerN(check.AltNet ?? 0)} gil a day.";

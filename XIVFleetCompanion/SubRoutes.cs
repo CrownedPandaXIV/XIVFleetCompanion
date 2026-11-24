@@ -47,8 +47,9 @@ namespace XIVFleetCompanion
     /// <summary>The game data the routes need (from the game's files in the plugin; made up in the tests).</summary>
     public sealed record SubGameData(List<SubSector> Sectors, Dictionary<int, string> MapNames, List<SubRank> Ranks, List<SubPartStat> Parts);
 
+    /// <summary>PartReadings: the parts' workshop readings (the last two weeks', oldest first), for Repair in.</summary>
     public sealed record RoutesInputs(List<PartsCharacter> Characters, List<RouteSub> Subs, List<PartsRule> Rules, List<FightClubRow> FightClub,
-        List<SubHistoryPoint> History, List<VoyageSector> Voyages);
+        List<SubHistoryPoint> History, List<VoyageSector> Voyages, List<PartReading>? PartReadings = null);
 
     /// <summary>Fight Club's next more profitable build, when the Sub Rules have nothing ahead.</summary>
     public sealed record FightClubNext(int Rank, string[] Build, string Route, double Net, double? Gain);
@@ -65,7 +66,7 @@ namespace XIVFleetCompanion
     /// <summary>A sub with everything the Subs page shows (gil a day rounded to whole gil, as the app; dates in milliseconds).</summary>
     public sealed record SubRoute(long Cid, string SubName, int? Slot, int Rank, string CurrentSetup, string CurrentRoute, (int Id, string Name)? CurrentMap,
         string TargetRoute, double? TargetGilDay, double? CurrentGilDay, double? Speed, double? Range, int? RankProgressPct, bool CraftEnabled,
-        long? ReturnTime, SubRankUp RankUp, int[]? Stops = null)
+        long? ReturnTime, SubRankUp RankUp, int[]? Stops = null, SubRepair? Repair = null)
     {
         /// <summary>The sectors of its current route, by id (Stops), for the Sub Calculator's Planner.</summary>
         public int[] Sectors => Stops ?? Array.Empty<int>();
@@ -553,6 +554,15 @@ namespace XIVFleetCompanion
             double? RouteExp(List<int> ids) => ids.Count > 0 && ids.All(sectors.ContainsKey) ? ids.Sum(id => sectors[id].ExpReward) : null;
 
             var characters = input.Characters.ToDictionary(c => c.Cid);
+            // Repair in: each sub's part readings by slot, and whether wear is taken when sent (from all of them).
+            var readings = (input.PartReadings ?? new List<PartReading>()).Where(p => p.Slot is >= 0 and < 4)
+                .GroupBy(p => (p.Cid, p.SubName)).ToDictionary(g => g.Key, g =>
+                {
+                    var bySlot = new IReadOnlyList<PartReading>[4];
+                    for (var i = 0; i < 4; i++) bySlot[i] = g.Where(p => p.Slot == i).OrderBy(p => p.ReadAt).ToList();
+                    return bySlot;
+                });
+            var atSend = RepairDue.WearAtSend(readings.Values.SelectMany(v => v));
             var output = new List<SubRoute>();
             foreach (var sub in input.Subs)
             {
@@ -648,8 +658,18 @@ namespace XIVFleetCompanion
                         sw.Build.Select(l => l ?? "").ToArray(),
                         switchAt?.At is double sa && sa != 0 ? sa : null, switchAt?.Voyages is int sv && sv != 0 ? sv : null, fightClubNext) : null);
 
+                SubRepair? repair = null;
+                if (readings.TryGetValue((cid, sub.SubName), out var subReadings) && stops.Count > 0 && stops.All(sectors.ContainsKey))
+                {
+                    var items = new[] { sub.Part1, sub.Part2, sub.Part3, sub.Part4 };
+                    var partsNow = Enumerable.Range(0, 4).Select(slot =>
+                        items[slot] is int item && PartClass.TryGetValue(parts[slot], out var cls) && partStats.TryGetValue((cls, slot), out var ps)
+                            ? ((IReadOnlyList<PartReading>, int, int)?)(subReadings[slot], item, ps.PartRank) : null).ToList();
+                    repair = RepairDue.Of(partsNow, stops.Select(id => sectors[id].RankReq).ToList(), sub.ReturnTime ?? 0, atSend);
+                }
+
                 output.Add(new SubRoute(cid, sub.SubName, sub.Slot, rank, string.Join("-", parts), currentRoute, map, targetRoute, targetGil, currentGil,
-                    speed, range, progress, sub.CraftEnabled, sub.ReturnTime, rankUp, stops.ToArray()));
+                    speed, range, progress, sub.CraftEnabled, sub.ReturnTime, rankUp, stops.ToArray(), repair));
             }
             return output;
         }

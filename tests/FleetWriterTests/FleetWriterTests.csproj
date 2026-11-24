@@ -33,6 +33,8 @@
     <Compile Include="..\..\XIVFleetCompanion\Market.cs" Link="Market.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubRoutes.cs" Link="SubRoutes.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubCalculatorData.cs" Link="SubCalculatorData.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\RepairDue.cs" Link="RepairDue.cs" />
+    <Compile Include="..\..\XIVFleetCompanion\SubDataUpdate.cs" Link="SubDataUpdate.cs" />
     <Compile Include="..\..\XIVFleetCompanion\SubCalculator.cs" Link="SubCalculator.cs" />
     <Compile Include="..\..\XIVFleetCompanion\BuildFinder.cs" Link="BuildFinder.cs" />
     <Compile Include="..\..\XIVFleetCompanion\RouteFinder.cs" Link="RouteFinder.cs" />

@@ -151,7 +151,7 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // your subs, their Free Companies, and the parts you have (Parts read)
         var g = PlannerGameData();
         if (g == null) { Ui.Wrapped("The Build Finder needs the game's sub data, which couldn't be read."); return; }
-        var data = SubCalculatorData.Shipped();
+        var data = SubCalculatorData.Current();
         finderMap ??= g.Maps.Count > 0 ? g.Maps[^1].Id : null;
         var scale = ImGuiHelpers.GlobalScale;
 

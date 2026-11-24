@@ -123,6 +123,9 @@ namespace XIVFleetCompanion
                 new Need(More(0, stats.Surveillance), More(1, stats.Surveillance), More(2, stats.Retrieval), More(3, stats.Retrieval), More(4, stats.Favor)));
         }
 
+        /// <summary>A sector's experience with a bonus of <paramref name="bonus"/> per cent, in whole points as the game gives it.</summary>
+        public static double SectorExp(double expReward, int bonus) => Math.Floor(expReward * (100 + bonus) / 100.0);
+
         /// <summary>Bonus experience as Pepper's FFXIV Ship Guide gives it: optimal retrieval +25% (the only sure one), T2 +25%,
         /// T3 +50%, HQ +25% and a double dip +25% (luck), the second roll able to earn the tier's bonus again; at most +100%.</summary>
         public static Bonus BonusExp(SectorResult r)
@@ -220,7 +223,7 @@ namespace XIVFleetCompanion
             }).ToList();
             double? kitsPerVoyage = wear.All(w => w != null) ? wear.Sum(w => w!.KitsPerVoyage) : null;
             var perDay = v.Hours > 0 ? 24 / v.Hours : 0;
-            double WithBonus(bool sure) => perSector.Sum(p => p.Sector.ExpReward * (1 + (p.Bonus == null ? 0 : sure ? p.Bonus.Sure : p.Bonus.Best) / 100.0));
+            double WithBonus(bool sure) => perSector.Sum(p => SectorExp(p.Sector.ExpReward, p.Bonus == null ? 0 : sure ? p.Bonus.Sure : p.Bonus.Best));
 
             return new Plan(perSector, start, range, v.Hours, v.Exp, WithBonus(true), WithBonus(false), sectors.Sum(s => s.Tanks),
                 loot, gilPerVoyage, gilPerVoyage * perDay, v.Exp * perDay, perDay, wear, kitsPerVoyage,
