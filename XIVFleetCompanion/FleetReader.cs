@@ -861,7 +861,29 @@ namespace XIVFleetCompanion
             await using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync())
                     voyages.Add(new VoyageSector(Text(r, "fc_id"), Long(r, "sub_register"), TextOrNull(r, "sub_name"), Ms(r, "returned_at"), Int(r, "sector"), IntOrNull(r, "leg")));
-            return new RoutesInputs(parts.Characters, subs, parts.Rules, fightClub, history, voyages);
+            return new RoutesInputs(parts.Characters, subs, parts.Rules, fightClub, history, voyages, await ReadPartReadings(conn));
+        }
+
+        /// <summary>The sub parts' workshop readings of the last two weeks (companion_sub_part_condition, database update 17:
+        /// before it, none), oldest first, for the Subs page's Repair in.</summary>
+        public static async Task<List<PartReading>> ReadPartReadings(DbConnection conn)
+        {
+            var list = new List<PartReading>();
+            try
+            {
+                await using var cmd = Db.Cmd(@"SELECT cid, sub_name, part_slot, read_at, return_at, item_id, condition FROM companion_sub_part_condition
+                    WHERE cid IS NOT NULL AND sub_name IS NOT NULL AND read_at >= @since ORDER BY read_at", conn);
+                Db.Add(cmd, "since", DateTime.UtcNow.AddDays(-14));
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    list.Add(new PartReading(Long(r, "cid"), Text(r, "sub_name"), Int(r, "part_slot"), Ms(r, "read_at") / 1000, Ms(r, "return_at") / 1000,
+                        Int(r, "item_id"), Int(r, "condition")));
+            }
+            catch (Exception ex) when (ex is PostgresException { SqlState: "42P01" } || ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+            {
+                // A database without update 17 yet: nothing read.
+            }
+            return list;
         }
 
         /// <summary>How close the Next rank dates the app saved came to the real rank-ups (fleet_rankup_forecast_view,

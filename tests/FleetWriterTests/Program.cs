@@ -1085,6 +1085,32 @@ internal static partial class Program
             new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 });
         Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 1,
             "part condition: written only for characters synced here that are in a Free Company");
+        // Repair in (RepairDue), as the app's tests/repair-due.test.js.
+        PartReading P(double readAt, double returnAt, int condition, int item = 100) => new(1, "Kestrel", 0, readAt, returnAt, item, condition);
+        Check(RepairDue.DropsOf(new[] { P(0, 0, 30000), P(10, 500, 29000), P(600, 0, 28000) }).SequenceEqual(new[] { true, false })
+              && RepairDue.DropsOf(new[] { P(0, 0, 10000), P(10, 0, 30000), P(20, 0, 29000, 200) }).Count == 0,
+            "repair: a drop read while out is wear taken when sent, once back on return; a repair or another part is no drop");
+        Check(RepairDue.WearAtSend(new[] { new[] { P(0, 0, 30000), P(10, 500, 29000) }, new[] { P(0, 0, 30000), P(10, 500, 29000) } }) == true
+              && RepairDue.WearAtSend(new[] { new[] { P(0, 0, 30000), P(600, 0, 29000) } }) == false
+              && RepairDue.WearAtSend(new[] { new[] { P(0, 0, 30000) } }) == null,
+            "repair: wear taken when sent or on return goes by most drops, unknown with none");
+        Check(RepairDue.VoyagesLeft(P(10, 0, 2500), 100, 1000, 0, true) == 3
+              && RepairDue.VoyagesLeft(P(10, 500, 2500), 100, 1000, 500, false) == 2
+              && RepairDue.VoyagesLeft(P(10, 500, 2500), 100, 1000, 500, null) == 2
+              && RepairDue.VoyagesLeft(P(10, 500, 2500), 100, 1000, 500, true) == 3
+              && RepairDue.VoyagesLeft(P(10, 0, 2500), 100, 1000, 9000, true) == 2
+              && RepairDue.VoyagesLeft(P(10, 500, 800), 100, 1000, 500, false) == 0
+              && RepairDue.VoyagesLeft(P(10, 0, 2500), 200, 1000, 0, true) == null,
+            "repair: a part sails while above 0, after the voyage it is on now; another part fitted is not known");
+        var dueRoute = new[] { 30, 40 };
+        var dueLost = dueRoute.Sum(rq => SubCalculator.SectorDamage(rq, 1));
+        var due = RepairDue.Of(new (IReadOnlyList<PartReading>, int, int)?[]
+        {
+            (new[] { P(10, 0, 30000) }, 100, 1), (new[] { P(10, 0, 6000, 101) }, 101, 1), null, (Array.Empty<PartReading>(), 103, 1),
+        }, dueRoute, 0, true);
+        Check(due is { Slot: 1, Condition: 20 } && due.Voyages == (int)Math.Ceiling(6000.0 / dueLost)
+              && RepairDue.Of(new (IReadOnlyList<PartReading>, int, int)?[] { (new[] { P(10, 0, 30000) }, 100, 1) }, Array.Empty<int>(), 0, true) == null,
+            "repair: a sub's Repair in is its part that needs repairing first");
         var parts = new[] { R(1, 0, 24356, 1, 1) with { FcId = 901 }, R(2, 0, 24356, 1, 1), R(3, 0, 24356, 1, 1) };
         var fcOf = new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 };
         Check(PartCondition.ToWrite(parts, fcOf).Select(r => r.FcId).SequenceEqual(new ulong[] { 901 })
@@ -1135,6 +1161,42 @@ internal static partial class Program
     // own cases (tests/sub-calculator-data.test.js).
     private static void SubCalculatorChecks()
     {
+        // The daily copy (SubDataUpdate, SubCalculatorData.Adopt/Current), as the app's tests/sub-data-update.test.js.
+        string shippedText;
+        using (var stream = typeof(SubCalculatorData).Assembly.GetManifestResourceStream(SubCalculatorData.ResourceName)!)
+        using (var reader = new System.IO.StreamReader(stream)) shippedText = reader.ReadToEnd();
+        var shippedMade = SubCalculatorData.Shipped().About.Made!.Value;
+        string MadeIn(DateTime at)
+        {
+            var node = JsonNode.Parse(shippedText)!;
+            node["about"]!["made"] = at.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+            return node.ToJsonString();
+        }
+        var dayAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        Check(SubCalculatorData.Due(null, dayAt) && !SubCalculatorData.Due(dayAt, dayAt.AddHours(23)) && SubCalculatorData.Due(dayAt, dayAt.AddDays(1))
+              && SubCalculatorData.Due(dayAt.AddDays(2), dayAt), "Sub Calculator data: a check is due with none yet, a day after the last, or when the clock went back");
+        var dataDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"sub-data-{Guid.NewGuid():N}");
+        var older = new SubDataUpdate(dataDir, _ => { }, () => Task.FromResult(MadeIn(shippedMade.AddDays(-1))));
+        var olderDone = older.CheckNow(dayAt).GetAwaiter().GetResult();
+        var broken = new SubDataUpdate(dataDir, _ => { }, () => Task.FromResult("{\"about\":{},\"sectors\":[]}"));
+        var brokenDone = broken.CheckNow(dayAt).GetAwaiter().GetResult();
+        var offline = new SubDataUpdate(dataDir, _ => { }, () => throw new System.Net.Http.HttpRequestException("HTTP 404"));
+        var offlineDone = offline.CheckNow(dayAt).GetAwaiter().GetResult();
+        Check(!olderDone.Adopted && !brokenDone.Adopted && offlineDone.Error == "HTTP 404" && SubCalculatorData.Current().About.Made == shippedMade
+              && !System.IO.File.Exists(System.IO.Path.Combine(dataDir, "SubCalculatorData.json")),
+            "Sub Calculator data: an older, broken or unreachable copy changes nothing");
+        var newer = new SubDataUpdate(dataDir, _ => { }, () => Task.FromResult(MadeIn(shippedMade.AddDays(1))));
+        var newerDone = newer.CheckNow(dayAt).GetAwaiter().GetResult();
+        var usedNow = SubCalculatorData.Current().About.Made;
+        SubCalculatorData.UseFolder(dataDir); // as at the next start
+        Check(newerDone.Adopted && usedNow == shippedMade.AddDays(1) && SubCalculatorData.Current().About.Made == shippedMade.AddDays(1)
+              && System.IO.File.ReadAllText(System.IO.Path.Combine(dataDir, "sub-data-check.txt")).Trim() == new DateTimeOffset(dayAt).ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "Sub Calculator data: a newer copy that passes the checks is kept, used, and still used after a restart");
+        System.IO.File.WriteAllText(System.IO.Path.Combine(dataDir, "SubCalculatorData.json"), MadeIn(shippedMade.AddDays(-1)));
+        SubCalculatorData.UseFolder(dataDir);
+        Check(SubCalculatorData.Current().About.Made == shippedMade, "Sub Calculator data: a downloaded copy older than the shipped one (after an update) is left unused");
+        System.IO.Directory.Delete(dataDir, true);
+
         var data = SubCalculatorData.Shipped();
         var bottom = data.Find(28); // the Rimilala Trench Bottom (AB)
         Check(data.Sectors.Count >= 140 && data.About.XivstatsUpdated != null, $"Sub Calculator data: {data.Sectors.Count} sectors, XIVStats updated {data.About.XivstatsUpdated:u}");
@@ -2216,6 +2278,13 @@ internal static partial class Program
                           + $"{bigFc} 1717000000 0 24356 28650 Kestrel -400 3600 | {bigFc} 1717000000 0 24356 30000 Kestrel -300 3600";
         Check(partsSaved.All(s => s) && partsStored.All(s => s == partsWanted),
             $"file: sub part condition keeps only changes (a voyage's drop, a repair's rise), and writing again adds nothing, on both: {string.Join(" / ", partsStored)}");
+
+        var readBack = new List<string>();
+        await Each(async c => readBack.Add(string.Join(" | ", (await FleetReader.ReadPartReadings(c)).Select(p =>
+            $"{p.Cid} {p.SubName} {p.Slot} {p.ItemId} {p.Condition} {p.ReadAt - nowUnix:0.##} {p.ReturnAt - nowUnix:0}"))));
+        var readWanted = "18014498578000001 Kestrel 0 24356 30000 -600.25 3600 | 18014498578000001 Kestrel 1 24361 30000 -600.25 3600 | "
+                         + "18014498578000001 Kestrel 0 24356 28650 -400 3600 | 18014498578000001 Kestrel 0 24356 30000 -300 3600";
+        Check(readBack.All(s => s == readWanted), $"file: the part readings read back for Repair in, oldest first, on both: {string.Join(" / ", readBack)}");
 
         // ---- The sectors each FC has unlocked and explored ----
         SubSectors.Reading Sectors(double at, bool jExplored) => new(18014498578000001,

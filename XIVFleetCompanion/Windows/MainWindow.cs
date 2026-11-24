@@ -852,6 +852,9 @@ public partial class MainWindow : Window, IDisposable
         new("nextBuild", "Next build", sub => NextBuildCell(RouteOf(sub.Cid, sub.SubName)), sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At ?? double.MaxValue,
             sub => RouteOf(sub.Cid, sub.SubName)?.RankUp.NextBuild?.At == null),
         new("build", "Build", sub => BuildCell(sub.Build), sub => sub.Build),
+        // How many more voyages the part closest to 0% can go on (current route, after the one it is on now), from the last workshop reading.
+        new("repair", "Repair in", sub => RepairCell(RouteOf(sub.Cid, sub.SubName)?.Repair), sub => RouteOf(sub.Cid, sub.SubName)?.Repair?.Voyages ?? int.MaxValue,
+            sub => RouteOf(sub.Cid, sub.SubName)?.Repair == null, New: true),
         new("speed", "Speed", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Speed is double v) RightNumber((long)v); else Colored(Dim, "—"); },
             sub => RouteOf(sub.Cid, sub.SubName)?.Speed ?? -1),
         new("range", "Range", sub => { if (RouteOf(sub.Cid, sub.SubName)?.Range is double v) RightNumber((long)v); else Colored(Dim, "—"); },
@@ -876,6 +879,24 @@ public partial class MainWindow : Window, IDisposable
         new("planner", "Voyage Planner", sub => { if (Ui.SmallButton($"Open in Voyage Planner##planner{sub.Cid}{sub.SubName}")) OpenInPlanner(sub.Cid, sub.SubName); Hover("Open this sub's build and route in Sub Calculator → Voyage Planner."); }, New: true),
         new("craft", "Fight Club builds", sub => CraftCell(sub.Cid, sub.SubName), sub => CraftOf(sub.Cid, sub.SubName) ? 1 : 0, New: true),
     }, sub => sub.Account, "subs", runKey: sub => $"{sub.Character}@{sub.World}");
+
+    private static readonly string[] RepairSlots = { "Hull", "Stern", "Bow", "Bridge" };
+
+    // Repair in, as the app's: red "Repair now" at 0, amber at 1, the part and its reading on hover.
+    private void RepairCell(SubRepair? due)
+    {
+        if (due == null)
+        {
+            Colored(Dim, "—");
+            Hover("No workshop reading of this sub's parts yet (they are read while a character is in the Free Company's workshop).");
+            return;
+        }
+        var when = DateTimeOffset.FromUnixTimeMilliseconds((long)(due.ReadAt * 1000)).LocalDateTime.ToString("d MMM HH:mm", System.Globalization.CultureInfo.CurrentCulture);
+        if (due.Voyages == 0) Colored(Red, "Repair now");
+        else if (due.Voyages == 1) Colored(Amber, "1 voyage");
+        else Ui.Text($"{due.Voyages} voyages");
+        Hover($"{RepairSlots[due.Slot]} at {due.Condition.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture)}% when read on {when}; voyages on the current route after the one it is on now.");
+    }
 
     // "W-S-U-C" with the dashes softer, so the four parts stand out.
     private void BuildCell(string build)

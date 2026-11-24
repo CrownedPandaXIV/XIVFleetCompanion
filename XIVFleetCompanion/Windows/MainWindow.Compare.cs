@@ -88,7 +88,7 @@ public partial class MainWindow
         reader.ReadIfDue(withLists: true); // your subs, their Free Companies, and each FC's sectors
         var g = PlannerGameData();
         if (g == null) { Ui.Wrapped("Compare Builds needs the game's sub data, which couldn't be read."); return; }
-        var data = SubCalculatorData.Shipped();
+        var data = SubCalculatorData.Current();
         var scale = ImGuiHelpers.GlobalScale;
         // The map: the route's, else the one picked, else the last.
         if (cmpRoute.Count > 0 && g.Sectors.TryGetValue(cmpRoute[0], out var routeFirst)) cmpMap = routeFirst.Map;

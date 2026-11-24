@@ -3,6 +3,21 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.7.0 - 2026-11-24
+
+### New
+- **Sub Calculator data, daily:** newer loot and breakpoint data (XIVStats, Pepper's guide) is now checked every day and
+  published once it passes the checks. The plugin downloads it once a day, or when the game next opens after a day
+  missed, and uses it when it's newer than the copy it came with, so a patch's new data no longer waits for a plugin
+  update. Nothing changes when it can't be reached.
+- **Subs → Repair in:** how many more voyages each sub can go on its current route before a part needs repairing, from
+  the last workshop reading of its parts. "Repair now" in red, 1 voyage in amber; the part and its condition on hover.
+
+### Changed
+- **Experience** with a bonus is now in whole points per sector, as the game gives it (Voyage Planner, Route Finder,
+  Compare Builds, Levelling Plan).
+- **Levelling Plan** works out its stage rows once per plan, not every frame.
+
 ## 2.6.1 - 2026-11-23
 
 Fixes to the Sub Calculator, the workshop readings and the market price, from a full check of 2.6.0.

@@ -41,8 +41,8 @@ jobs:
 
     # No token here: the build runs other people's code (NuGet packages, Dalamud), which must not reach the publishing one.
     # The Sub Calculator's data ships as committed: the copy the tests ran on and the app has too (pr-build.yml checks
-    # they're the same). Newer XIVStats and Pepper data comes in as a change of its own (the app's sub-data.yml says
-    # when there is some).
+    # they're the same). Newer XIVStats and Pepper data is published each day by the app's sub-data.yml, and the plugin
+    # downloads it (SubCalculatorData.Update).
 
     - name: Build the test build
       id: build

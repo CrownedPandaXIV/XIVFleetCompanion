@@ -94,6 +94,8 @@ public sealed class Plugin : IDalamudPlugin
     public CheckWindow CheckPage { get; init; }
     public SpeedTestWindow SpeedTestPage { get; init; }
 
+    private readonly SubDataUpdate subData;
+
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -128,6 +130,9 @@ public sealed class Plugin : IDalamudPlugin
         AutoRetainer = new AutoRetainerApi();
         AllaganTools = new AllaganToolsConnector(PluginInterface);
         FCTracker = new FCTrackerIpc(PluginInterface);
+
+        // Before the windows, so their first plans already use the newer Sub Calculator data when one was downloaded.
+        subData = new SubDataUpdate(PluginInterface.ConfigDirectory.FullName, text => Log.Information($"Fleet Companion: {text}"));
 
         Framework.Update += OnFrameworkUpdate;
         ClientState.Logout += OnLogout;
@@ -329,6 +334,7 @@ public sealed class Plugin : IDalamudPlugin
         NoteLogin();
         UpdateInfoBar();
         Backups.Tick(DateTime.Now);
+        subData.Tick(DateTime.UtcNow);
         ReadPartConditions();
         // No new sync starts while the fleet is being moved or restored (WaitForSyncAsync).
         if (!Configuration.Enabled || moving) return;

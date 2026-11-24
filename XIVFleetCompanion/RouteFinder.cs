@@ -71,7 +71,7 @@ namespace XIVFleetCompanion
                 items[l.ItemId] = (items.TryGetValue(l.ItemId, out var was) ? was : 0) + l.PerVoyage;
                 gil += l.PerVoyage * price(l.ItemId);
             }
-            return new Value(sector.ExpReward * (1 + SubCalculator.BonusExp(result).Sure / 100.0), gil, items, result.Tier, result.TierSure);
+            return new Value(SubCalculator.SectorExp(sector.ExpReward, SubCalculator.BonusExp(result).Sure), gil, items, result.Tier, result.TierSure);
         }
 
         /// <summary>A route: its sectors in order, voyage, range, experience, gil and the item a day, and how many sectors it
