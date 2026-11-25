@@ -30,6 +30,8 @@ public partial class MainWindow
     private bool lvStandardOnly;
     private string? lvFc;
     private bool lvEverySector;
+    // The chance (%) a voyage through a sector opens each sector it leads to (Pepper's guide: 20-30%).
+    private int lvUnlockPct = 25;
 
     private sealed record LvSub((long Cid, string SubName) Key, int Rank, double Exp, int Target, string[] Parts, long Cid);
     private sealed record LvResult(bool Every, List<(LvSub Sub, Levelling.Plan Plan)> Plans);
@@ -88,8 +90,17 @@ public partial class MainWindow
             ImGui.Checkbox("Use every sector##lvEvery", ref lvEverySector);
             Hover("Plan as if every sector were discovered: how long it takes once the Free Company has found them.");
             ImGui.SameLine(0, 12 * scale);
-            Colored(Dim, lvEverySector ? "every sector, as if all were discovered"
-                : f0?.ReadAt is double at ? $"only sectors {f0.Name} has discovered (read at the workshop {RfWhen(at)})" : "not read yet: every sector is allowed");
+            var reading = !lvEverySector && f0?.ReadAt != null;
+            if (reading)
+            {
+                ImGui.SameLine(0, 12 * scale);
+                ImGui.SetNextItemWidth(90 * scale);
+                if (ImGui.InputInt("% chance to open a sector##lvChance", ref lvUnlockPct, 5)) lvUnlockPct = Math.Clamp(lvUnlockPct, 1, 100);
+                Hover("Pepper's guide: about 20-30% for each sector a voyage goes through. The plan counts on the expected number of voyages; the game may open one sooner or later.");
+            }
+            Colored(Dim, lvEverySector ? "Every sector, as if all were discovered."
+                : f0?.ReadAt is double at ? $"From the sectors {f0.Name} has discovered (read at the workshop {RfWhen(at)}), opening more on the way: each voyage through a sector has a chance to open each one it leads to, and the plan counts on the expected number of voyages."
+                : "Not read yet: every sector is allowed.");
         }
         // The longest voyage, and keep the build or suggest changes.
         void Choices()
@@ -122,7 +133,7 @@ public partial class MainWindow
         }
         var fcRead = lvFc == null ? null : fcs.FirstOrDefault(f => f.FcId == lvFc);
         var kitCost = reader.Credits.Data?.RepairKitCost ?? 0;
-        var key = $"{lvEveryFc}|{string.Join(";", asked.Select(a => $"{a.Key}|{a.Rank}|{a.Exp}|{a.Target}|{string.Join(",", a.Parts)}"))}|{lvMaxHours}|{lvSuggest}|{lvStandardOnly}|{lvFc}|{lvEverySector}|{fcRead?.ReadAt}|{kitCost}";
+        var key = $"{lvEveryFc}|{string.Join(";", asked.Select(a => $"{a.Key}|{a.Rank}|{a.Exp}|{a.Target}|{string.Join(",", a.Parts)}"))}|{lvMaxHours}|{lvSuggest}|{lvStandardOnly}|{lvFc}|{lvEverySector}|{lvUnlockPct}|{fcRead?.ReadAt}|{kitCost}";
         if (lvWork is { IsCompleted: true } done)
         {
             if (done.IsCompletedSuccessfully) { lvResult = done.Result; lvError = null; }
@@ -140,7 +151,7 @@ public partial class MainWindow
         if (lvWork != null && lvWorkKey != key) { lvCancel?.Cancel(); lvWork = null; }
         if (key != lvKey && lvWork == null)
         {
-            var (every, hours, suggest, standard) = (lvEveryFc, lvMaxHours, lvSuggest, lvStandardOnly);
+            var (every, hours, suggest, standard, chance) = (lvEveryFc, lvMaxHours, lvSuggest, lvStandardOnly, lvUnlockPct / 100.0);
             // Use every sector: as if every sector were discovered (the full-map plan), whatever the FC has read.
             var read = !lvEverySector && fcRead?.ReadAt != null ? fcRead.Sectors : null;
             var inputs = reader.Parts.Data?.Inputs;
@@ -160,7 +171,9 @@ public partial class MainWindow
                 foreach (var s in list)
                 {
                     var owned = suggest && inputs != null && s.Cid != 0 ? BuildFinder.Owned(inputs, s.Cid) : new HashSet<string>();
-                    var plan = Levelling.LevellingPlan(s.Rank, s.Exp, s.Target, expToNext, s.Parts, search.BestAt, search.Score, suggest, standard, owned, partRank);
+                    var unlock = read != null && all != null ? Levelling.UnlockFor(g.Sectors, read, search, all, chance, s.Rank, s.Exp, s.Target, expToNext, s.Parts) : null;
+                    var plan = Levelling.LevellingPlan(s.Rank, s.Exp, s.Target, expToNext, s.Parts, search.BestAt, search.Score, suggest, standard, owned, partRank, unlock);
+                    plan.UnlockChance = unlock?.Chance;
                     if (read != null) Levelling.MarkBetter(plan, all, read, search);
                     plans.Add((s, plan));
                 }
@@ -260,7 +273,9 @@ public partial class MainWindow
         ImGui.Spacing();
         using (ImRaii.PushColor(ImGuiCol.Text, Dim))
             Ui.Wrapped("Experience with the bonus each sub is sure of (Pepper's guide); routes as the Route Finder ranks them for experience (up to 5 stops, any map); " +
-                       "rank-up experience from the game data. A sub out now starts when it's back. Part swaps are tried at the start of each stage, one part at a time.");
+                       "rank-up experience from the game data. A sub out now starts when it's back. Part swaps are tried at the start of each stage, one part at a time, " +
+                       "each judged by how much sooner the whole plan reaches the target. With a Free Company's sectors, sectors open as the plan goes (by the expected " +
+                       "number of voyages, so the real days can differ), and it goes out of its way to open one when that gets there sooner.");
     }
 
     private void LvRoute(PlannerGame g, List<int> route)
@@ -269,7 +284,7 @@ public partial class MainWindow
         {
             if (j > 0) ImGui.SameLine(0, 3 * ImGuiHelpers.GlobalScale);
             Tag(g.Sectors.TryGetValue(route[j], out var s) ? s.Location : "?", softColor);
-            Hover(s?.Name ?? "");
+            Hover(SectorHover(g, s));
         }
     }
 
@@ -309,9 +324,12 @@ public partial class MainWindow
             var st = plan.Stages[i];
             var w = (float)(width * st.Hours / plan.Hours);
             draw.AddRectFilled(new Vector2(x, at.Y), new Vector2(x + w - 2 * scale, at.Y + height), ImGui.GetColorU32(colors[i % 4]), 3 * scale);
-            var label = $"{st.FromRank}–{st.ToRank}";
+            var label = st.ToRank > st.FromRank ? $"{st.FromRank}–{st.ToRank}" : $"{st.FromRank}";
             var size = ImGui.CalcTextSize(label);
+            // Its ranks only when they fit; else on hover.
             if (size.X < w - 6 * scale) draw.AddText(new Vector2(x + (w - size.X) / 2, at.Y + 3 * scale), ImGui.GetColorU32(new Vector4(0.06f, 0.07f, 0.1f, 1f)), label);
+            if (ImGui.IsMouseHoveringRect(new Vector2(x, at.Y), new Vector2(x + w, at.Y + height)))
+                ImGui.SetTooltip($"{(st.ToRank > st.FromRank ? $"Ranks {st.FromRank}–{st.ToRank}" : $"Rank {st.FromRank}")}: {LvDays(st.Hours)}{(st.ToOpen != null ? " (to open a sector)" : "")}");
             x += w;
         }
         ImGui.Dummy(new Vector2(width, height));
@@ -398,17 +416,38 @@ public partial class MainWindow
 
     private FleetTable<LvRow> LvStageTable => lvStageTable ??= new FleetTable<LvRow>("levellingStages", plugin.Configuration, new List<FleetColumn<LvRow>>
     {
-        new("ranks", "Ranks", r => Ui.Text($"{r.St.FromRank} → {r.St.ToRank}"), r => r.St.FromRank, Locked: true),
+        // A stage that doesn't reach the next rank (a few voyages to open a sector) shows its one rank.
+        new("ranks", "Ranks", r => Ui.Text(r.St.ToRank > r.St.FromRank ? $"{r.St.FromRank} → {r.St.ToRank}" : $"{r.St.FromRank}"), r => r.St.FromRank, Locked: true),
         new("days", "Time", r => TableCells.Right(LvDays(r.St.Hours)), r => r.St.Hours),
         new("voyages", "Voyages", r => RightNumber(r.St.Voyages), r => r.St.Voyages),
         new("route", "Route", r =>
         {
             if (lvGame == null) return;
             LvRoute(lvGame, r.St.Route);
+            var g = lvGame;
+            string Letter(int id) => g.Sectors.TryGetValue(id, out var x) ? x.Location : "?";
+            var chancePct = (int)Math.Round((lvRowsCache?.Plan.UnlockChance ?? Levelling.UnlockChance) * 100);
+            var visits = (int)Math.Ceiling(1 / (lvRowsCache?.Plan.UnlockChance ?? Levelling.UnlockChance) - 1e-9);
+            if (r.St.ToOpen is { } t)
+            {
+                ImGui.SameLine(0, 8 * ImGuiHelpers.GlobalScale);
+                Tag($"to open {Letter(t.Next)}", Amber);
+                var goal = t.Target != t.Next && g.Sectors.TryGetValue(t.Target, out var gs) ? $", on the way to {gs.Location} ({g.Maps.FirstOrDefault(m => m.Id == gs.Map).Name})" : "";
+                Hover($"This stage goes through {SectorHover(g, g.Sectors.GetValueOrDefault(t.Via))} to open {SectorHover(g, g.Sectors.GetValueOrDefault(t.Next))}{goal}. " +
+                      $"Each voyage through it has a {chancePct}% chance; the plan counts on about {visits} voyages.");
+            }
+            if (r.St.Discovers.Count > 0)
+            {
+                ImGui.SameLine(0, 8 * ImGuiHelpers.GlobalScale);
+                Tag($"opens {string.Join(", ", r.St.Discovers.Select(Letter))}", Green);
+                Hover($"Expected to open on this stage: {string.Join("; ", r.St.Discovers.Select(id => SectorHover(g, g.Sectors.GetValueOrDefault(id))))}. " +
+                      $"Each voyage through the sector before one has a {chancePct}% chance to open it; the plan counts on about {visits} voyages. It may open sooner or later.");
+            }
             foreach (var id in r.Opened)
             {
                 ImGui.SameLine(0, 8 * ImGuiHelpers.GlobalScale);
-                Tag($"{(lvGame.Sectors.TryGetValue(id, out var s) ? s.Location : "?")} from rank {s?.RankReq}", Blue);
+                Tag($"{Letter(id)} from rank {g.Sectors.GetValueOrDefault(id)?.RankReq}", Blue);
+                Hover(SectorHover(g, g.Sectors.GetValueOrDefault(id)));
             }
         }, r => r.RouteLetters),
         new("parts", "Parts", r =>
@@ -429,6 +468,13 @@ public partial class MainWindow
         {
             if (r.St.Better is not { } b || lvGame == null) { Colored(Dim, "—"); return; }
             string L(int id) => lvGame.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
+            if (b.OpensBy is int by)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Dim))
+                    Ui.Wrapped($"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "opens" : "open")} on the way, by rank {by}.");
+                Hover($"With {(b.Missing.Count == 1 ? "it" : "them")}, {string.Join("-", b.Route.Select(L))} gives {PlannerN(b.Gain * 100)}% more an hour.");
+                return;
+            }
             using (ImRaii.PushColor(ImGuiCol.Text, softColor))
                 Ui.Wrapped($"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
                            $"{string.Join("-", b.Route.Select(L))} gives {PlannerN(b.Gain * 100)}% more an hour{(b.AtRank > r.St.FromRank ? $" from rank {b.AtRank}" : "")}.");

@@ -9,21 +9,55 @@ namespace XIVFleetCompanion
     /// writes its answers, which the plugin's tests check this against): a sub's way from its rank to a target rank,
     /// voyage by voyage, each on the route best for experience an hour at the rank it leaves at (RouteFinder), the
     /// experience arriving when it's back and carrying over into the next rank. Voyages on the same route with the same
-    /// parts make a stage. With suggestions on, a one-part swap is offered where it makes the route being run at least 3%
-    /// faster for experience and the whole plan shorter.
+    /// parts make a stage. With suggestions on, part swaps are offered wherever they make the whole plan shorter. Through
+    /// an FC's reading, sectors open as the plan goes (by chance, counted as the expected voyages), and it goes out of its
+    /// way to open one when that gets there sooner.
     /// </summary>
     public static class Levelling
     {
         public const int MaxVoyages = 3000;
+        /// <summary>A swap is looked at only for at least 3% more experience an hour.</summary>
         public const double MinGain = 0.03;
-        public const int MaxSwaps = 4;
+        /// <summary>No cap on swaps (the fewest days): this many at most, only so a plan can't run on.</summary>
+        public const int MaxSwaps = 24;
+        /// <summary>The chance each sector on a voyage opens each sector it leads to (Pepper's guide: 20-30%), unless asked
+        /// otherwise.</summary>
+        public const double UnlockChance = 0.25;
+        /// <summary>How far ahead (ranks) the plan starts opening a sector a later stage wants: none, or as soon as it can.</summary>
+        public static readonly double?[] Lookaheads = { null, double.PositiveInfinity };
         public static readonly string[] Standard = { "S", "U", "W", "C", "Y" };
         public static readonly string[] AllParts = { "S", "U", "W", "C", "Y", "S+", "U+", "W+", "C+", "Y+" };
 
         /// <summary>The voyage a sub would run: its route, length, experience (with the sure bonus), tanks and repair kits.</summary>
         public sealed record Voyage(List<int> Route, double Hours, double Exp, double ExpPerHour, int Range, int Tanks, double Kits);
 
-        public sealed record Better(int AtRank, List<int> Route, double ExpPerHour, double Gain, List<int> Missing);
+        /// <summary>OpensBy: when the plan opens every missing sector itself later on, the rank it's done by (else null).</summary>
+        public sealed record Better(int AtRank, List<int> Route, double ExpPerHour, double Gain, List<int> Missing, int? OpensBy = null);
+
+        /// <summary>The sectors a plan may use at some point (opened as it goes), with a key for the searches' memory.</summary>
+        public sealed class Open
+        {
+            public readonly HashSet<int> Set;
+            public readonly string Key;
+            public Open(IEnumerable<int> ids) { Set = new HashSet<int>(ids); Key = string.Join(",", Set.OrderBy(x => x)); }
+        }
+
+        /// <summary>A stage going out of its way to open a sector: the open sector it goes through, the next sector along
+        /// the chain, and the sector the plan wants in the end.</summary>
+        public sealed record ToOpen(int Via, int Next, int Target);
+
+        /// <summary>What the plan needs to open sectors as it goes (as the app's simulate's unlock).</summary>
+        public sealed class Unlock
+        {
+            public HashSet<int> Open = new();
+            public double Chance = UnlockChance;
+            public IReadOnlyDictionary<int, List<int>> Opens = new Dictionary<int, List<int>>();
+            public IReadOnlyDictionary<int, int> OpenerOf = new Dictionary<int, int>();
+            public IReadOnlyDictionary<int, int> RankOf = new Dictionary<int, int>();
+            public List<(int Id, int Rank)> Targets = new();
+            public double? Lookahead;
+            public Unlock With(double? lookahead) => new() { Open = Open, Chance = Chance, Opens = Opens, OpenerOf = OpenerOf, RankOf = RankOf, Targets = Targets, Lookahead = lookahead };
+        }
 
         public sealed class Stage
         {
@@ -32,6 +66,11 @@ namespace XIVFleetCompanion
             public string[] Parts = Array.Empty<string>();
             public double Hours, Exp, ExpPerVoyage, ExpPerHour, Kits; // ExpPerVoyage, ExpPerHour: the stage's averages
             public Better? Better;
+            /// <summary>The sectors expected to open on this stage, and why it goes where it does (null: for experience).</summary>
+            public List<int> Discovers = new();
+            public ToOpen? ToOpen;
+            /// <summary>The sectors open when the stage started (for the working out).</summary>
+            public Open? OpenAt;
         }
 
         /// <summary>Gain and SavedHours are null for a swap that lets a stuck plan fly at all.</summary>
@@ -47,13 +86,19 @@ namespace XIVFleetCompanion
             public double Hours, Kits, ExpNeeded, KeepHours;
             public bool Reached;
             public int? StuckAt;
+            public Open? StuckOpen;
             public List<Swap> Swaps = new();
+            public double? Lookahead;
+            public double? UnlockChance;
         }
 
         private static string Key(IEnumerable<int> route) => string.Join("-", route);
 
-        /// <summary>The plan with the parts each rank uses (as the app's simulate). expToNext: rank → experience to the next.</summary>
-        public static Plan Simulate(int rank, double exp, int target, IReadOnlyDictionary<int, double> expToNext, Func<int, string[]> partsAt, Func<int, string[], Voyage?> bestAt)
+        /// <summary>The plan with the parts each rank uses (as the app's simulate). expToNext: rank → experience to the next.
+        /// bestAt(rank, parts, open, must): the voyage it would run (open: the sectors it may use, null for the searches' own;
+        /// must: a sector the route has to go to). unlock: sectors opening as it goes (null: as they are).</summary>
+        public static Plan Simulate(int rank, double exp, int target, IReadOnlyDictionary<int, double> expToNext, Func<int, string[]> partsAt,
+            Func<int, string[], Open?, int?, Voyage?> bestAt, Unlock? unlock = null)
         {
             double Step(int r) => expToNext.TryGetValue(r, out var e) ? e : 0;
             var plan = new Plan();
@@ -61,16 +106,37 @@ namespace XIVFleetCompanion
             var into = exp;
             var needed = -into;
             for (var k = r; k < target; k++) needed += Step(k);
+            var open = unlock != null ? new HashSet<int>(unlock.Open) : null;
+            // What's open now, as a stage and the searches see it: a copy, as `open` keeps growing.
+            var openNow = open != null ? new Open(open) : null;
+            var progress = new Dictionary<int, double>();
             for (var n = 0; n < MaxVoyages && r < target; n++)
             {
                 var parts = partsAt(r);
-                var best = bestAt(r, parts);
+                var best = bestAt(r, parts, openNow, null);
+                ToOpen? toOpen = null;
+                if (unlock?.Lookahead is double ahead && open != null)
+                {
+                    foreach (var (t, need) in unlock.Targets)
+                    {
+                        if (open.Contains(t) || need > r + ahead) continue;
+                        // The open sector its chain starts from, and the next one along it.
+                        var x = t;
+                        var next = t;
+                        for (var guard = 0; x != 0 && !open.Contains(x) && guard < 300; guard++) { next = x; x = unlock.OpenerOf.TryGetValue(x, out var f) ? f : 0; }
+                        if (x == 0 || !open.Contains(x) || (unlock.RankOf.TryGetValue(x, out var xr) ? xr : 0) > r) continue;
+                        if (best != null && best.Route.Contains(x)) break; // its route passes it already
+                        var via = bestAt(r, parts, openNow, x);
+                        if (via != null) { best = via; toOpen = new ToOpen(x, next, t); }
+                        break;
+                    }
+                }
                 if (best == null || !(best.Exp > 0) || !(best.Hours > 0)) { plan.StuckAt = r; break; }
                 var last = plan.Stages.Count > 0 ? plan.Stages[^1] : null;
-                var stage = last != null && Key(last.Route) == Key(best.Route) && string.Join(",", last.Parts) == string.Join(",", parts) ? last : null;
+                var stage = last != null && Key(last.Route) == Key(best.Route) && string.Join(",", last.Parts) == string.Join(",", parts) && last.ToOpen?.Via == toOpen?.Via ? last : null;
                 if (stage == null)
                 {
-                    stage = new Stage { FromRank = r, ToRank = r, Route = best.Route, Parts = parts.ToArray() };
+                    stage = new Stage { FromRank = r, ToRank = r, Route = best.Route, Parts = parts.ToArray(), ToOpen = toOpen, OpenAt = openNow };
                     plan.Stages.Add(stage);
                 }
                 stage.Voyages += 1;
@@ -81,6 +147,21 @@ namespace XIVFleetCompanion
                 stage.ExpPerHour = stage.Exp / stage.Hours;
                 stage.Tanks += best.Tanks;
                 stage.Kits += best.Kits;
+                if (unlock != null && open != null)
+                {
+                    var changed = false;
+                    foreach (var id in best.Route)
+                    {
+                        if (!unlock.Opens.TryGetValue(id, out var leads)) continue;
+                        foreach (var t in leads)
+                        {
+                            if (open.Contains(t)) continue;
+                            var p = (progress.TryGetValue(t, out var had) ? had : 0) + unlock.Chance;
+                            if (p >= 1 - 1e-9) { open.Add(t); progress.Remove(t); stage.Discovers.Add(t); changed = true; } else progress[t] = p;
+                        }
+                    }
+                    if (changed) openNow = new Open(open);
+                }
                 into += best.Exp;
                 for (var step = Step(r); step > 0 && into >= step && r < target; step = Step(r))
                 {
@@ -96,6 +177,7 @@ namespace XIVFleetCompanion
             plan.Kits = plan.Stages.Sum(s => s.Kits);
             plan.ExpNeeded = Math.Max(0, needed);
             plan.Reached = r >= target;
+            plan.StuckOpen = openNow;
             return plan;
         }
 
@@ -115,25 +197,39 @@ namespace XIVFleetCompanion
             return (letter, slot) => SubRoutes.PartClass.TryGetValue(letter, out var c) && byKey.TryGetValue((c, slot), out var r) ? r : 0;
         }
 
-        /// <summary>The plan, and with suggestions the part swaps on the way (as the app's levellingPlan): looked at the start
-        /// of each stage and at each rank a part can first be fitted from, only parts the sub's rank allows (partRank).
-        /// score(rank, parts, route): experience an hour on that route, null when it can't fly it. owned: "letter|slot".</summary>
+        /// <summary>The plan, and with suggestions the part swaps on the way: the one with the fewest hours found (as the
+        /// app's levellingPlan). At the start of each stage, and at each rank a part can first be fitted from, every one-part
+        /// swap (only parts the sub's rank allows, partRank) is looked at two ways: on the route being run there (score(rank,
+        /// parts, route): experience an hour, null when it can't fly it) and on the best route the new parts allow. The best
+        /// of each way, at least MinGain better, has the whole plan worked out with it; the shorter is kept when it makes the
+        /// plan shorter, and the same rank looked at again for another part. owned: "letter|slot". unlock: as Simulate's,
+        /// each way of opening sectors ahead (Lookaheads) tried and the shortest kept.</summary>
         public static Plan LevellingPlan(int rank, double exp, int target, IReadOnlyDictionary<int, double> expToNext, string[] parts,
-            Func<int, string[], Voyage?> bestAt, Func<int, string[], List<int>, double?>? score, bool suggest, bool standardOnly, IReadOnlySet<string> owned,
-            Func<string, int, int>? partRank = null)
+            Func<int, string[], Open?, int?, Voyage?> bestAt, Func<int, string[], List<int>, double?>? score, bool suggest, bool standardOnly, IReadOnlySet<string> owned,
+            Func<string, int, int>? partRank = null, Unlock? unlock = null)
         {
             partRank ??= (_, _) => 0;
-            var keep = Simulate(rank, exp, target, expToNext, _ => parts, bestAt);
-            keep.KeepHours = keep.Hours;
-            if (!suggest || score == null) return keep;
+            static bool Better(Plan a, Plan? b) => b == null || (a.Reached && !b.Reached) || (a.Reached == b.Reached && a.Hours < b.Hours - 1e-9);
+            // The way of opening sectors ahead that makes the build's own plan shortest.
+            double? lookahead = null;
+            Plan? keep = null;
+            foreach (var la in unlock != null ? Lookaheads : new double?[] { null })
+            {
+                var tried = Simulate(rank, exp, target, expToNext, _ => parts, bestAt, unlock?.With(la));
+                if (Better(tried, keep)) { keep = tried; lookahead = la; }
+            }
+            Plan Sim(List<Swap> list) => Simulate(rank, exp, target, expToNext, PartsWith(parts, list), bestAt, unlock?.With(lookahead));
+            keep!.KeepHours = keep.Hours;
+            keep.Lookahead = lookahead;
+            if (!suggest) return keep;
             var letters = standardOnly ? Standard : AllParts;
             // The ranks a part becomes possible at, on the way.
             var opens = new HashSet<int>();
             foreach (var to in letters) for (var slot = 0; slot < 4; slot++) { var r = partRank(to, slot); if (r > rank && r < target) opens.Add(r); }
             var swaps = new List<Swap>();
             var plan = keep;
-            // A plan stuck where its parts can't fly any route (none could be scored there): the one-part swap at that rank
-            // that gets it to the target soonest, if any does.
+            // A plan stuck where its parts can't fly any route: the one-part swap at that rank that gets it to the target
+            // soonest, if any does.
             if (plan.StuckAt is int stuck && !plan.Reached)
             {
                 var now = PartsWith(parts, swaps)(stuck);
@@ -146,9 +242,9 @@ namespace XIVFleetCompanion
                         if (to == now[slot] || partRank(to, slot) > stuck) continue;
                         var tried = now.ToArray();
                         tried[slot] = to;
-                        if (bestAt(stuck, tried) == null) continue;
+                        if (bestAt(stuck, tried, plan.StuckOpen, null) == null) continue;
                         var swap = new Swap(stuck, slot, now[slot], to, owned.Contains($"{to}|{slot}"), null);
-                        var next = Simulate(rank, exp, target, expToNext, PartsWith(parts, new List<Swap> { swap }), bestAt);
+                        var next = Sim(new List<Swap> { swap });
                         if (!next.Reached) continue;
                         if (pickPlan == null || next.Hours < pickPlan.Hours - 1e-9 || (Math.Abs(next.Hours - pickPlan.Hours) <= 1e-9 && swap.Owned && !pick!.Owned))
                         {
@@ -165,41 +261,72 @@ namespace XIVFleetCompanion
                 var points = plan.Stages.Select(st => st.FromRank).Concat(opens).Distinct().Where(r => r > after && r < target).OrderBy(r => r).ToList();
                 if (points.Count == 0) break;
                 var at = points[0];
-                after = at;
                 // The stage being run at that rank.
                 Stage? stage = null;
                 foreach (var st in plan.Stages) if (st.FromRank <= at) stage = st;
-                if (stage == null) continue;
+                if (stage == null) { after = at; continue; }
                 var now = PartsWith(parts, swaps)(at);
-                var baseScore = score(at, now, stage.Route);
-                Swap? pick = null;
-                if (baseScore is double b)
+                var onRoute = score?.Invoke(at, now, stage.Route);
+                var onBest = bestAt(at, now, stage.OpenAt, null)?.ExpPerHour;
+                // The best swap each way: the most gain; on a tie, a part you own, then the earlier slot and letter.
+                Swap? topRoute = null, topBest = null;
+                void Offer(ref Swap? was, Swap cand)
                 {
-                    for (var slot = 0; slot < 4; slot++)
+                    if (cand.Gain >= MinGain && (was == null || cand.Gain > was.Gain!.Value + 1e-9 || (Math.Abs(cand.Gain!.Value - was.Gain!.Value) <= 1e-9 && cand.Owned && !was.Owned))) was = cand;
+                }
+                for (var slot = 0; slot < 4; slot++)
+                {
+                    foreach (var to in letters)
                     {
-                        foreach (var to in letters)
-                        {
-                            if (to == now[slot] || partRank(to, slot) > at) continue;
-                            var tried = now.ToArray();
-                            tried[slot] = to;
-                            if (score(at, tried, stage.Route) is not double v) continue;
-                            var gain = v / b - 1;
-                            var isOwned = owned.Contains($"{to}|{slot}");
-                            if (gain >= MinGain && (pick == null || gain > pick.Gain!.Value + 1e-9 || (Math.Abs(gain - pick.Gain!.Value) <= 1e-9 && isOwned && !pick.Owned)))
-                                pick = new Swap(at, slot, now[slot], to, isOwned, gain);
-                        }
+                        if (to == now[slot] || partRank(to, slot) > at) continue;
+                        var tried = now.ToArray();
+                        tried[slot] = to;
+                        var isOwned = owned.Contains($"{to}|{slot}");
+                        if (onRoute is double rb && rb != 0 && score!(at, tried, stage.Route) is double v) Offer(ref topRoute, new Swap(at, slot, now[slot], to, isOwned, v / rb - 1));
+                        if (onBest is double bb && bb != 0 && bestAt(at, tried, stage.OpenAt, null) is { } bv) Offer(ref topBest, new Swap(at, slot, now[slot], to, isOwned, bv.ExpPerHour / bb - 1));
                     }
                 }
-                if (pick == null) continue;
-                var next = Simulate(rank, exp, target, expToNext, PartsWith(parts, swaps.Append(pick).ToList()), bestAt);
-                if (!(next.Reached && (!plan.Reached || next.Hours < plan.Hours - 1e-9))) continue;
-                pick.SavedHours = plan.Hours - next.Hours;
-                swaps.Add(pick);
-                plan = next;
+                Swap? pickSwap = null;
+                Plan? pickNext = null;
+                var seen = new HashSet<string>();
+                foreach (var cand in new[] { topRoute, topBest })
+                {
+                    if (cand == null || !seen.Add($"{cand.Slot}|{cand.To}")) continue;
+                    var next = Sim(swaps.Append(cand).ToList());
+                    // Kept only when the whole plan gets shorter.
+                    if (!(next.Reached && (!plan.Reached || next.Hours < plan.Hours - 1e-9))) continue;
+                    if (pickNext == null || next.Hours < pickNext.Hours - 1e-9) { pickSwap = cand; pickNext = next; }
+                }
+                // Nothing more at this rank: on to the next. Else this rank is looked at again, for another part.
+                if (pickSwap == null) { after = at; continue; }
+                pickSwap.SavedHours = plan.Hours - pickNext!.Hours;
+                swaps.Add(pickSwap);
+                plan = pickNext;
             }
             plan.Swaps = swaps;
             plan.KeepHours = keep.Hours;
+            plan.Lookahead = lookahead;
             return plan;
+        }
+
+        /// <summary>What the plan needs to open sectors as it goes, for one sub through an FC's reading (as the app's
+        /// unlockFor): the sectors discovered, how each opens, and the targets: each sector the same sub's plan with every
+        /// sector uses, from the rank it first uses it.</summary>
+        public static Unlock UnlockFor(IReadOnlyDictionary<int, SubSector> sectors, IReadOnlyDictionary<int, (bool Unlocked, bool Explored)> read, Searches search, Searches every,
+            double chance, int rank, double exp, int target, IReadOnlyDictionary<int, double> expToNext, string[] parts)
+        {
+            var all = Simulate(rank, exp, target, expToNext, _ => parts, every.BestAt);
+            var targets = new List<(int, int)>();
+            var seen = new HashSet<int>();
+            foreach (var st in all.Stages) foreach (var id in st.Route) if (seen.Add(id)) targets.Add((id, st.FromRank));
+            return new Unlock
+            {
+                Open = sectors.Keys.Where(id => read.TryGetValue(id, out var x) && (x.Unlocked || x.Explored)).ToHashSet(),
+                Chance = Math.Min(1, Math.Max(0.01, chance)),
+                Opens = search.Opens, OpenerOf = search.OpenerOf,
+                RankOf = sectors.Values.ToDictionary(x => x.Id, x => x.RankReq),
+                Targets = targets,
+            };
         }
 
         /// <summary>The searches over every map for one FC's reading (null: every sector) and a longest voyage (as the app's
@@ -217,6 +344,8 @@ namespace XIVFleetCompanion
             private readonly double kitCost;
             private readonly double? maxHours;
             private readonly Dictionary<int, List<int>> opens;
+            public IReadOnlyDictionary<int, List<int>> Opens => opens;
+            public IReadOnlyDictionary<int, int> OpenerOf { get; }
             // A map's search, kept for whatever doesn't change it: the best route (or null), and Below: the rate it was asked
             // to beat when it found none at least that good (0: the true best).
             private readonly Dictionary<string, (RouteFinder.Route? Route, double Below)> searches = new();
@@ -233,14 +362,17 @@ namespace XIVFleetCompanion
                 (this.sectors, this.starts, this.ranks, this.partStats, this.partList, this.data, this.price, this.kitCost, this.maxHours) =
                     (sectors, starts, ranks, partStats, partList, data, price, kitCost, maxHours);
                 var openerOf = sectors.Keys.ToDictionary(id => id, id => data.Find(id)?.UnlockedFrom ?? 0);
+                OpenerOf = openerOf;
                 States = RouteFinder.SectorStates(sectors.Keys, read, openerOf);
                 opens = RouteFinder.OpensOf(openerOf);
                 maps = mapIds.OrderBy(m => m).Select(m => sectors.Values.Where(x => x.Map == m).OrderBy(x => x.Id).ToList()).Where(l => l.Count > 0).ToList();
             }
 
-            public Voyage? BestAt(int rank, string[] parts)
+            /// <summary>open: the sectors it may use (the plan opening them as it goes), else the reading's; must: a sector every
+            /// route has to go to (a voyage to open what comes after it).</summary>
+            public Voyage? BestAt(int rank, string[] parts, Open? open = null, int? must = null)
             {
-                var key = $"{rank}|{string.Join(",", parts)}";
+                var key = $"{rank}|{string.Join(",", parts)}|{(open != null ? open.Key : "-")}|{must}";
                 if (answers.TryGetValue(key, out var had)) return had;
                 cancel.ThrowIfCancellationRequested();
                 var stats = SubRoutes.BuildStats(rank, parts, ranks, partStats);
@@ -255,17 +387,18 @@ namespace XIVFleetCompanion
                     foreach (var i in order)
                     {
                         var onMap = maps[i];
-                        var allowed = RouteFinder.UsableSectors(onMap, rank, States);
-                        if (allowed.Count == 0) continue;
+                        if (must is int m0 && !onMap.Any(x => x.Id == m0)) continue;
+                        var allowed = open != null ? onMap.Where(x => x.RankReq <= rank && open.Set.Contains(x.Id)).ToList() : RouteFinder.UsableSectors(onMap, rank, States);
+                        if (allowed.Count == 0 || (must is int m1 && !allowed.Any(x => x.Id == m1))) continue;
                         var values = allowed.ToDictionary(x => x.Id, x => RouteFinder.SectorValue(x, data.Find(x.Id), stats, price));
-                        var searchKey = $"{onMap[0].Map}|{string.Join(",", allowed.Select(x => x.Id))}|{stats.Speed}|{stats.Range}|{string.Join(",", allowed.Select(x => values[x.Id].Exp))}";
+                        var searchKey = $"{onMap[0].Map}|{string.Join(",", allowed.Select(x => x.Id))}|{stats.Speed}|{stats.Range}|{string.Join(",", allowed.Select(x => values[x.Id].Exp))}|{must}";
                         // To matter here, this map's route must beat the best so far (or tie it, from an earlier map).
                         var atLeast = best != null ? best.ExpPerHour * (1 - 1e-6) : 0;
                         RouteFinder.Route? r;
                         if (searches.TryGetValue(searchKey, out var was) && (was.Below == 0 || was.Below <= atLeast)) r = was.Route;
                         else
                         {
-                            var found = RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, Array.Empty<int>(), values, "exp", null, opens, States, false,
+                            var found = RouteFinder.FindRoutes(allowed, SubRoutes.StartFor(onMap[0].Id, starts), stats, 5, maxHours, must is int m2 ? new[] { m2 } : Array.Empty<int>(), values, "exp", null, opens, States, false,
                                 bestOnly: true, atLeast: atLeast).FirstOrDefault();
                             var sure = found != null && found.ExpPerHour >= atLeast;
                             r = sure ? found : null;
@@ -329,6 +462,9 @@ namespace XIVFleetCompanion
         /// the reading.</summary>
         public static void MarkBetter(Plan plan, Searches? every, IReadOnlyDictionary<int, (bool Unlocked, bool Explored)> read, Searches? own = null)
         {
+            // The sectors the plan opens itself, and the rank it's done by (the end of the stage that opens it).
+            var opensBy = new Dictionary<int, int>();
+            foreach (var st in plan.Stages) foreach (var id in st.Discovers) opensBy.TryAdd(id, st.ToRank);
             foreach (var st in plan.Stages)
             {
                 st.Better = null;
@@ -337,11 +473,13 @@ namespace XIVFleetCompanion
                 {
                     var better = every.BestAt(r, st.Parts);
                     if (better == null) continue;
-                    var missing = better.Route.Where(id => !(read.TryGetValue(id, out var x) && x.Unlocked)).ToList();
+                    // Not open yet at this stage: as the plan has opened them by then, else as the FC was read.
+                    var missing = better.Route.Where(id => st.OpenAt != null ? !st.OpenAt.Set.Contains(id) : !(read.TryGetValue(id, out var x) && x.Unlocked)).ToList();
                     if (missing.Count == 0) continue;
-                    var now = own?.BestAt(r, st.Parts);
+                    var now = own?.BestAt(r, st.Parts, st.OpenAt);
                     var baseRate = now != null ? now.ExpPerHour : st.ExpPerHour;
-                    if (better.ExpPerHour >= baseRate * 1.01) { st.Better = new Better(r, better.Route, better.ExpPerHour, better.ExpPerHour / baseRate - 1, missing); break; }
+                    int? by = missing.All(opensBy.ContainsKey) ? missing.Max(id => opensBy[id]) : null;
+                    if (better.ExpPerHour >= baseRate * 1.01) { st.Better = new Better(r, better.Route, better.ExpPerHour, better.ExpPerHour / baseRate - 1, missing, by); break; }
                 }
             }
         }

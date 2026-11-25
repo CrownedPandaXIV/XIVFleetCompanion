@@ -1569,9 +1569,13 @@ internal static partial class Program
             var withRead = c.GetProperty("read").GetBoolean();
             var hours = c.GetProperty("maxHours").ValueKind == System.Text.Json.JsonValueKind.Null ? (double?)null : c.GetProperty("maxHours").GetDouble();
             var search = LvSearch(withRead, hours);
+            var lvParts = c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray();
+            var chance = c.TryGetProperty("unlockChance", out var uc) && uc.ValueKind == System.Text.Json.JsonValueKind.Number ? uc.GetDouble() : Levelling.UnlockChance;
+            var unlock = withRead ? Levelling.UnlockFor(byId, read, search, LvSearch(false, hours), chance, c.GetProperty("rank").GetInt32(), c.GetProperty("exp").GetDouble(),
+                c.GetProperty("target").GetInt32(), lvExp, lvParts) : null;
             var plan = Levelling.LevellingPlan(c.GetProperty("rank").GetInt32(), c.GetProperty("exp").GetDouble(), c.GetProperty("target").GetInt32(), lvExp,
-                c.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!).ToArray(), search.BestAt, search.Score,
-                c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned, Levelling.PartRanks(partList));
+                lvParts, search.BestAt, search.Score,
+                c.GetProperty("suggest").GetBoolean(), c.GetProperty("standardOnly").GetBoolean(), lvOwned, Levelling.PartRanks(partList), unlock);
             if (withRead) Levelling.MarkBetter(plan, LvSearch(false, hours), read, search);
             var placed = Levelling.SwapsByStage(plan);
             lvPlaced.Add($"{plan.Swaps.Count}/{placed.Sum(l => l.Count)}");
@@ -1582,6 +1586,10 @@ internal static partial class Program
             Want(plan.Voyages == c.GetProperty("voyages").GetInt32() && Near(plan.Hours, c.GetProperty("hours")) && plan.Tanks == c.GetProperty("tanks").GetInt32()
                  && Near(plan.Kits, c.GetProperty("kits")) && Near(plan.ExpNeeded, c.GetProperty("expNeeded")) && plan.Reached == c.GetProperty("reached").GetBoolean()
                  && Near(plan.StuckAt, c.GetProperty("stuckAt")) && Near(plan.KeepHours, c.GetProperty("keepHours")), $"the totals ({plan.Voyages} voyages, {plan.Hours:0.##}h)");
+            var eLook = c.TryGetProperty("lookahead", out var lk) ? lk : default;
+            Want(eLook.ValueKind == System.Text.Json.JsonValueKind.Undefined || (eLook.ValueKind == System.Text.Json.JsonValueKind.Null ? plan.Lookahead == null
+                : eLook.ValueKind == System.Text.Json.JsonValueKind.String ? plan.Lookahead is double pl && double.IsPositiveInfinity(pl) : plan.Lookahead == eLook.GetDouble()),
+                $"how far ahead it opens sectors ({plan.Lookahead})");
             var eSwaps = c.GetProperty("swaps").EnumerateArray().ToList();
             Want(plan.Swaps.Count == eSwaps.Count && plan.Swaps.Zip(eSwaps).All(z => z.First.AtRank == z.Second.GetProperty("atRank").GetInt32() && z.First.Slot == z.Second.GetProperty("slot").GetInt32()
                  && z.First.From == z.Second.GetProperty("from").GetString() && z.First.To == z.Second.GetProperty("to").GetString() && z.First.Owned == z.Second.GetProperty("owned").GetBoolean()
@@ -1597,11 +1605,15 @@ internal static partial class Program
                 Want(st.FromRank == e.GetProperty("fromRank").GetInt32() && st.ToRank == e.GetProperty("toRank").GetInt32()
                      && st.Route.SequenceEqual(e.GetProperty("route").EnumerateArray().Select(x => x.GetInt32())) && st.Parts.SequenceEqual(e.GetProperty("parts").EnumerateArray().Select(x => x.GetString()!))
                      && st.Voyages == e.GetProperty("voyages").GetInt32() && Near(st.Hours, e.GetProperty("hours")) && Near(st.ExpPerVoyage, e.GetProperty("expPerVoyage"))
+                     && (!e.TryGetProperty("discovers", out var ed) || st.Discovers.SequenceEqual(ed.EnumerateArray().Select(x => x.GetInt32())))
+                     && (!e.TryGetProperty("toOpen", out var eo) || (eo.ValueKind == System.Text.Json.JsonValueKind.Null ? st.ToOpen == null
+                         : st.ToOpen != null && st.ToOpen.Via == eo.GetProperty("via").GetInt32() && st.ToOpen.Next == eo.GetProperty("next").GetInt32() && st.ToOpen.Target == eo.GetProperty("target").GetInt32()))
                      && Near(st.ExpPerHour, e.GetProperty("expPerHour")) && st.Tanks == e.GetProperty("tanks").GetInt32() && Near(st.Kits, e.GetProperty("kits"))
                      && (eb.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better == null
                          : st.Better != null && st.Better.Route.SequenceEqual(eb.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))
                            && st.Better.AtRank == eb.GetProperty("atRank").GetInt32() && Near(st.Better.Gain, eb.GetProperty("gain"))
-                           && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))),
+                           && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))
+                           && (!eb.TryGetProperty("opensBy", out var ob) || (ob.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better.OpensBy == null : st.Better.OpensBy == ob.GetInt32()))),
                     $"stage {i + 1} ({st.FromRank}-{st.ToRank} {string.Join("-", st.Route)})");
             }
             if (wrong.Count == 0) lGood++;
