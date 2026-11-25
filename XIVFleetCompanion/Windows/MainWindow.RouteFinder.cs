@@ -354,7 +354,7 @@ public partial class MainWindow
                     else if (outOf) rfLeaveOut.Remove(s.Id);
                     else if (rfMust.Count < rfMaxStops) rfMust.Add(s.Id);
                 }
-                Hover($"{s.Location}: {s.Name}, rank {s.RankReq}");
+                Hover(SectorHover(g, s));
             }
             var border = must ? (headingColor ?? softColor) : state == "discovered" ? Amber : ImGui.GetStyle().Colors[(int)ImGuiCol.Border];
             draw.AddRect(start, start + size, ImGui.GetColorU32(usable ? border : border with { W = border.W * 0.4f }), 6 * scale, ImDrawFlags.None, must ? 2 * scale : 1);
@@ -441,7 +441,7 @@ public partial class MainWindow
                 if (i > 0) ImGui.SameLine(0, 3 * scale);
                 var s = d.G.Sectors[r.Sectors[i]];
                 Tag(s.Location, d.Must.Contains(s.Id) ? (headingColor ?? softColor) : d.Result.States.GetValueOrDefault(s.Id) == "discovered" ? Amber : softColor);
-                Hover(s.Name);
+                Hover(SectorHover(d.G, s));
             }
             if (r.Explores > 0)
             {
@@ -599,7 +599,7 @@ public partial class MainWindow
                 Tag(s.Location, RfColor(st));
                 ImGui.SameLine(0, 4 * scale);
                 Colored(st == "locked" ? Dim : softColor, s.Name);
-                Hover($"{s.Location}: {s.Name}, {RfStateText(st)}, rank {s.RankReq}");
+                Hover(SectorHover(g, s, RfStateText(st)));
             }
         }
     }

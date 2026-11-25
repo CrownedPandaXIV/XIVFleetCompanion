@@ -3,6 +3,18 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.7.2 - 2026-11-25
+
+### Changed
+- **Levelling Plan: the fewest days.** Part swaps are now judged by how much sooner the whole plan reaches the target,
+  both on the route being run and on the best route the new part allows (a part that opens a better route was missed
+  before), with no cap on how many. Several parts can change at the same rank.
+- **Levelling Plan with a Free Company's sectors: sectors open on the way.** Each voyage through a sector has a chance
+  to open each sector it leads to (25% to start with, from Pepper's guide; change it on the page), and the plan counts
+  on the expected number of voyages. Stages say what they're expected to open, and when a stage goes out of its way to
+  open a better sector.
+- **Hovering a sector letter shows its name, map and rank** (Levelling Plan, Route Finder, Compare Builds).
+
 ## 2.7.1 - 2026-11-25
 
 ### New

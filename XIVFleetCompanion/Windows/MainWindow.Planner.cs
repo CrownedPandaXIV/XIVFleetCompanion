@@ -76,6 +76,12 @@ public partial class MainWindow
         Dictionary<int, SubRank> Ranks, Dictionary<(int, int), SubPartStat> Parts, int MaxRank);
     private PlannerGame? plannerGame;
 
+    /// <summary>A sector letter's hover: its letter and name, its map and the rank it needs ("A: the Ivory Shoals · Deep-sea
+    /// Site · rank 1"), as the app's.</summary>
+    private static string SectorHover(PlannerGame g, SubSector? s, string? more = null) => s == null ? "" :
+        string.Join(" · ", new[] { $"{s.Location}: {s.Name}", g.Maps.FirstOrDefault(m => m.Id == s.Map).Name, more, s.RankReq > 0 ? $"rank {s.RankReq}" : null }
+            .Where(x => !string.IsNullOrEmpty(x)));
+
     private PlannerGame? PlannerGameData()
     {
         if (plannerGame != null) return plannerGame;

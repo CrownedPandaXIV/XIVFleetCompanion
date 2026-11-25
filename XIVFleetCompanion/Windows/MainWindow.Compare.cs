@@ -214,7 +214,7 @@ public partial class MainWindow
                         if (must) cmpMust.Remove(s.Id);
                         else if (cmpMust.Count < 5) cmpMust.Add(s.Id);
                     }
-                Hover($"{s.Location}: {s.Name}, rank {s.RankReq}");
+                Hover(SectorHover(g, s));
             }
             if (cmpMust.Count > 0) { ImGui.SameLine(0, 8 * scale); if (ImGui.SmallButton("Clear##cmpMustClear")) cmpMust.Clear(); }
         }
@@ -400,7 +400,7 @@ public partial class MainWindow
                 {
                     if (j > 0) ImGui.SameLine(0, 3 * scale);
                     Tag(L(c.Route[j]), cmpMust.Contains(c.Route[j]) ? (headingColor ?? softColor) : softColor);
-                    Hover(g.Sectors.GetValueOrDefault(c.Route[j])?.Name ?? "");
+                    Hover(SectorHover(g, g.Sectors.GetValueOrDefault(c.Route[j])));
                 }
             var problem = c.Stats == null ? "This rank or a part isn't in the game data"
                 : c.Check.PartsNeed > 0 ? $"Its parts can't be fitted until rank {c.Check.PartsNeed}"
