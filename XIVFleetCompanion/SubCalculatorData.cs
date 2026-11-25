@@ -83,6 +83,9 @@ namespace XIVFleetCompanion
             }
         }
 
+        /// <summary>Whether the data in use is a downloaded copy (else the one shipped with the plugin), for Settings.</summary>
+        public static bool Downloaded() => !ReferenceEquals(Current(), Shipped());
+
         /// <summary>What is wrong with the data, as the app's problems() checks it (none when it is fine to use).</summary>
         public static List<string> Problems(Data data)
         {

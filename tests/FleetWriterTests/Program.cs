@@ -363,6 +363,11 @@ internal static partial class Program
                 }
                 await cmd.ExecuteNonQueryAsync();
             }
+        // Connections in use against the database itself: read, and every connection on a PC row.
+        if (await ConnectionsInUse.Read(conn) is { } inUse)
+            Check(inUse.Plugins >= 1 && inUse.Limit > 0 && inUse.Pcs.Sum(p => p.Total) == inUse.InUse && inUse.InUse == inUse.App + inUse.Plugins + inUse.Other,
+                $"connections: read from PostgreSQL ({inUse.InUse} of {inUse.Limit})");
+        else Check(false, "connections: read from PostgreSQL");
         var builder = new NpgsqlConnectionStringBuilder(conn.ConnectionString) { SearchPath = "trends_check" };
         if (Environment.GetEnvironmentVariable("FLEET_TEST_DB") is { } given) builder = new NpgsqlConnectionStringBuilder(given) { SearchPath = "trends_check" };
         await using var trends = new NpgsqlConnection(builder.ConnectionString);
@@ -1085,6 +1090,26 @@ internal static partial class Program
             new Dictionary<ulong, ulong> { [1] = 900, [2] = 0 });
         Check(rows.Count == 1 && rows[0].FcId == 900 && rows[0].Reading.Cid == 1,
             "part condition: written only for characters synced here that are in a Free Company");
+        // Connections in use, as the app's tests/connections-in-use.test.js.
+        {
+            const string Pl = "XIV Fleet Companion plugin", Ap = ConnectionsInUse.AppName;
+            var lim = new ConnectionsInUse.Limits(100, 3, 0, "100.64.0.2");
+            var c = ConnectionsInUse.Summarize(new[] { new ConnectionsInUse.Row(Pl, "100.64.0.7", true), new ConnectionsInUse.Row(Ap, "100.64.0.9", true),
+                new ConnectionsInUse.Row(Pl, "100.64.0.9", true), new ConnectionsInUse.Row(Pl, "100.64.0.9", true), new ConnectionsInUse.Row("pgAdmin 4", null, false) }, lim);
+            Check(c.InUse == 6 && c.Limit == 97 && c.App == 1 && c.Plugins == 4 && c.Other == 1 && !c.Warn,
+                "connections: counted as the app, the plugins or other, this check counted as a plugin, the limit less the superusers' slots");
+            Check(string.Join("|", c.Pcs.Select(p => $"{p.Label}:{p.App}/{p.Plugins}/{p.Other}")) == "This PC:0/1/0|100.64.0.9:1/2/0|100.64.0.7:0/1/0|Another login (its PC isn't shown):0/0/1",
+                "connections: by PC, this PC first, then by how many they hold, another login last");
+            var local = ConnectionsInUse.Summarize(new[] { new ConnectionsInUse.Row(Pl, null, true), new ConnectionsInUse.Row(Pl, "127.0.0.1", true) }, lim with { Me = "100.64.0.2" });
+            var onDbPc = ConnectionsInUse.Summarize(new[] { new ConnectionsInUse.Row(Ap, "::1", true) }, lim with { Me = "127.0.0.1" });
+            Check(string.Join("|", local.Pcs.Select(p => $"{p.Label}:{p.Total}")) == "This PC:1|The database's PC:2"
+                  && string.Join("|", onDbPc.Pcs.Select(p => $"{p.Label}:{p.Total}")) == "This PC (the database's PC):2",
+                "connections: the database's own PC named so");
+            var many = Enumerable.Range(0, 76).Select(_ => new ConnectionsInUse.Row(Pl, "100.64.0.7", true)).ToList();
+            Check(!ConnectionsInUse.Summarize(many, lim).Warn && ConnectionsInUse.Summarize(many.Append(many[0]), lim).Warn
+                  && ConnectionsInUse.Summarize(many, lim with { Reserved = 5 }).Limit == 92,
+                "connections: a warning from 80% of the slots an ordinary login may use (reserved_connections counted too)");
+        }
         // Repair in (RepairDue), as the app's tests/repair-due.test.js.
         PartReading P(double readAt, double returnAt, int condition, int item = 100) => new(1, "Kestrel", 0, readAt, returnAt, item, condition);
         Check(RepairDue.DropsOf(new[] { P(0, 0, 30000), P(10, 500, 29000), P(600, 0, 28000) }).SequenceEqual(new[] { true, false })

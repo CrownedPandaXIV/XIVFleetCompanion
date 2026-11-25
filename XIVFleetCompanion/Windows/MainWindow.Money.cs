@@ -306,6 +306,7 @@ public partial class MainWindow
             AdjustedPricesNote();
         }
         else if (reader.Market.Data?.Settings.LivePrices == true && marketCache.Working) Colored(Dim, "Working out market prices...");
+        LivePricesNote();
         if (loot.Subs.Count == 0)
         {
             Ui.Text("No voyages recorded in this time. Submarine Tracker records a voyage when its loot is collected on a PC running it.");
@@ -336,6 +337,7 @@ public partial class MainWindow
         if (ventureMarket != null)
             Runs(new[] { T("At market prices: ", Dim) }.Concat(Universalis.Scopes.SelectMany((s, i) => new[] { T(i > 0 ? ", " : "", Dim), GilRun(ventureMarket.Values.Sum(v => v[s]), ""),
                 T($" ({(s == "world" ? "World" : s == "dc" ? "DC" : "Region")})", Dim) })).Append(T(" a day, from Universalis.", Dim)).ToArray());
+        LivePricesNote();
         var table = ventureMarket != null ? VenturesLiveTable : VenturesTable;
         table.DrawControls();
         var rows = ventures.Where(v => Matches(incomeFilter, v.Character, v.World, v.Account)).ToList();

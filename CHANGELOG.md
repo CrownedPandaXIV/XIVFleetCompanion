@@ -3,6 +3,20 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.7.1 - 2026-11-25
+
+### New
+- **Settings → Connections in use** (shared database): how many of the database's connection slots are taken (when they
+  run out, the plugins can't sync), split into the app, the plugins and anything else, and from which PC. A warning
+  from 80% of the slots. Connections from another login (pgAdmin signed in as postgres, say) are counted, without their PC.
+- **Settings → Sub Calculator Data:** which copy of the Sub Calculator's data is in use (the one this version came
+  with, or a newer one downloaded by the daily check), when it was last checked, and Check now.
+
+### Changed
+- **A quiet note when live prices fall back:** Income's loot and ventures and the Summary's ventures now say in grey
+  when live prices didn't arrive this time (vendor prices shown) or some are from an earlier check; the reason is on
+  hover. The other pages with live prices already said so.
+
 ## 2.7.0 - 2026-11-24
 
 ### New
