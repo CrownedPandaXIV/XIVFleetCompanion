@@ -4,8 +4,8 @@
 #   1. attaches the build's latest.zip to this repo's "testing" pre-release, as XIVFleetCompanion-<build>.zip, then
 #   2. adds it to repo.json in XIVFleetCompanion-Releases as TestingAssemblyVersion and DownloadLinkTesting,
 #      leaving the normal version's entries as they are.
-# A test build is numbered <version>.<run> (1.0.2.7); the next normal release of that version is numbered above
-# the last test build (release.yml), so testers get it too.
+# A test build is numbered <version>.<n>, counting that version's test builds from 1 (test-build-number.sh); the
+# next normal release of that version is numbered above the last test build (release.yml), so testers get it too.
 #
 # Usage: publish-testing.sh <build-version>      (needs gh and jq)
 #   GH_TOKEN        can upload to this repo's releases

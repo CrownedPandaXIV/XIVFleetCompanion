@@ -1,7 +1,8 @@
 name: Test release
 
 # A test build of the plugin, for trying before everyone gets it: pushing to the testing branch builds it as
-# <version>.<run number> (1.0.2.7 for 1.0.2) and offers it in repo.json as the plugin's testing version. Only
+# <version>.<n>, n counting the test builds of that version from 1 (1.0.2.1, 1.0.2.2, ...; test-build-number.sh), and
+# offers it in repo.json as the plugin's testing version. Only
 # players who opted in to the plugin's testing builds in Dalamud get it; everyone else stays on the normal version.
 # The next normal release of that version (release.yml) is numbered above the last test build, so testers get it too.
 #
@@ -39,20 +40,33 @@ jobs:
         Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
         Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
 
+    # One above the newest build of this version repo.json offers (.1 for a new version). If repo.json can't be read
+    # (other than not being there yet), stop: guessing .1 could number it below the testers' build. Runs before the
+    # build, so the token never meets the build's code. One run at a time (concurrency above), so two never get the same.
+    - name: Work out the build number
+      id: build
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      run: |
+        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
+        if [ -z "$GH_TOKEN" ]; then echo '[]' > listed.json
+        elif ! gh api repos/CrownedPandaXIV/XIVFleetCompanion-Releases/contents/repo.json -H 'Accept: application/vnd.github.raw' > listed.json 2> read-error.txt; then
+          if grep -q 'HTTP 404' read-error.txt; then echo '[]' > listed.json
+          else echo "::error::Couldn't read repo.json from XIVFleetCompanion-Releases: $(cat read-error.txt)"; exit 1; fi
+        fi
+        build=$(bash .github/scripts/test-build-number.sh "$version" listed.json)
+        rm -f listed.json read-error.txt
+        echo "Test build: ${build}"
+        echo "build=${build}" >> "$GITHUB_OUTPUT"
+
     # No token here: the build runs other people's code (NuGet packages, Dalamud), which must not reach the publishing one.
     # The Sub Calculator's data ships as committed: the copy the tests ran on and the app has too (pr-build.yml checks
     # they're the same). Newer XIVStats and Pepper data is published each day by the app's sub-data.yml, and the plugin
     # downloads it (SubCalculatorData.Update).
 
     - name: Build the test build
-      id: build
-      shell: bash
-      run: |
-        version=$(grep -oPm1 '(?<=<Version>)[^<]+' XIVFleetCompanion/XIVFleetCompanion.csproj)
-        build="${version}.${GITHUB_RUN_NUMBER}"
-        echo "Test build: ${build}"
-        echo "build=${build}" >> "$GITHUB_OUTPUT"
-        dotnet build --configuration Release -p:Version="${build}"
+      run: dotnet build --configuration Release -p:Version="${{ steps.build.outputs.build }}"
 
     - name: Publish the test build
       shell: bash

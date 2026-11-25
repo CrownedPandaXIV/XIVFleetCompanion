@@ -24,6 +24,17 @@ check "the normal release after test build 1.0.2.7 is 1.0.2.8, so testers get it
 check "a test build of another version doesn't count" "$(bash $scripts/stable-build-number.sh 1.0.3 "$tmp/testing.json")" "1.0.3.0"
 check "no repo.json counts as no test build" "$(bash $scripts/stable-build-number.sh 1.0.2 "$tmp/missing.json")" "1.0.2.0"
 
+# Test builds count from 1 for each version (test-build-number.sh).
+check "the first test build of a version is .1" "$(bash $scripts/test-build-number.sh 1.0.2 "$tmp/repo.json")" "1.0.2.1"
+check "the next test build is one above the last" "$(bash $scripts/test-build-number.sh 1.0.2 "$tmp/testing.json")" "1.0.2.8"
+check "a new version starts at .1 again" "$(bash $scripts/test-build-number.sh 1.0.3 "$tmp/testing.json")" "1.0.3.1"
+check "no repo.json counts as no build" "$(bash $scripts/test-build-number.sh 1.0.2 "$tmp/missing.json")" "1.0.2.1"
+printf '[{"AssemblyVersion":"1.0.2.8"}]' > "$tmp/released.json"
+check "a test build after the normal release of the same version is numbered above it" "$(bash $scripts/test-build-number.sh 1.0.2 "$tmp/released.json")" "1.0.2.9"
+printf '[{"AssemblyVersion":"1.0.2.8","TestingAssemblyVersion":"1.0.2.3"}]' > "$tmp/both.json"
+check "the newer of the two counts" "$(bash $scripts/test-build-number.sh 1.0.2 "$tmp/both.json")" "1.0.2.9"
+check "a version that only starts the same doesn't count (1.0.20 is not 1.0.2)" "$(bash $scripts/test-build-number.sh 1.0.2 <(printf '[{"AssemblyVersion":"1.0.20.5"}]'))" "1.0.2.1"
+
 # The normal release's entry (repo-entry.sh) replaces the whole entry, so the test build stops being offered.
 printf '\xEF\xBB\xBF{"InternalName":"XIVFleetCompanion","AssemblyVersion":"1.0.2.8","DalamudApiLevel":15}' > "$tmp/manifest.json"
 printf '# Changelog\n\n## 1.0.2 - unreleased\n\n- New.\n' > "$tmp/CHANGELOG.md"
