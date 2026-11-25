@@ -155,7 +155,11 @@ public partial class MainWindow : Window, IDisposable
                     ImGui.Spacing();
                     DrawFightClubImport();
                     ImGui.Spacing();
+                    DrawSubCalculatorData();
+                    ImGui.Spacing();
                     DrawMoveFleet();
+                    ImGui.Spacing();
+                    DrawConnectionsInUse();
                     ImGui.Spacing();
                     DrawSharedBackups();
                     ImGui.Spacing();
@@ -765,6 +769,7 @@ public partial class MainWindow : Window, IDisposable
             if (VentureMarketPerDay(ventures.Rows, ventures.WindowDays) is { } market)
                 Runs(new[] { T("Market: ", Dim) }.Concat(Universalis.Scopes.SelectMany((sc, i) => new[] { T(i > 0 ? ", " : "", Dim), GilRun(market.Values.Sum(v => v[sc]), ""),
                     T($" ({(sc == "world" ? "World" : sc == "dc" ? "DC" : "Region")})", Dim) })).ToArray());
+            LivePricesNote();
         }
         // As the app's Listings Unsold for a While tile.
         if (reader.Market.Data is { } marketRead)

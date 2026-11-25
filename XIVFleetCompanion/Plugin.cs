@@ -95,6 +95,8 @@ public sealed class Plugin : IDalamudPlugin
     public SpeedTestWindow SpeedTestPage { get; init; }
 
     private readonly SubDataUpdate subData;
+    /// <summary>The Sub Calculator's daily data check, for Settings (its status and Check now).</summary>
+    public SubDataUpdate SubData => subData;
 
     public Plugin()
     {

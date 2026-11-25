@@ -53,6 +53,24 @@ namespace XIVFleetCompanion
             catch (Exception) { return null; }
         }
 
+        /// <summary>For Settings: when the last check was (this session or an earlier one), what the last one this session
+        /// found (null before one), and whether one is running now.</summary>
+        public DateTime? LastCheck => lastCheck;
+        public (bool Adopted, string? Error)? LastResult { get; private set; }
+        public bool Checking => running;
+
+        /// <summary>Settings → Check now: a check straight away, in the background (none when one is running already).</summary>
+        public void CheckSoon(DateTime nowUtc)
+        {
+            if (running) return;
+            running = true;
+            Task.Run(async () =>
+            {
+                try { await CheckNow(nowUtc); }
+                finally { running = false; }
+            });
+        }
+
         /// <summary>Called every frame: at most once a minute it looks whether a check is due, and starts one in the background.</summary>
         public void Tick(DateTime nowUtc)
         {
@@ -83,6 +101,7 @@ namespace XIVFleetCompanion
                 log($"Sub Calculator data: no newer copy fetched ({ex.Message}).");
             }
             lastCheck = nowUtc;
+            LastResult = done;
             try { File.WriteAllText(stateFile, new DateTimeOffset(nowUtc, TimeSpan.Zero).ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)); }
             catch (Exception) { /* checked again on the next start */ }
             return done;
