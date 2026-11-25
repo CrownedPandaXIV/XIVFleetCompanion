@@ -34,6 +34,12 @@ check "a test build after the normal release of the same version is numbered abo
 printf '[{"AssemblyVersion":"1.0.2.8","TestingAssemblyVersion":"1.0.2.3"}]' > "$tmp/both.json"
 check "the newer of the two counts" "$(bash $scripts/test-build-number.sh 1.0.2 "$tmp/both.json")" "1.0.2.9"
 check "a version that only starts the same doesn't count (1.0.20 is not 1.0.2)" "$(bash $scripts/test-build-number.sh 1.0.2 <(printf '[{"AssemblyVersion":"1.0.20.5"}]'))" "1.0.2.1"
+# The Windows runner's jq ends lines with \r: the test build (first line) must still count.
+mkdir -p "$tmp/crlf-bin"
+printf '#!/usr/bin/env bash\n%s "$@" | sed "s/$/\\r/"\n' "$(command -v jq)" > "$tmp/crlf-bin/jq"; chmod +x "$tmp/crlf-bin/jq"
+check "Windows line endings still count the test build" "$(PATH="$tmp/crlf-bin:$PATH" bash $scripts/test-build-number.sh 1.0.2 "$tmp/both.json")" "1.0.2.9"
+printf '[{"AssemblyVersion":"1.0.1.4","TestingAssemblyVersion":"1.0.2.1"}]' > "$tmp/second.json"
+check "the second test build of a version is .2, Windows line endings or not" "$(PATH="$tmp/crlf-bin:$PATH" bash $scripts/test-build-number.sh 1.0.2 "$tmp/second.json")" "1.0.2.2"
 
 # The normal release's entry (repo-entry.sh) replaces the whole entry, so the test build stops being offered.
 printf '\xEF\xBB\xBF{"InternalName":"XIVFleetCompanion","AssemblyVersion":"1.0.2.8","DalamudApiLevel":15}' > "$tmp/manifest.json"

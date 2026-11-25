@@ -8,7 +8,8 @@
 set -euo pipefail
 version="${1:?version required}"
 last=0
-for listed in $(jq -r '.[0] | .TestingAssemblyVersion // empty, .AssemblyVersion // empty' "${2:?repo.json required}" 2>/dev/null || true); do
+# tr: jq on the Windows runner ends its lines with \r, which would hide the test build (the first of the two lines).
+for listed in $({ jq -r '.[0] | .TestingAssemblyVersion // empty, .AssemblyVersion // empty' "${2:?repo.json required}" 2>/dev/null || true; } | tr -d '\r'); do
   case "$listed" in
     "$version".*) n="${listed##*.}"; [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt "$last" ] && last="$n" ;;
   esac
