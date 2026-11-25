@@ -1612,7 +1612,8 @@ internal static partial class Program
                      && (eb.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better == null
                          : st.Better != null && st.Better.Route.SequenceEqual(eb.GetProperty("route").EnumerateArray().Select(x => x.GetInt32()))
                            && st.Better.AtRank == eb.GetProperty("atRank").GetInt32() && Near(st.Better.Gain, eb.GetProperty("gain"))
-                           && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))),
+                           && Near(st.Better.ExpPerHour, eb.GetProperty("expPerHour")) && st.Better.Missing.SequenceEqual(eb.GetProperty("missing").EnumerateArray().Select(x => x.GetInt32()))
+                           && (!eb.TryGetProperty("opensBy", out var ob) || (ob.ValueKind == System.Text.Json.JsonValueKind.Null ? st.Better.OpensBy == null : st.Better.OpensBy == ob.GetInt32()))),
                     $"stage {i + 1} ({st.FromRank}-{st.ToRank} {string.Join("-", st.Route)})");
             }
             if (wrong.Count == 0) lGood++;

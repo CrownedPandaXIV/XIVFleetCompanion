@@ -31,7 +31,8 @@ namespace XIVFleetCompanion
         /// <summary>The voyage a sub would run: its route, length, experience (with the sure bonus), tanks and repair kits.</summary>
         public sealed record Voyage(List<int> Route, double Hours, double Exp, double ExpPerHour, int Range, int Tanks, double Kits);
 
-        public sealed record Better(int AtRank, List<int> Route, double ExpPerHour, double Gain, List<int> Missing);
+        /// <summary>OpensBy: when the plan opens every missing sector itself later on, the rank it's done by (else null).</summary>
+        public sealed record Better(int AtRank, List<int> Route, double ExpPerHour, double Gain, List<int> Missing, int? OpensBy = null);
 
         /// <summary>The sectors a plan may use at some point (opened as it goes), with a key for the searches' memory.</summary>
         public sealed class Open
@@ -461,6 +462,9 @@ namespace XIVFleetCompanion
         /// the reading.</summary>
         public static void MarkBetter(Plan plan, Searches? every, IReadOnlyDictionary<int, (bool Unlocked, bool Explored)> read, Searches? own = null)
         {
+            // The sectors the plan opens itself, and the rank it's done by (the end of the stage that opens it).
+            var opensBy = new Dictionary<int, int>();
+            foreach (var st in plan.Stages) foreach (var id in st.Discovers) opensBy.TryAdd(id, st.ToRank);
             foreach (var st in plan.Stages)
             {
                 st.Better = null;
@@ -474,7 +478,8 @@ namespace XIVFleetCompanion
                     if (missing.Count == 0) continue;
                     var now = own?.BestAt(r, st.Parts, st.OpenAt);
                     var baseRate = now != null ? now.ExpPerHour : st.ExpPerHour;
-                    if (better.ExpPerHour >= baseRate * 1.01) { st.Better = new Better(r, better.Route, better.ExpPerHour, better.ExpPerHour / baseRate - 1, missing); break; }
+                    int? by = missing.All(opensBy.ContainsKey) ? missing.Max(id => opensBy[id]) : null;
+                    if (better.ExpPerHour >= baseRate * 1.01) { st.Better = new Better(r, better.Route, better.ExpPerHour, better.ExpPerHour / baseRate - 1, missing, by); break; }
                 }
             }
         }

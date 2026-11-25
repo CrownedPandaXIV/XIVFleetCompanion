@@ -14,6 +14,10 @@ All notable changes to the plugin are recorded here. Versions follow
   on the expected number of voyages. Stages say what they're expected to open, and when a stage goes out of its way to
   open a better sector.
 - **Hovering a sector letter shows its name, map and rank** (Levelling Plan, Route Finder, Compare Builds).
+- **Levelling Plan, easier to read:** "Not discovered yet" says when the plan opens a sector itself ("H opens on the way,
+  by rank 97") instead of what it would add; a stage that doesn't reach the next rank shows its one rank ("96", not
+  "96 → 96"); and the day strip labels only the stages with room, with the days under it where the stages end and
+  never crowded (every stage's ranks and days on hover).
 
 ## 2.7.1 - 2026-11-25
 

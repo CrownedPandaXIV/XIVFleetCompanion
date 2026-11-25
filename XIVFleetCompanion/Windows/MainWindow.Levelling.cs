@@ -324,9 +324,12 @@ public partial class MainWindow
             var st = plan.Stages[i];
             var w = (float)(width * st.Hours / plan.Hours);
             draw.AddRectFilled(new Vector2(x, at.Y), new Vector2(x + w - 2 * scale, at.Y + height), ImGui.GetColorU32(colors[i % 4]), 3 * scale);
-            var label = $"{st.FromRank}–{st.ToRank}";
+            var label = st.ToRank > st.FromRank ? $"{st.FromRank}–{st.ToRank}" : $"{st.FromRank}";
             var size = ImGui.CalcTextSize(label);
+            // Its ranks only when they fit; else on hover.
             if (size.X < w - 6 * scale) draw.AddText(new Vector2(x + (w - size.X) / 2, at.Y + 3 * scale), ImGui.GetColorU32(new Vector4(0.06f, 0.07f, 0.1f, 1f)), label);
+            if (ImGui.IsMouseHoveringRect(new Vector2(x, at.Y), new Vector2(x + w, at.Y + height)))
+                ImGui.SetTooltip($"{(st.ToRank > st.FromRank ? $"Ranks {st.FromRank}–{st.ToRank}" : $"Rank {st.FromRank}")}: {LvDays(st.Hours)}{(st.ToOpen != null ? " (to open a sector)" : "")}");
             x += w;
         }
         ImGui.Dummy(new Vector2(width, height));
@@ -413,7 +416,8 @@ public partial class MainWindow
 
     private FleetTable<LvRow> LvStageTable => lvStageTable ??= new FleetTable<LvRow>("levellingStages", plugin.Configuration, new List<FleetColumn<LvRow>>
     {
-        new("ranks", "Ranks", r => Ui.Text($"{r.St.FromRank} → {r.St.ToRank}"), r => r.St.FromRank, Locked: true),
+        // A stage that doesn't reach the next rank (a few voyages to open a sector) shows its one rank.
+        new("ranks", "Ranks", r => Ui.Text(r.St.ToRank > r.St.FromRank ? $"{r.St.FromRank} → {r.St.ToRank}" : $"{r.St.FromRank}"), r => r.St.FromRank, Locked: true),
         new("days", "Time", r => TableCells.Right(LvDays(r.St.Hours)), r => r.St.Hours),
         new("voyages", "Voyages", r => RightNumber(r.St.Voyages), r => r.St.Voyages),
         new("route", "Route", r =>
@@ -464,6 +468,13 @@ public partial class MainWindow
         {
             if (r.St.Better is not { } b || lvGame == null) { Colored(Dim, "—"); return; }
             string L(int id) => lvGame.Sectors.TryGetValue(id, out var s) ? s.Location : "?";
+            if (b.OpensBy is int by)
+            {
+                using (ImRaii.PushColor(ImGuiCol.Text, Dim))
+                    Ui.Wrapped($"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "opens" : "open")} on the way, by rank {by}.");
+                Hover($"With {(b.Missing.Count == 1 ? "it" : "them")}, {string.Join("-", b.Route.Select(L))} gives {PlannerN(b.Gain * 100)}% more an hour.");
+                return;
+            }
             using (ImRaii.PushColor(ImGuiCol.Text, softColor))
                 Ui.Wrapped($"{string.Join(", ", b.Missing.Select(L))} {(b.Missing.Count == 1 ? "isn't" : "aren't")} discovered yet: with {(b.Missing.Count == 1 ? "it" : "them")}, " +
                            $"{string.Join("-", b.Route.Select(L))} gives {PlannerN(b.Gain * 100)}% more an hour{(b.AtRank > r.St.FromRank ? $" from rank {b.AtRank}" : "")}.");
