@@ -15,7 +15,7 @@ namespace XIVFleetCompanion
     /// <summary>One character with subs, from fleet_supplies_view. PerDay null: not enough history yet; 0: none used.</summary>
     public sealed record SupplyRow(string Character, string World, string Account, int SortIndex, DateTime? LastSynced,
         int Ceruleum, double? CeruleumPerDay, double? CeruleumDaysLeft, int CeruleumRestock,
-        int RepairKits, double? RepairKitsPerDay, double? RepairKitsDaysLeft, int RepairKitsRestock, int WindowDays, int TargetDays, string? FcId = null);
+        int RepairKits, double? RepairKitsPerDay, double? RepairKitsDaysLeft, int RepairKitsRestock, int WindowDays, int TargetDays, string? FcId = null, long Cid = 0);
 
     /// <summary>What the Supplies page's FC credits section and summary need besides its rows: the Free Companies, the
     /// ceruleum tanks in each FC chest (by FC id), the tank's price in company credits and a repair kit's in gil.</summary>
@@ -367,6 +367,8 @@ namespace XIVFleetCompanion
                         // The Summary's salvage total (quick), unless the Salvage page reads it now anyway.
                         if (!money) Salvage = await Read(conn, ReadSalvage, Salvage);
                         Ventures = await Read(conn, ReadVentures, Ventures);
+                        // The low-supply warnings per character, for the held counts' colours (the Characters list's).
+                        if (!lists) Roster = await Read(conn, ReadRoster, Roster);
                     }
                     if (lists)
                     {
@@ -525,7 +527,7 @@ namespace XIVFleetCompanion
                     Int(r, "ceruleum"), Double(r, "ceruleum_per_day"), Double(r, "ceruleum_days_left"), Int(r, "ceruleum_restock"),
                     Int(r, "repair_kits"), Double(r, "repair_kits_per_day"), Double(r, "repair_kits_days_left"), Int(r, "repair_kits_restock"),
                     Int(r, "window_days", 14), Int(r, "target_days", 14),
-                    DecimalOrNull(r, "fc_id") is decimal fc && fc != 0 ? fc.ToString(CultureInfo.InvariantCulture) : null));
+                    DecimalOrNull(r, "fc_id") is decimal fc && fc != 0 ? fc.ToString(CultureInfo.InvariantCulture) : null, Long(r, "cid")));
             return list;
         }
 

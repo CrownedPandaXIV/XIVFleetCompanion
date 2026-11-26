@@ -611,6 +611,21 @@ public partial class MainWindow : Window, IDisposable
 
     private Vector4? DaysColor(double? days) => days == null ? null : days < 3 ? Red : days < 7 ? Amber : null;
 
+    // A character's Characters-list row (its low-supply warnings), by character id; kept until the list is read again.
+    private List<RosterRow>? rosterIndexed;
+    private Dictionary<long, RosterRow> rosterByCid = new();
+    private RosterRow? RosterOf(long cid)
+    {
+        var list = reader.Roster.Data;
+        if (!ReferenceEquals(list, rosterIndexed))
+        {
+            rosterIndexed = list;
+            rosterByCid = new Dictionary<long, RosterRow>();
+            foreach (var r in list ?? new List<RosterRow>()) rosterByCid[r.Cid] = r;
+        }
+        return rosterByCid.GetValueOrDefault(cid);
+    }
+
     private static string PerDay(double? perDay) => perDay == null ? "—" : perDay.Value < 10 ? perDay.Value.ToString("0.0") : perDay.Value.ToString("0");
 
     private void DrawSummary()
@@ -946,18 +961,30 @@ public partial class MainWindow : Window, IDisposable
             Hover($"Account: {(c.Account.Length > 0 ? c.Account : "none")}{(c.LastSynced.HasValue ? $"\nLast synced {c.LastSynced.Value:g}" : "")}");
         }, c => c.Character, Locked: true),
         new("account", "Account", c => Ui.Text(c.Account.Length > 0 ? c.Account : "—"), c => c.Account, Hidden: true),
-        new("ceruleum", "Ceruleum", c => RightNumber(c.Ceruleum, DaysColor(c.CeruleumDaysLeft) ?? (c.CeruleumPerDay != null ? Green : (Vector4?)null)), c => c.Ceruleum),
+        // Held: against the low-supply warnings, as the Characters list. Days left and To buy: by days left.
+        new("ceruleum", "Ceruleum", c =>
+        {
+            var r = RosterOf(c.Cid);
+            RightNumber(c.Ceruleum, r == null ? Dim : SupplyColor(c.Ceruleum, r.CeruleumWarning, r.SubsBuilt > 0 && r.BehindMinutes == null));
+            if (r is { LowCeruleum: true }) Hover($"Below the low-ceruleum warning of {r.CeruleumWarning:N0} ({WarningsWhere})");
+        }, c => c.Ceruleum),
         new("ceruleumPerDay", "Ceruleum / day", c => PerDayCell(c.CeruleumPerDay), c => c.CeruleumPerDay ?? 0, c => c.CeruleumPerDay == null),
         new("ceruleumDays", "Ceruleum: days left", c => DaysCell(c.CeruleumDaysLeft, c.CeruleumPerDay), c => DaysKey(c.CeruleumDaysLeft), c => c.CeruleumPerDay == null),
-        new("kits", "Repair kits", c => RightNumber(c.RepairKits, DaysColor(c.RepairKitsDaysLeft) ?? (c.RepairKitsPerDay != null ? Green : (Vector4?)null)), c => c.RepairKits),
+        new("kits", "Repair kits", c =>
+        {
+            var r = RosterOf(c.Cid);
+            RightNumber(c.RepairKits, r == null ? Dim : SupplyColor(c.RepairKits, r.RepairKitWarning, r.SubsBuilt > 0 && r.BehindMinutes == null));
+            if (r is { LowRepairKits: true }) Hover($"Below the low-repair-kit warning of {r.RepairKitWarning:N0} ({WarningsWhere})");
+        }, c => c.RepairKits),
         new("kitsPerDay", "Repair kits / day", c => PerDayCell(c.RepairKitsPerDay), c => c.RepairKitsPerDay ?? 0, c => c.RepairKitsPerDay == null),
         new("kitsDays", "Repair kits: days left", c => DaysCell(c.RepairKitsDaysLeft, c.RepairKitsPerDay), c => DaysKey(c.RepairKitsDaysLeft), c => c.RepairKitsPerDay == null),
         new("buy", "To buy", c =>
         {
-            var buy = new List<string>();
-            if (c.CeruleumRestock > 0) buy.Add($"{c.CeruleumRestock:N0} ceruleum");
-            if (c.RepairKitsRestock > 0) buy.Add($"{c.RepairKitsRestock:N0} kits");
-            if (buy.Count > 0) Colored(Amber, string.Join(", ", buy)); else Colored(Green, "Nothing");
+            // Each by its own days left: red under 3, amber under 7, green otherwise.
+            var buy = new List<(string, Vector4?)>();
+            if (c.CeruleumRestock > 0) buy.Add(($"{c.CeruleumRestock:N0} ceruleum", DaysColor(c.CeruleumDaysLeft) ?? Green));
+            if (c.RepairKitsRestock > 0) { if (buy.Count > 0) buy.Add((", ", Dim)); buy.Add(($"{c.RepairKitsRestock:N0} kits", DaysColor(c.RepairKitsDaysLeft) ?? Green)); }
+            if (buy.Count > 0) Runs(buy.ToArray()); else Colored(Green, "Nothing");
         }, c => (long)c.CeruleumRestock * 1_000_000 + c.RepairKitsRestock),
     }, c => c.Account, "characters");
 

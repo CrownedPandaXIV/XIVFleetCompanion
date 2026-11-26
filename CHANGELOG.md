@@ -3,6 +3,15 @@
 All notable changes to the plugin are recorded here. Versions follow
 [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH.
 
+## 2.7.3 - 2026-11-26
+
+### Changed
+- **Supplies: held ceruleum and repair kits follow the low-supply warnings** (Settings → Warnings), as the Characters
+  list does: amber under the warning, red under half of it, green otherwise, the warning on hover. Before, they were
+  coloured by days left.
+- **Supplies: To buy follows days left,** each supply on its own: red under 3 days, amber under 7, green otherwise (it
+  was always amber), as the app's.
+
 ## 2.7.2 - 2026-11-25
 
 ### Changed
