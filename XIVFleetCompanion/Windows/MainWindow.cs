@@ -946,6 +946,10 @@ public partial class MainWindow : Window, IDisposable
         ForecastLine();
         var subs = reader.Subs.Data;
         if (subs == null) return;
+        // How many subs follow Fight Club's builds (the Fight Club builds column), as the app's Subs page: all of them,
+        // whatever the filter shows.
+        Colored(Dim, $"Fight Club builds: {subs.Count(x => CraftOf(x.Cid, x.SubName)):N0} of {subs.Count:N0} subs");
+        Hover("Subs with Fight Club builds ticked: from rank 85 they follow Fight Club's best build after repair kits");
         // In the app's order: account, the Roster's character order, then slot.
         SubsTable.Draw(subs.Where(x => Matches(subsFilter, x.Character, x.SubName, x.Account, x.Build)).ToList());
     }
