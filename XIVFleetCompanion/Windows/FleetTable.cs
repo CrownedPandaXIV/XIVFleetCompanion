@@ -358,7 +358,8 @@ public sealed class FleetTable<T>
                     var draw = ImGui.GetWindowDrawList();
                     var right = Math.Min(tableRight, ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X);
                     var bottom = at.Y + ImGui.GetTextLineHeight();
-                    draw.PushClipRect(new Vector2(at.X, at.Y), new Vector2(right, bottom), true);
+                    // Not within the current clip (the first cell's): the line would be cut at the first column again.
+                    draw.PushClipRect(new Vector2(at.X, at.Y), new Vector2(right, bottom), false);
                     draw.AddText(at, ImGui.GetColorU32(noteColor), line.Heading);
                     draw.PopClipRect();
                     if (at.X + ImGui.CalcTextSize(line.Heading).X > right && ImGui.IsMouseHoveringRect(at, new Vector2(right, bottom)))

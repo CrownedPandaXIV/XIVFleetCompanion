@@ -9,6 +9,10 @@ All notable changes to the plugin are recorded here. Versions follow
 - **Subs: how many subs follow Fight Club's builds,** above the table: "Fight Club builds: 212 of 320 subs" (the subs with
   Fight Club builds ticked, of all your built subs), in the app and the plugin alike.
 
+### Fixed
+- **Levelling Plan: the part swap lines were cut off after "At rank N:"** (since 2.6.1): the part, what it gives and
+  how much sooner show again, across the table.
+
 ## 2.7.3 - 2026-11-26
 
 ### Changed
